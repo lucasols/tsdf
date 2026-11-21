@@ -8,6 +8,7 @@ import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import { isOfflineStoreError, type StoreError } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -20,7 +21,6 @@ import {
   resolveAfterAllTimers,
   waitForScheduledCleanup,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { userRowSchema } from './offlineReplayTestShared';
 import {
   collectionSchema,

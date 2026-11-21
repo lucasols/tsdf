@@ -575,6 +575,73 @@ The callback is read before every fetch and every mutation with an `offline` des
 
 The tabs of a session key share its offline status and its replay, so `enabled()` must return the same value in every tab of that session key. A tab with the gate closed would clear an offline mode another tab still relies on, and a leading tab with the gate closed holds back the replay of every tab. To gate per workspace, include the workspace in the session key.
 
+### Forced offline mode
+
+`setForcedOfflineMode(forced)` makes the session behave as if the network were down, without cutting the real connection:
+
+```ts
+const result = await storeManager.setForcedOfflineMode(true);
+
+storeManager.getOfflineStatus().isForcedOffline; // true
+
+await storeManager.setForcedOfflineMode(false);
+```
+
+- While forced, the session's network detection reports offline regardless of `navigator.onLine` / `network.getIsOffline`: fetches are served from cache, offline-enabled mutations are queued, and neither replay nor recovery checks run. Successful requests and browser `online` events cannot end it.
+- Only the offline session goes offline: the real connection stays up, so requests that do not go through the session still reach the server and succeed. That includes fetches of stores without `persistentStorage.offline`, mutations without an `offline` descriptor, offline-enabled mutations while `mutationQueueing.network` is `'disallow'`, and the app's own requests. Cut the connection (e.g. Playwright's `context.setOffline(true)`) to test how those fail.
+- The flag is persisted per session key in `localStorage` and read synchronously when the session boots, so it survives reloads and the first fetches after a reload are already offline. It stays on until it is turned off.
+- It is shared with the other tabs of the same session: open tabs follow the toggle, tabs opened later boot with it.
+- Turning it off hands control back to the real network detection. If the network is up, the session recovers and replays queued work exactly like a normal reconnect; if the detection (`navigator.onLine` / `network.getIsOffline`) still reports offline, the session stays offline.
+- It is a simulated network loss, so it requires `offlineSession.network` and only takes effect while network mode is enabled and the [session gate](#session-gate) is open. The call resolves to `Result.err(...)` when `offlineSession.network` is not configured or there is no active session key.
+- The returned promise resolves once the flag is persisted and, when turning it off, once the network detection has run again, so it is safe to reload right after awaiting it. A failed storage write is not reported in the result: like every other persistence write it goes to `onPersistentStorageError` and the call still resolves to `Result.ok`. In that case the change applies in the open tabs but does not survive a reload.
+
+Unlike `setOfflineRuntimeConfig(...)`, which is in-memory and changes which modes are allowed, forced offline mode is persisted and changes what the session detects. It is a runtime control available in production builds, meant for manual testing, end-to-end tests and support diagnostics. Expose it deliberately (e.g. a dev tools panel), and show `isForcedOffline` in the UI when you do, since the app will keep booting offline until it is released.
+
+## Testing
+
+### End-to-end tests
+
+Browser automation tools can cut the connection (e.g. Playwright's `context.setOffline(true)`), but that also blocks loading the app itself on the next navigation unless a service worker serves it. Forced offline mode keeps the real network up and only takes the offline session offline, and it survives the reload:
+
+```ts
+// `storeManager` exposed by the app for tests, e.g. on `window`
+await page.evaluate(() => window.storeManager.setForcedOfflineMode(true));
+await page.reload();
+
+// ...the app boots offline from cache; edits are queued
+
+await page.evaluate(() => window.storeManager.setForcedOfflineMode(false));
+// ...queued edits are replayed
+```
+
+When several pages of the same session are open, replay is done by the leading tab (the visible, most recently focused one), which also sends the edits queued in the other pages, same as for a real reconnect (see [Multiple Tabs](#multiple-tabs)). A multi-page test that asserts which page sent a request should expect it from the page that was opened or focused last.
+
+### Unit and component tests
+
+`tsdf/testing` exports a network status mock with no dependency on a test runner:
+
+```ts
+import { createOfflineNetworkMock } from 'tsdf/testing';
+
+const network = createOfflineNetworkMock();
+
+beforeEach(() => network.install());
+afterEach(() => network.uninstall());
+
+test('queues the edit while offline', async () => {
+  network.goOffline();
+  // ...perform the mutation, assert it was queued
+
+  network.goOnline();
+  // ...assert it was replayed
+});
+```
+
+- `install()` / `uninstall()` replace and restore `navigator.onLine` (requires a DOM environment such as `happy-dom` or `jsdom`). That is enough for sessions using the default detection. `uninstall()` also resets the status to its initial value, so a test that ends offline does not leave the next one offline.
+- `network.config` is a ready-to-use `offlineSession.network` value (`{ enabled: true, getIsOffline }`) for sessions that should read the mock directly.
+- `goOffline()` / `goOnline()` change the status and dispatch the window `offline` / `online` events, like the browser does. `setOffline()` / `setOnline()` change it silently, e.g. to prepare the status before the app boots.
+- `isOnline()` / `isOffline()` read the mocked status.
+
 ## Uploads
 
 Configure uploads on `offlineSession.uploads` when queued mutations depend on local files. The manager exposes upload helpers:

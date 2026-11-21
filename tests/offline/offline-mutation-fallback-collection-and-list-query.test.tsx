@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -15,7 +16,6 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateUserOperations,
   getOfflineQueueEntries,
@@ -629,6 +629,7 @@ describe('collection', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000
@@ -1063,6 +1064,7 @@ describe('list-query', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000

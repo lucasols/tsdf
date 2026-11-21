@@ -8,11 +8,11 @@ import type {
 } from '../../src/main';
 import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   HEALTH_CHECK_DURATION_MS,
@@ -94,6 +94,7 @@ test('async outage classification promotes the session into outage mode after a 
   env.apiStore.scheduleFetch('highPriority');
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
@@ -111,6 +112,7 @@ test('async outage classification promotes the session into outage mode after a 
   expect(recoveryCheck).not.toHaveBeenCalled();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -178,6 +180,7 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   await advanceTime(25);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -198,6 +201,7 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -217,6 +221,7 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: 1735689600010
@@ -302,6 +307,7 @@ test('default outage recovery probes use the slower backend-friendly cadence', a
 
     expect(recoveryCheck).toHaveBeenCalledTimes(1);
     expect(statusHook.result.current).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -399,6 +405,7 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   await advanceTime(25);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -419,6 +426,7 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -438,6 +446,7 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: 1735689600010
@@ -602,6 +611,7 @@ test('stale async outage classifications are ignored after a newer failure settl
   expect(recoveryCheck).not.toHaveBeenCalled();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
@@ -622,6 +632,7 @@ test('stale async outage classifications are ignored after a newer failure settl
   await Promise.resolve();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
@@ -1126,6 +1137,7 @@ test('recovery checks use the same health check: the outage ends when it answers
 
   expect(health.check).toHaveBeenCalledTimes(2);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600100

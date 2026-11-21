@@ -12,6 +12,7 @@ import {
 } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -25,7 +26,6 @@ import {
   pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import {
   getLocalStorageTree,

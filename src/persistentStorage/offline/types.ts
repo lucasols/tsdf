@@ -496,6 +496,14 @@ export type GlobalOfflineStatus = {
   outage: { enabled: boolean; active: boolean };
   /** Whether the session currently has any active offline cause. */
   isOfflineMode: boolean;
+  /**
+   * Whether forced offline mode is on for this session (see
+   * `storeManager.setForcedOfflineMode(...)`). Lets UI and devtools tell a
+   * simulated network loss from a real one: while it is `true` and network
+   * mode is enabled, `network.active` stays `true` regardless of the real
+   * connectivity.
+   */
+  isForcedOffline: boolean;
   /** Whether this tab currently acts as leader for this session. */
   isLeader: boolean;
   /** Timestamp when this status entry was last updated. */
@@ -767,6 +775,12 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => void;
   /** Resets runtime controls back to the static session config. */
   resetOfflineRuntimeConfig: () => void;
+  /**
+   * Turns forced offline mode on or off for the active session. Resolves once
+   * the flag is persisted, and rejects when there is no active session or
+   * `network` mode is not configured.
+   */
+  setForcedOfflineMode: (forced: boolean) => Promise<void>;
   /** Returns the latest global offline status for the session. */
   getOfflineStatus: () => GlobalOfflineStatus;
   /** Returns the latest aggregated offline entities for the session. */
@@ -830,6 +844,8 @@ const compactOfflineStatusModeStateSchema = rc_object({
 export const compactOfflineStatusSnapshotSchema = rc_object({
   n: compactOfflineStatusModeStateSchema.optionalKey(),
   o: compactOfflineStatusModeStateSchema.optionalKey(),
+  /** Forced offline mode is on. */
+  f: rc_literals(COMPACT_OFFLINE_STATUS_FLAG).optionalKey(),
   u: rc_number.optionalKey(),
   lf: rc_number.optionalKey(),
   lr: rc_number.optionalKey(),

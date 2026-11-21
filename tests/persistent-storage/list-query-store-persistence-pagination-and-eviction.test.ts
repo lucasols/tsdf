@@ -13,6 +13,7 @@ import {
 import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { type ListQueryParams, type Row } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
@@ -21,7 +22,6 @@ import {
   range,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { getParsedLocalStorageValue } from '../utils/persistentStorageOptimizationTestUtils';
 import {
   persistentStore,

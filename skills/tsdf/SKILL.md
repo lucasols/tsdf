@@ -249,6 +249,8 @@ Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `dele
 
 Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them.
 
+Testing: `await storeManager.setForcedOfflineMode(true | false)` forces the session offline without cutting the connection (persisted per session key, survives reloads, shared across tabs, reported as `getOfflineStatus().isForcedOffline`; requires `offlineSession.network`). `createOfflineNetworkMock()` from `tsdf/testing` mocks the network status in unit tests.
+
 Docs: `docs/offline.md`.
 
 ## Real-time updates

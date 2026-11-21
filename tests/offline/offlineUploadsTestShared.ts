@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import { encodePathSegment } from '../../src/persistentStorage/opfsFileNaming';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 
 /**

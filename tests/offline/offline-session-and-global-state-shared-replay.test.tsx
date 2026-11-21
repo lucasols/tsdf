@@ -6,11 +6,11 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { type CollectionOfflineOperationDefinition } from '../../src/main';
 import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 import {

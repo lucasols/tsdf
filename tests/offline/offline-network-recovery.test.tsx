@@ -6,12 +6,12 @@ import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   HEALTH_CHECK_DURATION_MS,
   createHealthCheckMock,
@@ -79,6 +79,7 @@ test('classified network failures activate network mode and shift fetches into o
 
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -152,6 +153,7 @@ test('classified network recovery uses network-specific probes and clears networ
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -169,6 +171,7 @@ test('classified network recovery uses network-specific probes and clears networ
 
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: 1735689600010
@@ -225,6 +228,7 @@ test('network classifications are ignored when network mode is disabled', async 
   // session stays online.
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
@@ -281,6 +285,7 @@ test('browser offline events stop classified-network probing and hand control to
   await advanceTime(25);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -311,6 +316,7 @@ test('browser offline events stop classified-network probing and hand control to
   ]);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -385,6 +391,7 @@ test('coming back online after browser-driven network takeover clears the interr
   await advanceTime(25);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: 1735689600010
@@ -425,6 +432,7 @@ test('coming back online after browser-driven network takeover clears the interr
   });
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: 1735689600010

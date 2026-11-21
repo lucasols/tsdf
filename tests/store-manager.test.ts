@@ -772,6 +772,7 @@ test('offline manager api returns empty defaults when offline is not configured'
     outage: { enabled: '❌' }
   `);
   expect(storeManager.getOfflineStatus()).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
@@ -813,6 +814,7 @@ test('offline manager api returns empty defaults when offline is not configured'
     resolutions: []
 
     status:
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: null

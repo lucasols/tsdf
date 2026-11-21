@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
@@ -9,7 +10,6 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   getOfflineQueueEntries,
   type UpdateValueOperations,
@@ -292,6 +292,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000
@@ -360,6 +361,7 @@ describe('document', () => {
     await advanceTime(25);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -388,6 +390,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -456,6 +459,7 @@ describe('document', () => {
     await advanceTime(25);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -484,6 +488,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -567,6 +572,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
@@ -720,6 +726,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
@@ -997,6 +1004,7 @@ describe('document', () => {
       ),
     ).toMatchInlineSnapshot(`[]`);
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: null

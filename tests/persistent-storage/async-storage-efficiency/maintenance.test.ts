@@ -7,13 +7,13 @@ import { clearSessionProtectedKeysSnapshot } from '../../../src/persistentStorag
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../../src/storeManager';
+import { createOfflineNetworkMock } from '../../../src/testing';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { normalizeError } from '../../mocks/testEnvUtils';
 import {
   advanceTime,
   resolveAfterAllTimers,
 } from '../../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
   getOpfsDirTree,

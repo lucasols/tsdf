@@ -20,6 +20,7 @@ import {
 } from 'vitest';
 import { createIndexedDbPersistentStorageForTests } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -34,7 +35,6 @@ import {
   range,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 
 const sessionKey = 'sess1';

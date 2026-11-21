@@ -11,10 +11,10 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createServerMock } from '../mocks/serverMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const docSchema = rc_object({ value: rc_number, label: rc_string });
 const docConflictSchema = rc_object({ reason: rc_string });
@@ -212,6 +212,7 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
@@ -236,6 +237,7 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
@@ -269,6 +271,7 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
@@ -625,6 +628,7 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
@@ -785,6 +789,7 @@ test('direct document store offline public api', async () => {
   `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
@@ -927,6 +932,7 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null

@@ -13,6 +13,7 @@ import {
 } from 'vitest';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { type Row } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -22,7 +23,6 @@ import {
   range,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
 import {
   createEnv,

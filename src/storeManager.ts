@@ -11,6 +11,7 @@ import {
 } from './debug';
 import {
   createDefaultStatus,
+  createForcedOfflineModeUnavailableError,
   createOfflineSession,
   recheckIsSessionInOfflineMode,
   subscribeToOfflineRecovery,
@@ -109,6 +110,39 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   ) => ResultType<void, Error>;
   /** Resets runtime controls back to the static session config. */
   resetOfflineRuntimeConfig: () => void;
+  /**
+   * Forces this manager's offline session into offline mode (or releases it)
+   * without cutting the real connection. Intended for manual, end-to-end and
+   * support testing of offline flows.
+   *
+   * While forced, the session's network detection reports offline regardless
+   * of `navigator.onLine` / `network.getIsOffline`: fetches are served from
+   * cache, offline-enabled mutations are queued and replay is paused. Passing
+   * `false` hands control back to the real detection, which recovers and
+   * replays like a normal reconnect.
+   *
+   * Only the offline session goes offline: requests that do not go through it
+   * (stores without offline support, mutations without an `offline`
+   * descriptor or with network queueing disallowed, the app's own requests)
+   * still reach the server.
+   *
+   * The flag is persisted per session key in `localStorage`, read
+   * synchronously at boot (the first fetches after a reload are already
+   * offline) and shared with the other tabs of the session. It stays on until
+   * it is turned off. `getOfflineStatus().isForcedOffline` reports it.
+   *
+   * The returned promise resolves once the flag is persisted and, when turning
+   * it off, once the network detection has run again, so it is safe to reload
+   * right after awaiting it. It resolves to `Result.err(...)` when
+   * there is no active session key or `offlineSession.network` is not
+   * configured.
+   *
+   * A failed storage write is not reported in the result: like every other
+   * persistence write it goes to `onPersistentStorageError` and the call
+   * still resolves to `Result.ok`. In that case the change applies in the
+   * open tabs but does not survive a reload.
+   */
+  setForcedOfflineMode: (forced: boolean) => Promise<ResultType<void, Error>>;
   /** Returns the latest aggregated offline status for this manager. */
   getOfflineStatus: () => GlobalOfflineStatus;
   /** Returns the latest aggregated offline entities for this manager. */
@@ -332,6 +366,8 @@ function createDisabledStoreManagerOfflineApi<
     getOfflineRuntimeConfig: () => defaultOfflineRuntimeConfig,
     setOfflineRuntimeConfig: () => Result.ok(undefined),
     resetOfflineRuntimeConfig: () => {},
+    setForcedOfflineMode: () =>
+      Promise.resolve(Result.err(createForcedOfflineModeUnavailableError())),
     getOfflineStatus,
     getOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
     getOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
@@ -489,6 +525,11 @@ export function createStoreManager<
         resetOfflineRuntimeConfig: () => {
           resolvedOfflineSession.resetOfflineRuntimeConfig();
         },
+        setForcedOfflineMode: (forced: boolean) =>
+          resultify(
+            () => resolvedOfflineSession.setForcedOfflineMode(forced),
+            normalizeStoreManagerOfflineError,
+          ),
         getOfflineStatus: () => resolvedOfflineSession.getOfflineStatus(),
         getOfflineEntities: () => resolvedOfflineSession.getOfflineEntities(),
         getOfflineResolutions: () =>

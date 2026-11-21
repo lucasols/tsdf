@@ -17,10 +17,10 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createServerTableMock } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 
@@ -509,6 +509,7 @@ test('direct list-query store offline public api', async () => {
     await Promise.resolve();
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: null
@@ -697,6 +698,7 @@ test('direct list-query store offline public api', async () => {
     );
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: null
@@ -841,6 +843,7 @@ test('direct list-query store offline public api', async () => {
     `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: null

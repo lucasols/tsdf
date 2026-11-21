@@ -141,6 +141,7 @@ Runtime controls:
 
 - `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`. Every update, even an empty `{}`, also re-reads the `offlineSession.enabled` gate right away
 - `resetOfflineRuntimeConfig()` restores the static `offlineSession` controls
+- `setForcedOfflineMode(forced)` forces the session offline (or releases it) without cutting the real connection, for testing offline flows. Returns a `Promise<Result<void, Error>>` that resolves once the flag is persisted. The flag is stored per session key, survives reloads, is shared across tabs and is reported by `getOfflineStatus().isForcedOffline`. See [Offline](./offline.md#forced-offline-mode)
 
 Resolution actions:
 

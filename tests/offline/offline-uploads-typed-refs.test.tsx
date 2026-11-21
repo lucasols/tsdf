@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import { createStoreManager, opfsOfflineUploadAdapter } from '../../src/main';
 import { encodePathSegment } from '../../src/persistentStorage/opfsFileNaming';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -15,7 +16,6 @@ import {
   pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { docSchema } from './offlineTestShared';

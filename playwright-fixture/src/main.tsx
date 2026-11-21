@@ -853,6 +853,14 @@ function OfflineDocumentScenario({
   const offlineStatus = storeManager.useOfflineStatus();
   const offlineEntities = storeManager.useOfflineEntities();
   const [nextValue, setNextValue] = useState('');
+  // Counts forced offline toggles that finished persisting, so tests know
+  // when it is safe to reload
+  const [persistedToggleCount, setPersistedToggleCount] = useState(0);
+  const setForcedOfflineMode = (forced: boolean) => {
+    void storeManager.setForcedOfflineMode(forced).then(() => {
+      setPersistedToggleCount((current) => current + 1);
+    });
+  };
 
   return (
     <section>
@@ -876,6 +884,53 @@ function OfflineDocumentScenario({
           0,
         )}
       </div>
+      <div data-testid="offline-doc-forced">
+        {offlineStatus.isForcedOffline ? 'forced' : 'not-forced'}
+      </div>
+      <div data-testid="offline-doc-pending">{offlineEntities.length}</div>
+      <div data-testid="offline-doc-persisted-toggles">
+        {persistedToggleCount}
+      </div>
+      <button
+        data-testid="offline-doc-force-offline"
+        onClick={() => setForcedOfflineMode(true)}
+        type="button"
+      >
+        force offline
+      </button>
+      <button
+        data-testid="offline-doc-release-offline"
+        onClick={() => setForcedOfflineMode(false)}
+        type="button"
+      >
+        release offline
+      </button>
+      <button
+        data-testid="offline-doc-mutate"
+        onClick={() => {
+          const incrementedValue = (document.data?.value ?? 0) + 1;
+
+          void store.performMutation({
+            optimisticUpdate: () => {
+              store.updateState((draft) => {
+                draft.value = incrementedValue;
+              });
+            },
+            mutation: () =>
+              requestJson<DocumentState>(pageId, '/api/document/mutate', {
+                method: 'POST',
+                body: JSON.stringify({ value: incrementedValue }),
+              }),
+            offline: {
+              operation: 'setValue',
+              input: { value: incrementedValue },
+            },
+          });
+        }}
+        type="button"
+      >
+        mutate
+      </button>
       <input
         data-testid="offline-doc-next-value"
         onChange={(event) => setNextValue(event.target.value)}

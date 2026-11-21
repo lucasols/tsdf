@@ -10,13 +10,13 @@ import type {
   ValidPayload,
 } from '../../src/main';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
+import { createOfflineNetworkMock } from '../../src/testing';
 import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { getOpfsDirTree } from '../utils/persistentStorageOptimizationTestUtils';
 import {
   type CreateListQueryUserOperations,
@@ -1244,6 +1244,79 @@ test('a tab opened in the background does not also send the queued edits', async
   await advanceTime(3_000);
 
   expect(serverCalls).toMatchInlineSnapshot(`['tab A sent doc = 2']`);
+});
+
+test('forced offline mode holds the replay in every tab, and releasing it sends an edit queued in a background tab once', async () => {
+  // The real network stays up for the whole test.
+  const tabA = await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+  // Tab A keeps the focus, so it leads the session and holds the replay lock.
+  setDocumentHidden(false);
+
+  function describeForcedMode(...tabs: Tab[]) {
+    return Object.fromEntries(
+      tabs.map((tab) => {
+        const status = tab.storeManager.getOfflineStatus();
+        return [
+          `tab ${tab.name}`,
+          {
+            leader: status.isLeader,
+            forced: status.isForcedOffline,
+            offline: status.isOfflineMode,
+            entities: tab.storeManager
+              .getOfflineEntities()
+              .map((entity) => `${entity.storeName}: ${entity.syncState}`),
+          },
+        ];
+      }),
+    );
+  }
+
+  // --- The background tab forces offline mode: the leading tab follows it.
+  (await tabB.storeManager.setForcedOfflineMode(true)).unwrap();
+  await advanceTime(10);
+
+  // --- The user edits in the background tab, which queues the edit.
+  await tabB.queueEdit(2);
+  expect(describeForcedMode(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: ['doc: pending']
+      forced: '✅'
+      leader: '✅'
+      offline: '✅'
+
+    tab B:
+      entities: ['doc: pending']
+      forced: '✅'
+      leader: '❌'
+      offline: '✅'
+  `);
+
+  // --- Neither a browser `online` event nor time passing ends forced mode:
+  // the leading tab, which now holds the edit too, does not send it.
+  network.goOnline();
+  await advanceTime(60_000);
+  expect(serverCalls).toMatchInlineSnapshot(`[]`);
+
+  // --- Releasing from the leading tab recovers both tabs, and the leader
+  // sends the edit queued in the other tab exactly once.
+  (await tabA.storeManager.setForcedOfflineMode(false)).unwrap();
+  await advanceTime(3_000);
+
+  expect(serverCalls).toMatchInlineSnapshot(`['tab A sent doc = 2']`);
+  expect(describeForcedMode(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: []
+      forced: '❌'
+      leader: '✅'
+      offline: '❌'
+
+    tab B:
+      entities: []
+      forced: '❌'
+      leader: '❌'
+      offline: '❌'
+  `);
 });
 
 test('offline items of a store open only in another tab stay listed in every tab', async () => {

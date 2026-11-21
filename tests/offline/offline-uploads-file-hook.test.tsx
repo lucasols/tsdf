@@ -17,6 +17,7 @@ import type {
   ValidPayload,
 } from '../../src/main';
 import { createStoreManager, opfsOfflineUploadAdapter } from '../../src/main';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -25,7 +26,6 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import type { UpdateValueOperations as DirectUploadUpdateOperations } from './offlineReplayTestShared';
 import { docSchema } from './offlineTestShared';

@@ -8,6 +8,7 @@ import { clearSessionProtectedKeysSnapshot } from '../../../src/persistentStorag
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import type { AsyncStorageNamespaceScope } from '../../../src/persistentStorage/types';
 import { createStoreManager } from '../../../src/storeManager';
+import { createOfflineNetworkMock } from '../../../src/testing';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { normalizeError } from '../../mocks/testEnvUtils';
 import { advanceTime } from '../../utils/genericTestUtils';
@@ -20,7 +21,6 @@ import {
   startPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
 import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
-import { createOfflineNetworkMock } from '../../utils/networkMock';
 import {
   createDocumentEnv,
   createListQueryEnv,
