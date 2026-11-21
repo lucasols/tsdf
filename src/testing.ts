@@ -17,7 +17,11 @@ export type OfflineNetworkMock = {
    * test environment (`happy-dom`, `jsdom` or a real browser).
    */
   install: () => void;
-  /** Restores the `navigator.onLine` that was in place before `install()`. */
+  /**
+   * Restores the `navigator.onLine` that was in place before `install()` and
+   * resets the mocked status to its initial value, so a test that ends offline
+   * (or fails before going back online) does not leave the next one offline.
+   */
   uninstall: () => void;
   /** Whether the mocked network is currently online. */
   isOnline: () => boolean;
@@ -49,7 +53,8 @@ export type OfflineNetworkMock = {
  *
  * It has no dependency on a test runner. Call `install()` before the code
  * under test reads the network status (e.g. in `beforeEach`) and `uninstall()`
- * when the test is done.
+ * when the test is done (e.g. in `afterEach`), which also resets the status
+ * for the next test.
  *
  * @param initialOnline - Initial status. Defaults to online.
  *
@@ -90,6 +95,7 @@ export function createOfflineNetworkMock(
       });
     },
     uninstall() {
+      online = initialOnline;
       if (!isInstalled) return;
       isInstalled = false;
 

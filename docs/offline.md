@@ -547,9 +547,9 @@ await storeManager.setForcedOfflineMode(false);
 - While forced, the session's network detection reports offline regardless of `navigator.onLine` / `network.getIsOffline`: fetches are served from cache, offline-enabled mutations are queued, and neither replay nor recovery checks run. Successful requests and browser `online` events cannot end it.
 - The flag is persisted per session key in `localStorage` and read synchronously when the session boots, so it survives reloads and the first fetches after a reload are already offline. It stays on until it is turned off.
 - It is shared with the other tabs of the same session: open tabs follow the toggle, tabs opened later boot with it.
-- Turning it off hands control back to the real network detection. If the network is up, the session recovers and replays queued work exactly like a normal reconnect; if it is really down, the session stays offline.
+- Turning it off hands control back to the real network detection. If the network is up, the session recovers and replays queued work exactly like a normal reconnect; if the detection (`navigator.onLine` / `network.getIsOffline`) still reports offline, the session stays offline.
 - It is a simulated network loss, so it requires `offlineSession.network` and only takes effect while network mode is enabled and the [session gate](#session-gate) is open. The call resolves to `Result.err(...)` when `offlineSession.network` is not configured or there is no active session key.
-- The returned promise resolves once the flag is persisted, so it is safe to reload right after awaiting it.
+- The returned promise resolves once the flag is persisted and, when turning it off, once the network detection has run again, so it is safe to reload right after awaiting it.
 
 Unlike `setOfflineRuntimeConfig(...)`, which is in-memory and changes which modes are allowed, forced offline mode is persisted and changes what the session detects. It is a runtime control available in production builds, meant for manual testing, end-to-end tests and support diagnostics. Expose it deliberately (e.g. a dev tools panel), and show `isForcedOffline` in the UI when you do, since the app will keep booting offline until it is released.
 
@@ -570,7 +570,7 @@ await page.evaluate(() => window.storeManager.setForcedOfflineMode(false));
 // ...queued edits are replayed
 ```
 
-When several pages of the same session are open, replay is done by the leading tab (the visible, most recently focused one), which replays the edits it queued itself or loaded from storage when it booted, same as for a real reconnect. In a multi-page test, queue the edits from the page that was opened or focused last.
+When several pages of the same session are open, replay is done by the leading tab (the visible, most recently focused one), which also sends the edits queued in the other pages, same as for a real reconnect (see [Multiple Tabs](#multiple-tabs)). A multi-page test that asserts which page sent a request should expect it from the page that was opened or focused last.
 
 ### Unit and component tests
 
@@ -593,7 +593,7 @@ test('queues the edit while offline', async () => {
 });
 ```
 
-- `install()` / `uninstall()` replace and restore `navigator.onLine` (requires a DOM environment such as `happy-dom` or `jsdom`). That is enough for sessions using the default detection.
+- `install()` / `uninstall()` replace and restore `navigator.onLine` (requires a DOM environment such as `happy-dom` or `jsdom`). That is enough for sessions using the default detection. `uninstall()` also resets the status to its initial value, so a test that ends offline does not leave the next one offline.
 - `network.config` is a ready-to-use `offlineSession.network` value (`{ enabled: true, getIsOffline }`) for sessions that should read the mock directly.
 - `goOffline()` / `goOnline()` change the status and dispatch the window `offline` / `online` events, like the browser does. `setOffline()` / `setOnline()` change it silently, e.g. to prepare the status before the app boots.
 - `isOnline()` / `isOffline()` read the mocked status.

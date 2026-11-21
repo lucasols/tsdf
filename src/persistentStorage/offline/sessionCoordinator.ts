@@ -1083,7 +1083,7 @@ class SessionOfflineCoordinator {
           // state last, and regardless of snapshot staleness: it is an
           // explicit user action, not derived state.
           if (typeof message.forcedOffline === 'boolean') {
-            this.#applyForcedOffline(message.forcedOffline);
+            void this.#applyForcedOffline(message.forcedOffline);
           }
         },
         undefined,
@@ -1866,17 +1866,23 @@ class SessionOfflineCoordinator {
    * Turns forced offline mode on or off, shares it with the other tabs of the
    * session and resolves once it is persisted.
    */
-  setForcedOffline(forced: boolean): Promise<void> {
+  async setForcedOffline(forced: boolean): Promise<void> {
     if (!this.#canonicalConfig.hasNetworkConfig) {
       throw createForcedOfflineModeUnavailableError();
     }
 
-    this.#applyForcedOffline(forced, true);
-    return this.#persistSessionSnapshot();
+    // Leaving re-detects the network, which can be async. The status is only
+    // final, and safe to reload over, once that detection settled: a reload
+    // before it would boot from a leftover "network down" status.
+    await this.#applyForcedOffline(forced, true);
+    await this.#persistSessionSnapshot();
   }
 
-  #applyForcedOffline(forced: boolean, isLocalToggle = false): void {
-    if (this.#forcedOffline === forced) return;
+  #applyForcedOffline(
+    forced: boolean,
+    isLocalToggle = false,
+  ): Promise<boolean> | undefined {
+    if (this.#forcedOffline === forced) return undefined;
 
     this.#forcedOffline = forced;
     // A forced session is never "classified": recovery probes must not run
@@ -1894,7 +1900,7 @@ class SessionOfflineCoordinator {
     if (isLocalToggle) this.#publishSnapshot(forced);
     // Entering reports offline synchronously. Leaving goes through the regular
     // detection, so it recovers and replays exactly like a real reconnect.
-    void this.refreshNetworkState();
+    return this.refreshNetworkState();
   }
 
   #browserReportsOnline(): boolean {

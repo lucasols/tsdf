@@ -126,8 +126,9 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * offline) and shared with the other tabs of the session. It stays on until
    * it is turned off. `getOfflineStatus().isForcedOffline` reports it.
    *
-   * The returned promise resolves once the flag is persisted, so it is safe to
-   * reload right after awaiting it. It resolves to `Result.err(...)` when
+   * The returned promise resolves once the flag is persisted and, when turning
+   * it off, once the network detection has run again, so it is safe to reload
+   * right after awaiting it. It resolves to `Result.err(...)` when
    * there is no active session key or `offlineSession.network` is not
    * configured.
    */

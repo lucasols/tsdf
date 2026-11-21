@@ -522,6 +522,61 @@ test('network recovery checks do not run and cannot end forced offline mode', as
   screen.unmount();
 });
 
+test('reloading right after awaiting the release of forced offline mode boots online when the network detection is async', async () => {
+  const sessionKey = 'forced-offline-async-detection-session';
+  const storeName = 'forced-offline-async-detection-doc';
+  // The app detects connectivity with a ping that takes 100ms, and confirms
+  // recoveries with a recovery check.
+  const recoveryCheck = vi.fn(() => true);
+  const networkConfig: OfflineSessionConfig['network'] = {
+    enabled: true,
+    getIsOffline: () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve(network.isOffline()), 100);
+      }),
+    recoveryCheck,
+  };
+
+  const page = createOfflineDocumentPage({
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+    networkConfig,
+  });
+  await flushAllTimers();
+  (await page.storeManager.setForcedOfflineMode(true)).unwrap();
+
+  // An e2e test releases forced mode and reloads as soon as the call resolves.
+  // The reload happens at the exact moment the promise settles.
+  const releaseAndReload = page.storeManager
+    .setForcedOfflineMode(false)
+    .then((result) => {
+      result.unwrap();
+      resetSessionForTests();
+      const reloadedPage = createOfflineDocumentPage({
+        sessionKey,
+        storeName,
+        networkConfig,
+      });
+      // Read synchronously: the status the reloaded app boots with.
+      return getStatusSummary(reloadedPage.storeManager);
+    });
+  // The ping started by the release answers "online".
+  await advanceTime(100);
+
+  // The release only resolved after the ping confirmed the network is up, so
+  // the reloaded app boots online instead of finding a leftover "network down"
+  // status in storage (which it would only leave after a recovery check).
+  expect(await releaseAndReload).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '✅' }
+  `);
+
+  await flushAllTimers();
+  expect(recoveryCheck).toHaveBeenCalledTimes(0);
+});
+
 test('turning forced offline mode off while the network is really down keeps the session offline until it returns', async () => {
   const sessionKey = 'forced-offline-real-outage-session';
   const page = createOfflineDocumentPage({
