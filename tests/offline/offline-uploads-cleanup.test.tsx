@@ -5,6 +5,7 @@ import type {
   CollectionOfflineOperationDefinition,
   DocumentOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
+  OfflineReplayRetryConfig,
 } from '../../src/main';
 import { createStoreManager, opfsOfflineUploadAdapter } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -50,9 +51,12 @@ setupOfflineUploadTests();
 /**
  * Session whose upload transport resolves instantly and whose replay gives up
  * after a single failure, so one rejected `execute` is enough to turn a queued
- * mutation into a manual resolution.
+ * mutation into a manual resolution. `replayRetry` replaces that retry policy.
  */
-function createUploadCleanupStoreManager(sessionKey: string) {
+function createUploadCleanupStoreManager(
+  sessionKey: string,
+  replayRetry: OfflineReplayRetryConfig = { maxFailures: 1, intervalMs: 1 },
+) {
   return createStoreManager({
     getSessionKey: () => sessionKey,
     errorNormalizer: normalizeError,
@@ -60,7 +64,7 @@ function createUploadCleanupStoreManager(sessionKey: string) {
       network: network.config,
       classifyRetryableFailure: (error, ctx) =>
         classifyRetryableReplayFailure(error, ctx.phase),
-      replayRetry: { maxFailures: 1, intervalMs: 1 },
+      replayRetry,
       uploads: {
         adapter: opfsOfflineUploadAdapter,
         upload: ({ id }) => Promise.resolve(`server:${id}`),
@@ -1107,6 +1111,46 @@ test('committing a conflict without replaying it deletes the staged uploads it d
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
 
+test('requeueing a conflict while online deletes the staged uploads once the replacement is saved', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  network.setOffline();
+  const storeManager = createUploadCleanupStoreManager(
+    'offline-upload-online-requeue-session',
+  );
+  const executedRefs: unknown[] = [];
+  const env = createAttachmentsConflictEnv({
+    storeManager,
+    storeName: 'offline-upload-online-requeue-doc',
+    executedRefs,
+  });
+  await flushAllTimers();
+
+  // --- Setup: a mutation with a staged file stops on a conflict ---
+  await stageUpload(storeManager, 'attachment-a');
+  const conflict = await env.queueConflictingMutation(['attachment-a']);
+
+  // The user looks at the conflict for a while. Being online for more than a
+  // few seconds also starts the retention window of the stored files, which
+  // rewrites their records.
+  await advanceTime(30_000);
+
+  // --- Action: the replacement is queued and sent right away ---
+  await resolveWithin(
+    env.apiStore.resolveOfflineResolution(conflict.id, 'saveAttachments', {
+      action: 'requeue',
+      input: { attachmentIds: ['attachment-a'], value: 3 },
+    }),
+  );
+  await advanceTime(2_000);
+
+  expect(executedRefs).toMatchInlineSnapshot(
+    `- attachment-a: 'server:attachment-a'`,
+  );
+  // The saved replacement was the last work that needed the file.
+  expect(getStagedUploads(storeManager)).toMatchInlineSnapshot(`[]`);
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
 test('files attached directly to a mutation are deleted when that mutation is discarded', async () => {
   const mockBrowserOpfs = createMockBrowserOpfs();
   network.setOffline();
@@ -1499,5 +1543,213 @@ test('a file queued offline by an older version is removed once its edit is sent
   expect(replayedFiles).toMatchInlineSnapshot(`['avatar body']`);
   // Nothing in the profile queue uses the file anymore, so it's removed right
   // away instead of staying in storage until the retention expires.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
+/**
+ * Attempts of the `updateWithAttachment` mutation that reached the server, and
+ * how many of the next ones fail. A failure happens after the file was
+ * uploaded, like a server that is briefly unable to save the change.
+ */
+type FlakyAttachmentServer = { failuresLeft: number; requests: string[] };
+
+/**
+ * Document whose `updateWithAttachment` mutation depends on a staged upload and
+ * is sent to a server that fails the first `server.failuresLeft` attempts.
+ */
+function createFlakyAttachmentEnv(args: {
+  storeManager: UploadCleanupStoreManager;
+  storeName: string;
+  testScenario: 'loaded' | 'idle';
+  server: FlakyAttachmentServer;
+}) {
+  const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
+    1,
+    {
+      id: args.storeName,
+      storeManager: args.storeManager,
+      testScenario: args.testScenario,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateWithAttachment: {
+              inputSchema: rc_object({
+                attachmentId: rc_string,
+                value: rc_number,
+              }),
+              kind: 'update',
+              dependsOnUploads: ({ input }) => [input.attachmentId],
+              execute: (ctx) => {
+                const request = `update with ${JSON.stringify(
+                  ctx.uploads.resolvedRefsById[ctx.input.attachmentId],
+                )}`;
+                if (args.server.failuresLeft > 0) {
+                  args.server.failuresLeft -= 1;
+                  args.server.requests.push(`${request} -> server is busy`);
+                  return Promise.reject(new Error('server is busy'));
+                }
+                args.server.requests.push(`${request} -> saved`);
+                return Promise.resolve({ value: ctx.input.value });
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  /** Queues the edit that sends the staged `asset-1` file. */
+  async function queueAttachmentEdit(): Promise<void> {
+    await resolveWithin(
+      env.apiStore.performMutation({
+        mutation: () => Promise.resolve({ value: 3 }),
+        offline: {
+          operation: 'updateWithAttachment',
+          input: { attachmentId: 'asset-1', value: 3 },
+        },
+      }),
+    );
+  }
+
+  return { ...env, queueAttachmentEdit };
+}
+
+test('a staged upload is deleted from storage once retrying its failed mutation saves it, and stays deleted after a reload', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-resolution-retry-session';
+  const storeName = 'offline-upload-resolution-retry-doc';
+  const server: FlakyAttachmentServer = { failuresLeft: 1, requests: [] };
+
+  // --- Setup: forced offline, the user picks a file and queues its edit ---
+  const firstPage = createUploadCleanupStoreManager(sessionKey);
+  const firstPageEnv = createFlakyAttachmentEnv({
+    storeManager: firstPage,
+    storeName,
+    testScenario: 'loaded',
+    server,
+  });
+  await flushAllTimers();
+  (await firstPage.setForcedOfflineMode(true)).unwrap();
+  await stageUpload(firstPage, 'asset-1');
+  await firstPageEnv.queueAttachmentEdit();
+
+  // --- The app is reloaded while still forced offline ---
+  resetSessionForTests();
+  const storeManager = createUploadCleanupStoreManager(sessionKey);
+  const env = createFlakyAttachmentEnv({
+    storeManager,
+    storeName,
+    testScenario: 'idle',
+    server,
+  });
+  await advanceTime(1_000);
+
+  // --- Forced offline is released: the file is uploaded, the edit fails ---
+  await act(async () => {
+    (await storeManager.setForcedOfflineMode(false)).unwrap();
+  });
+  await advanceTime(2_000);
+
+  expect(server.requests).toMatchInlineSnapshot(
+    `['update with "server:asset-1" -> server is busy']`,
+  );
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) {
+    throw new Error('Expected the failed replay to require a resolution');
+  }
+  expect(summarizeResolution(resolution)).toMatchInlineSnapshot(`
+    error: 'server is busy'
+    input: 'attachmentId: "asset-1", value: 3'
+    kind: 'retry-exhausted'
+    on: 'document:document'
+    op: 'updateWithAttachment'
+  `);
+  // The user may still retry, so the uploaded file is kept meanwhile.
+  expect(getStagedUploads(storeManager)).toMatchInlineSnapshot(
+    `- { id: 'asset-1', source: 'manual', state: 'uploaded' }`,
+  );
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
+    "tsdf-uploads (0.67 kb)
+    └ offline-upload-resolution-retry-session (0.64 kb)
+      └ asset-1 (0.57 kb)
+        ├ binary.blob (0.05 kb)
+        └ metadata.json (0.51 kb)"
+  `);
+
+  // The user reads the error for a while before retrying. Being online for
+  // more than a few seconds also starts the retention window of the stored
+  // files, which rewrites their records.
+  await advanceTime(30_000);
+
+  // --- Action: the user retries and this time the server saves the edit ---
+  await resolveWithin(
+    env.apiStore.resolveOfflineResolution(
+      resolution.id,
+      'updateWithAttachment',
+      { action: 'retry' },
+    ),
+  );
+  await advanceTime(2_000);
+
+  expect(server.requests).toMatchInlineSnapshot(`
+    - 'update with "server:asset-1" -> server is busy'
+    - 'update with "server:asset-1" -> saved'
+  `);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  // The saved edit was the last work that needed the file, so both its record
+  // and its bytes are deleted.
+  expect(getStagedUploads(storeManager)).toMatchInlineSnapshot(`[]`);
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+
+  // --- The app is reloaded again: the deleted upload does not come back ---
+  resetSessionForTests();
+  const reloadedStoreManager = createUploadCleanupStoreManager(sessionKey);
+  createFlakyAttachmentEnv({
+    storeManager: reloadedStoreManager,
+    storeName,
+    testScenario: 'idle',
+    server,
+  });
+  await advanceTime(1_000);
+
+  expect(getStagedUploads(reloadedStoreManager)).toMatchInlineSnapshot(`[]`);
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
+test('a staged upload is deleted from storage once an automatic replay retry saves its mutation', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  network.setOffline();
+  // The default replay retry policy: up to 3 failures, one retry every 5s.
+  const storeManager = createUploadCleanupStoreManager(
+    'offline-upload-replay-retry-session',
+    {},
+  );
+  const server: FlakyAttachmentServer = { failuresLeft: 1, requests: [] };
+  const env = createFlakyAttachmentEnv({
+    storeManager,
+    storeName: 'offline-upload-replay-retry-doc',
+    testScenario: 'loaded',
+    server,
+  });
+  await flushAllTimers();
+
+  await stageUpload(storeManager, 'asset-1');
+  await env.queueAttachmentEdit();
+
+  // --- Action: reconnect; the first attempt fails and is retried 5s later ---
+  await reconnect();
+  await advanceTime(5_000);
+
+  // The retry saved the edit within the retry budget, without asking the user.
+  expect(server.requests).toMatchInlineSnapshot(`
+    - 'update with "server:asset-1" -> server is busy'
+    - 'update with "server:asset-1" -> saved'
+  `);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  // Nothing needs the file anymore, in memory or in storage.
+  expect(getStagedUploads(storeManager)).toMatchInlineSnapshot(`[]`);
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });

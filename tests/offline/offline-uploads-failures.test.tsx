@@ -469,7 +469,7 @@ test('a dependency upload failure classified as an outage puts the session in ou
 });
 
 test('a dependency upload failure marked as retryable is uploaded again on the replay retry cadence without failing the upload', async () => {
-  createMockBrowserOpfs();
+  const mockBrowserOpfs = createMockBrowserOpfs();
   const sessionKey = 'upload-retryable-failure-session';
 
   network.setOffline();
@@ -524,6 +524,8 @@ test('a dependency upload failure marked as retryable is uploaded again on the r
         pick(upload, ['id', 'state', 'resolvedRef', 'lastError']),
       ),
   ).toMatchInlineSnapshot(`[]`);
+  // Its bytes are gone from storage too.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time    | ui                                                                           |
@@ -548,7 +550,7 @@ test('a dependency upload failure marked as retryable is uploaded again on the r
     23.863s | "upload:uploaded | op:syncing | session:online"                              | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"                              | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"                                 | ui-changed
-    23.865s | "upload:none | op:none | session:online"                                     | ui-changed
+    23.872s | "upload:none | op:none | session:online"                                     | ui-changed
     "
   `);
 
@@ -644,7 +646,7 @@ test('a retryable dependency upload failure that keeps failing uses up the repla
 });
 
 test('a permanently rejected dependency upload sends the operation to manual resolution, where retry uploads the file again', async () => {
-  createMockBrowserOpfs();
+  const mockBrowserOpfs = createMockBrowserOpfs();
   const sessionKey = 'upload-permanent-failure-session';
 
   network.setOffline();
@@ -742,6 +744,8 @@ test('a permanently rejected dependency upload sends the operation to manual res
         pick(upload, ['id', 'state', 'resolvedRef', 'lastError']),
       ),
   ).toMatchInlineSnapshot(`[]`);
+  // Its bytes are gone from storage too.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time    | ui                                                                                 |
@@ -766,7 +770,7 @@ test('a permanently rejected dependency upload sends the operation to manual res
     74.427s | "upload:uploaded | op:syncing | session:online"                                    | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"                                    | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"                                       | ui-changed
-    74.429s | "upload:none | op:none | session:online"                                           | ui-changed
+    74.436s | "upload:none | op:none | session:online"                                           | ui-changed
     "
   `);
 
