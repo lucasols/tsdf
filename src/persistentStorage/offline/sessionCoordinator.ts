@@ -251,9 +251,10 @@ type SessionRegistration = {
   onOfflineCycle?: () => void;
   /**
    * Called when another store of the session cancelled or discarded entities
-   * created offline that will never exist on the server. `cancelledEntityKeys`
-   * holds their keys in the source store, and `getEntityKey` keys an entity
-   * payload of that store the same way.
+   * created offline that will never exist on the server, or successfully
+   * deleted entities from it. `cancelledEntityKeys` holds their keys in the
+   * source store, and `getEntityKey` keys an entity payload of that store the
+   * same way.
    * Only registered by stores with `cancelledWith` operations.
    */
   onTempEntitiesCancelled?: (
@@ -1406,7 +1407,8 @@ class SessionOfflineCoordinator {
   /**
    * Lets the other stores of the session drop the queued work they declared
    * as `cancelledWith` entities of `sourceStoreName` that will never exist on
-   * the server.
+   * the server (cancelled or discarded creations), or no longer exist there
+   * (successful deletes). Only reaches the stores attached in this tab.
    */
   async notifyTempEntitiesCancelled(
     sourceStoreName: string,
