@@ -166,7 +166,24 @@ If the session should pause for that service instead, make `check` cover it (ans
 
 While a check is in flight, every failure and recovery tick that needs an answer waits for that same call: a burst of requests failing right when the backend goes down costs one health request. Failures that arrive while the session is already in offline mode do not run the check at all — the active mode explains them, and asking "are we back?" is the job of the recovery checks.
 
-A finished answer is never reused. A cached `'up'` could hide an outage that started right after it, so the next failure after a check has settled starts a new one. The check is never called on the success path.
+By default a finished answer is not reused. A cached `'up'` could hide an outage that started right after it, so the next failure after a check has settled starts a new one. The check is never called on the success path.
+
+When the check is expensive, an endpoint that keeps failing while the backend is up costs one check per failure, which adds load right when the backend is degraded. `healthCheck.reuseUpForFailuresMs` lets the following failures of the same tab reuse an `'up'` answer for that long:
+
+```ts
+healthCheck: {
+  check: checkApiHealth,
+  // A failure answered "up" explains the next failures for 30s
+  reuseUpForFailuresMs: 30_000,
+},
+```
+
+Inside the window a failure is left to its request without asking the check, so an outage that starts inside it is only noticed by the first failure after it ends. Until then its failures get the handling of [a failure that belongs to the request](#up-means-the-failure-belongs-to-the-request): a direct mutation fails with its own error instead of being queued, and a queued mutation being replayed goes through `classifyRetryableFailure` and the `replayRetry` budget, and can end in a `retry-exhausted` resolution instead of staying queued until the backend recovers. Keep the window short. The reuse never decides recovery:
+
+- only an `'up'` answer to a failure classification starts the window, and only failure classification reads it. Recovery checks always run the check, and their answers are not reused;
+- the window ends early when the session enters an offline mode, for any reason, including the browser going offline or another tab entering one.
+
+A failure that arrives while a check is in flight still waits for that call rather than reusing an older answer.
 
 ### With `classifyFailure` and `recoveryCheck`
 
@@ -219,6 +236,8 @@ With [partial resources](./partial-resources.md), "cached" is decided per hook, 
 - A hook requesting fields that were never loaded has nothing usable to return for them, so it reports `status: 'error'` with the offline error, without attempting a fetch. Its data stays hidden as it would be while loading (`data: null`, `items: []`), or stays visible with `loadingFields` when `showPartialAsRefetching` is enabled.
 
 Both can be mounted for the same item or query at the same time: the hook waiting for missing fields does not disturb the one reading cached fields.
+
+The list query `awaitItemFetch`, `getItemFromStateOrFetch`, `awaitListQueryFetch` and `getQueryFromStateOrFetch` follow the same rule: a read whose requested fields are all cached resolves with the cached data, and a read requesting fields that were never loaded (for any item of the query, with `fields: '*'` included) resolves with the offline error instead of the partial item. The failed read leaves the cached item or query as it was.
 
 A cached list query that lost a row before one of the rows that are left (or every row) is not a cached read: it is not reported as a complete `success`. A list that only lost its last rows (e.g. to `maxItemBytes`) is still a cached read, with fewer rows. Hooks return the rows that are left with `status: 'error'` and the offline error (`isOfflineStoreError(error)`), so the screen can show them together with a notice that the list is incomplete. See [Cached list queries that lost rows](./persistent-storage.md#cached-list-queries-that-lost-rows).
 
@@ -307,6 +326,30 @@ tempEntity: {
   // ...
 },
 ```
+
+### Following a temp entity to its final payload
+
+When a queued creation is saved, TSDF replaces the temp payload with the final one: the item state, the query memberships (the saved item takes the place of the temp row) and the offline state of the item. This happens in every open tab of the session, whichever tab sent the creation.
+
+Code that keeps a temp payload outside the store (a route open on the record, a selection, an embedded frame that created it) can follow the record in two ways:
+
+```ts
+// Called in every tab when the creation is saved
+const stopListening = userStore.storeEvents.on(
+  'tempEntityReconciled',
+  ({ payload: { tempId, finalPayload } }) => {
+    if (openedUserPayload.id === tempId.id) openUser(finalPayload);
+  },
+);
+
+// Or ask later, for a payload that may still be the temp one
+const userPayload = userStore.resolveTempItemPayload(openedUserPayload);
+```
+
+`resolveTempItemPayload(payload)` returns the final payload once the item was saved, and the given payload otherwise. Collection and list-query stores have both the event and the lookup.
+
+- The mapping is kept in memory, for the tabs that were open when the creation was saved (the 1000 most recent creations per store). A tab opened or reloaded afterwards starts from the saved item and cannot resolve the old temp payload, so replace temp payloads kept in URLs when the event fires.
+- A tab that does not hold the temp item is still told about it and can resolve it.
 
 ### Deleting entities created offline
 
@@ -480,7 +523,7 @@ Tabs of the same session share one offline queue. Every tab can queue mutations 
 - The **leading tab** replays the queue: the visible tab, or the one that was visible most recently. `useOfflineStatus().isLeader` tells whether the current tab leads.
 - A mutation queued in any other tab is sent by the leading tab after the connection recovers, in the order the mutations were queued across tabs. No reload or tab switch is needed.
 - Every queued mutation is sent once. A cross-tab lock (Web Locks API) keeps two tabs from replaying a store's queue at the same time, and a tab drops an entry as soon as another tab reports it as sent, so it does not send it again when it leads later. Where the Web Locks API is unavailable (pages served over plain `http` other than `localhost`), this guarantee does not hold and TSDF logs a warning. It also only holds between tabs running the same app version (`getAppVersion`) and the same TSDF release: tabs on different versions do not see each other's messages, so after a deploy an old tab and a new tab can both send the same queued mutation.
-- When the leading tab sends a temp-entity creation queued in another tab, every tab with the store emits `tempEntityReconciled`, so a view that follows the temp id can switch to the final one in any tab.
+- When the leading tab sends a temp-entity creation queued in another tab, every tab with the store replaces the temp item with the saved one and emits `tempEntityReconciled`, so a view that follows the temp id can switch to the final one in any tab. See [Following a temp entity to its final payload](#following-a-temp-entity-to-its-final-payload).
 - When the leading tab is closed or hidden, a visible tab takes over. When the previous tab was replaying or just did, the new one first waits for the mutation that tab is sending to finish, then up to a second more, so it learns what that tab already sent before it starts.
 
 Things to keep in mind:

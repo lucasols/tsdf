@@ -141,15 +141,21 @@ type SessionResolutionMessage = BrowserTabsMessageMeta & {
 
 /**
  * A tab replayed the creation of a temp entity and the server assigned its
- * final payload. The item data reaches the other tabs through the store's own
- * tab sync; this message lets them map the temp payload to the final one, so
- * a tab that queued the creation still learns where its temp entity went.
+ * final payload. Sent before the replacement, so the other tabs replace the
+ * temp item themselves (in their own lists too) before the store's tab sync
+ * tells them it was deleted, map the temp payload to the final one, and emit
+ * `tempEntityReconciled`, wherever the creation was queued.
  */
 type SessionTempReconciledMessage = BrowserTabsMessageMeta & {
   kind: 'offline-temp-reconciled';
   storeName: string;
   tempId: ValidPayload;
   finalPayload: ValidPayload;
+  /**
+   * The saved item data, when the operation's reconciliation provides it.
+   * Missing in messages sent by tabs running an older version.
+   */
+  finalData?: unknown;
 };
 
 /** Queued work the user discarded: what its refetch needs. */
@@ -263,6 +269,7 @@ type SessionRegistration = {
   onRemoteTempReconciled?: (
     tempId: ValidPayload,
     finalPayload: ValidPayload,
+    finalData: unknown,
   ) => void;
   /** Another tab discarded queued work of the store. */
   onRemoteWorkDiscarded?: (
@@ -625,6 +632,7 @@ type SessionCanonicalConfig = {
   classifyRetriableFailure?: OfflineSessionConfig['classifyRetryableFailure'];
   healthCheck?: OfflineHealthCheckConfig['check'];
   healthCheckTimeoutMs: number;
+  healthCheckReuseUpForFailuresMs: number;
   outageRecoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
   outageRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
@@ -655,6 +663,8 @@ function toCanonicalConfig(
     healthCheck: config?.healthCheck?.check,
     healthCheckTimeoutMs:
       config?.healthCheck?.timeoutMs ?? DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
+    healthCheckReuseUpForFailuresMs:
+      config?.healthCheck?.reuseUpForFailuresMs ?? 0,
     outageRecoveryCheck: config?.outage?.recoveryCheck,
     outageRecoveryProbe: normalizeRecoveryProbe(
       config?.outage?.recoveryProbe,
@@ -711,6 +721,8 @@ function sameCanonicalConfig(
     left.classifyRetriableFailure === right.classifyRetriableFailure &&
     left.healthCheck === right.healthCheck &&
     left.healthCheckTimeoutMs === right.healthCheckTimeoutMs &&
+    left.healthCheckReuseUpForFailuresMs ===
+      right.healthCheckReuseUpForFailuresMs &&
     left.outageRecoveryCheck === right.outageRecoveryCheck &&
     sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
   );
@@ -900,6 +912,12 @@ class SessionOfflineCoordinator {
   #recoveryAttempt = 0;
   /** Health check in flight, shared by every caller asking meanwhile. */
   #healthCheckInFlight: Promise<OfflineHealthCheckResult | null> | null = null;
+  /**
+   * When failure classification last got `up` from the health check, while
+   * `healthCheck.reuseUpForFailuresMs` lets later failures reuse it. Only
+   * failure classification reads it: recovery checks never do.
+   */
+  #healthUpForFailuresAt: number | null = null;
   #classifiedNetworkActive = false;
   /**
    * Forced offline mode: network detection reports offline regardless of the
@@ -1062,7 +1080,11 @@ class SessionOfflineCoordinator {
           if (message.kind === 'offline-temp-reconciled') {
             this.#registrations
               .get(message.storeName)
-              ?.onRemoteTempReconciled?.(message.tempId, message.finalPayload);
+              ?.onRemoteTempReconciled?.(
+                message.tempId,
+                message.finalPayload,
+                message.finalData,
+              );
             return;
           }
           if (message.kind === 'offline-work-discarded') {
@@ -1414,6 +1436,7 @@ class SessionOfflineCoordinator {
     storeName: string,
     tempId: ValidPayload,
     finalPayload: ValidPayload,
+    finalData: unknown,
   ): void {
     if (this.#disposed) return;
 
@@ -1422,6 +1445,7 @@ class SessionOfflineCoordinator {
       storeName,
       tempId,
       finalPayload,
+      ...(finalData === undefined ? {} : { finalData }),
     });
   }
 
@@ -2065,6 +2089,9 @@ class SessionOfflineCoordinator {
     this.#syncRecoveryProbe();
 
     if (!wasEffectivelyOffline && this.store.state.status.isOfflineMode) {
+      // Going offline is news about the backend: an `up` from before it must
+      // not explain the failures after the session is back
+      this.#healthUpForFailuresAt = null;
       this.#uploadOnlineSessionStartedAt = null;
       this.#stopUploadCleanupTimer();
       this.#stopUploadOnlineSessionStabilization();
@@ -2274,7 +2301,26 @@ class SessionOfflineCoordinator {
       if (this.store.state.status.outage.active) return 'outage';
       if (this.store.state.status.network.active) return 'network';
 
+      const reuseUpMs = this.#canonicalConfig.healthCheckReuseUpForFailuresMs;
+      if (
+        this.#healthUpForFailuresAt !== null &&
+        Date.now() - this.#healthUpForFailuresAt < reuseUpMs
+      ) {
+        return 'ignore';
+      }
+
       const health = await this.#checkHealth(healthCheck);
+
+      // Only an `up` received while the session is still online starts the
+      // reuse window. The check only ran because no window was live, so any
+      // other answer, or none, just drops the expired timestamp
+      this.#healthUpForFailuresAt =
+        reuseUpMs > 0 &&
+        health === 'up' &&
+        !this.store.state.status.isOfflineMode
+          ? Date.now()
+          : null;
+
       if (health === null || health === 'up') return 'ignore';
 
       result = health === 'outage' ? 'outage' : 'network';
@@ -2309,8 +2355,10 @@ class SessionOfflineCoordinator {
   /**
    * Runs `offlineSession.healthCheck`. While a check is in flight every
    * caller (failing requests, a recovery tick) gets that same call instead of
-   * starting its own. A finished answer is not kept: an `up` reused for a
-   * later failure could hide an outage that started right after it.
+   * starting its own. A finished answer is not kept here: an `up` reused for
+   * a later failure could hide an outage that started right after it, so
+   * only failure classification reuses one, when the app opts in with
+   * `healthCheck.reuseUpForFailuresMs`.
    *
    * Resolves with `null` when the check gave no answer (it threw or timed
    * out), which callers treat as "nothing learned".

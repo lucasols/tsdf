@@ -294,8 +294,9 @@ export type OfflineHealthCheckConfig = {
    *
    * Calls are deduplicated: while a check is in flight every failure and
    * recovery tick that needs an answer waits for that same call, so a burst of
-   * failing requests costs a single health request. A finished answer is never
-   * reused: the next failure or recovery tick starts a new check.
+   * failing requests costs a single health request. A finished answer is not
+   * reused by default: the next failure or recovery tick starts a new check.
+   * Set `reuseUpForFailuresMs` to let failures reuse an `'up'` answer.
    *
    * A check that throws, rejects or takes longer than `timeoutMs` gives no
    * answer and changes nothing: a failure being classified is treated as
@@ -311,6 +312,29 @@ export type OfflineHealthCheckConfig = {
    * @default 10_000
    */
   timeoutMs?: number;
+  /**
+   * How long, in milliseconds, an `'up'` answer to a failed request is reused
+   * for the next failed requests of this tab instead of running `check`
+   * again. Use it when `check` is expensive and an endpoint that keeps failing
+   * while the backend is up would otherwise cost one check per failure.
+   *
+   * Failures inside the window are treated as specific to their request
+   * without asking `check`, so an outage that starts inside the window is
+   * only noticed by the first failure after it ends. Until then a direct
+   * mutation fails with its own error instead of being queued, and a queued
+   * mutation being replayed uses its `replayRetry` budget and can end in a
+   * `retry-exhausted` resolution instead of staying queued until the backend
+   * recovers: keep it short.
+   *
+   * Only answers to failure classification start the window, and only failure
+   * classification reads it. Recovery checks always run `check`, and their
+   * answers are never reused. The window ends early when the session enters
+   * an offline mode.
+   *
+   * `0` (the default) never reuses an answer.
+   * @default 0
+   */
+  reuseUpForFailuresMs?: number;
 };
 
 /** Fixed replay retry policy for healthy online replay failures. Omitted fields use built-in defaults. */
@@ -1170,7 +1194,8 @@ type OperationBaseContext<TInput> = {
   updatedAt: number;
   /**
    * Resolves a previously temp-backed entity ref to its latest known final ref
-   * when one has been reconciled.
+   * when one has been reconciled. The mapping is kept in memory for the
+   * session, for the 1000 most recent creations of the store.
    */
   resolveEntityRef: <TEntityRef extends ValidPayload>(
     entityRef: TEntityRef,

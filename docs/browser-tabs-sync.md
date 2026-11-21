@@ -18,6 +18,7 @@ If `getSessionKey` returns `false`, sync is disabled for that store instance.
 - `fetch-start` and `fetch-success` messages for fetch batches
 - successful fetch snapshots (document, collection item, list query/query+item)
 - local state updates and optimistic mutation updates
+- the final payload of items created offline, once saved (see [Offline](./offline.md#following-a-temp-entity-to-its-final-payload))
 
 Tabs use a versioned message model so later snapshots do not overwrite fresher remote state.
 

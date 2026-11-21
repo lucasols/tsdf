@@ -122,3 +122,18 @@ export function createOfflineUsersEnv(
     },
   );
 }
+
+/** Item ids of the users loaded by `createOfflineUsersEnv`. */
+export const userItemIds = ['users||1', 'users||2', 'users||3'];
+
+/** Error messages the users list and items of the env show. */
+export function getUsersErrors(env: ReturnType<typeof createOfflineUsersEnv>) {
+  return {
+    list:
+      env.store.state.queries[env.getQueryKey({ tableId: 'users' })]?.error
+        ?.message ?? null,
+    items: userItemIds.map(
+      (itemId) => env.getItemQueryState(itemId)?.error?.message ?? null,
+    ),
+  };
+}

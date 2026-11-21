@@ -115,6 +115,7 @@ The overall store state is `Record<string, TSFDCollectionItem | null>` where key
 | ----------------------------------------------------- | ----------------------------------------------------------------- |
 | `getOfflineEntities()` / `useOfflineEntities()`       | Read offline entities scoped to this store                        |
 | `getItemOfflineState(payload)`                        | Read the offline sync state of one item, `null` if nothing queued |
+| `resolveTempItemPayload(payload)`                     | Final payload of an item created offline once it was saved        |
 | `getOfflineResolutions()` / `useOfflineResolutions()` | Read manual conflict/retry resolutions scoped to this store       |
 | `parseOfflineResolutionConflict(resolution)`          | Narrow a persisted resolution to this store's operation types     |
 | `resolveOfflineResolution(id, operation, action)`     | Resolve, retry, discard, requeue, or commit an offline resolution |

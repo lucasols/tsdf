@@ -237,8 +237,9 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
     status: 'success' | 'error' | 'skipped';
   };
   /**
-   * Emitted when an offline temp item is reconciled to its final payload, in
-   * every tab of the session, not only the one that sent the creation.
+   * An item created offline was saved: `tempId` was replaced by
+   * `finalPayload`. Emitted in every tab of the session, whichever tab sent
+   * the creation.
    */
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
@@ -733,6 +734,15 @@ export type CollectionStore<
   ) => ItemOfflineState | null;
   /** Non-reactive version of `useItemOfflineState`, for event handlers. */
   getItemOfflineState: (itemPayload: ItemPayload) => ItemOfflineState | null;
+  /**
+   * Returns the final payload of an item created offline once the server
+   * saved it (in this tab or another one), for code that still holds its
+   * temporary payload. Returns the given payload while it was not replaced,
+   * or when it is not a temporary payload. The mapping is kept in memory for
+   * the session (the 1000 most recent creations of the store); subscribe to
+   * `storeEvents` `tempEntityReconciled` to be told when it happens.
+   */
+  resolveTempItemPayload: (itemPayload: ItemPayload) => ItemPayload;
   /** React hook subscribing to manual offline resolutions for this store. */
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns manual offline resolutions for this store. */
@@ -1150,14 +1160,16 @@ export function createCollectionStore<
                   ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the collection store.
                     __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
                   : (currentItem?.data ?? undefined);
-              if (finalData === undefined) return;
-              deleteItemState(tempPayload);
               const finalPayload =
                 // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
                 __LEGIT_CAST__<ItemPayload, ValidPayload>(
                   reconciliation.finalPayload,
                 );
-              addItemToState(finalPayload, finalData);
+              if (finalData !== undefined) {
+                deleteItemState(tempPayload);
+                addItemToState(finalPayload, finalData);
+              }
+              // Listeners are told even when this tab had no item to replace
               storeEvents.emit('tempEntityReconciled', {
                 tempId: tempPayload,
                 finalPayload,
@@ -1176,15 +1188,21 @@ export function createCollectionStore<
                 await persistence.preloadItems(unloadedItemKeys);
               }
             },
-            applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
-              storeEvents.emit('tempEntityReconciled', {
-                // WORKAROUND: Offline temp ids and final payloads are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when notifying listeners.
-                tempId: __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+            applyTempReconciliationFromAnotherTab: (
+              tempId,
+              finalPayload,
+              finalData,
+            ) => {
+              applyRemoteTempItemReconciliation(
+                // WORKAROUND: Offline temp ids and final payloads are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when replacing the temp item.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
                 // WORKAROUND: Same ValidPayload-to-ItemPayload boundary as above.
-                finalPayload: __LEGIT_CAST__<ItemPayload, ValidPayload>(
-                  finalPayload,
-                ),
-              });
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(finalPayload),
+                finalData === undefined
+                  ? undefined
+                  : // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the collection store.
+                    __LEGIT_CAST__<ItemState, unknown>(finalData),
+              );
             },
             captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
               if (offlineOverlaySessionKey !== sessionKey)
@@ -1669,6 +1687,43 @@ export function createCollectionStore<
         message.itemKey,
       ) ?? false
     );
+  }
+
+  /**
+   * Another tab saved an item created offline. This tab applies the same
+   * replacement to the data it has and tells its own listeners. Without
+   * `finalData` (the operation reconciles to the pending data) the temp
+   * item's data is kept, as in the tab that sent the creation.
+   */
+  function applyRemoteTempItemReconciliation(
+    tempPayload: ItemPayload,
+    finalPayload: ItemPayload,
+    finalDataFromSender: ItemState | undefined,
+  ): void {
+    const tempItemKey = getItemKey(tempPayload);
+    const tempItem = store.state[tempItemKey];
+    const finalData = finalDataFromSender ?? tempItem?.data ?? undefined;
+
+    // A tab without the temp item has nothing to replace: the saved item
+    // reaches it through the store's tab sync.
+    if (tempItem && finalData !== undefined) {
+      runWithoutBroadcast(() => {
+        deleteItemState(tempPayload);
+        addItemToState(finalPayload, finalData);
+      });
+    }
+    // The changes this tab queued for the temp item follow it to the saved
+    // one, also when there was nothing to replace (a queued deletion already
+    // removed the temp item here).
+    unsentCreationItemKeys.delete(tempItemKey);
+    rebindOfflineOverlays([
+      { previousItemKey: tempItemKey, nextItemKey: getItemKey(finalPayload) },
+    ]);
+
+    storeEvents.emit('tempEntityReconciled', {
+      tempId: tempPayload,
+      finalPayload,
+    });
   }
 
   function handleRemoteMessage(
@@ -3016,6 +3071,8 @@ export function createCollectionStore<
       ),
     getItemOfflineState: (itemPayload) =>
       offlineController?.getItemOfflineState(getItemKey(itemPayload)) ?? null,
+    resolveTempItemPayload: (itemPayload) =>
+      offlineController?.resolveEntityRef(itemPayload) ?? itemPayload,
     useOfflineResolutions: () =>
       useOfflineStoreResolutions({
         sessionKey: getSessionKeyForRuntime(),

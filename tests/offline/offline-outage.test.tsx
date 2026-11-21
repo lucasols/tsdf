@@ -18,8 +18,10 @@ import {
   HEALTH_CHECK_DURATION_MS,
   createHealthCheckMock,
   createOfflineUsersEnv,
+  getUsersErrors,
   healthRecoveryProbe,
   trackOfflineSession,
+  userItemIds,
 } from './offlineHealthCheckTestShared';
 import {
   getOfflineQueueEntries,
@@ -652,19 +654,6 @@ test('stale async outage classifications are ignored after a newer failure settl
 // back?". The app wires its health endpoint once instead of in several hooks.
 // ---------------------------------------------------------------------------
 
-const userItemIds = ['users||1', 'users||2', 'users||3'];
-
-function getUsersErrors(env: ReturnType<typeof createOfflineUsersEnv>) {
-  return {
-    list:
-      env.store.state.queries[env.getQueryKey({ tableId: 'users' })]?.error
-        ?.message ?? null,
-    items: userItemIds.map(
-      (itemId) => env.getItemQueryState(itemId)?.error?.message ?? null,
-    ),
-  };
-}
-
 test('a burst of requests failing while the backend is down costs one health check and enters outage mode', async () => {
   const sessionKey = 'health-check-outage-burst-session';
   const health = createHealthCheckMock();
@@ -793,6 +782,169 @@ test('a healthy backend leaves the session online, each failed request shows its
     >>> the backend goes down right after answering "up"
 
     -> at: 260ms ⋅ session: offline (outage) ⋅ healthChecks: 2
+    "
+  `);
+
+  session.unmount();
+});
+
+// Real case: the app's health check costs several API requests. One endpoint
+// keeps answering 500 while the API is up, and without reuse every one of its
+// failures would cost a full health check while the backend is degraded.
+test('with reuseUpForFailuresMs, an endpoint that keeps failing while the backend is up costs one health check per reuse window', async () => {
+  const sessionKey = 'health-check-reuse-up-session';
+  const health = createHealthCheckMock();
+  const env = createOfflineUsersEnv(sessionKey, {
+    healthCheck: { check: health.check, reuseUpForFailuresMs: 30_000 },
+    outage: { enabled: true },
+  });
+  const failures = createLoggerStore();
+
+  async function failUser1Fetch(error: string) {
+    env.serverTable.setNextFetchError('users||1', error);
+    env.scheduleItemFetch('highPriority', 'users||1');
+    await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+    failures.add({
+      at: `${Date.now() - TEST_INITIAL_TIME}ms`,
+      itemError: env.getItemQueryState('users||1')?.error?.message ?? null,
+      healthChecks: health.check.mock.calls.length,
+    });
+  }
+
+  // -- 1st failure: the health check answers "up" and starts the window --
+  failures.addMark('1st failure asks the health check');
+  await failUser1Fetch('internal error #1');
+
+  // -- The same endpoint keeps failing inside the 30s window --
+  failures.addMark('failures inside the window reuse the "up" answer');
+  await advanceTime(10_000);
+  await failUser1Fetch('internal error #2');
+  await advanceTime(10_000);
+  await failUser1Fetch('internal error #3');
+
+  // -- The window is over: the next failure asks again --
+  failures.addMark('the window is over: the next failure asks again');
+  await advanceTime(10_000);
+  await failUser1Fetch('internal error #4');
+
+  // Each failure shows its own error, the session never goes offline, and
+  // the three failures of the window cost a single health check.
+  expect(failures.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> 1st failure asks the health check
+
+    -> at: 150ms ⋅ itemError: internal error #1 ⋅ healthChecks: 1
+
+    >>> failures inside the window reuse the "up" answer
+
+    -> at: 10300ms ⋅ itemError: internal error #2 ⋅ healthChecks: 1
+    -> at: 20450ms ⋅ itemError: internal error #3 ⋅ healthChecks: 1
+
+    >>> the window is over: the next failure asks again
+
+    -> at: 30600ms ⋅ itemError: internal error #4 ⋅ healthChecks: 2
+    "
+  `);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+});
+
+test('a reused "up" never decides recovery: entering outage mode drops it and recovery checks always ask the health endpoint', async () => {
+  const sessionKey = 'health-check-reuse-up-recovery-session';
+  const health = createHealthCheckMock();
+  const env = createOfflineUsersEnv(sessionKey, {
+    // The app recognizes a 503 as an outage from the error alone and defers
+    // every other failure to the health check.
+    classifyFailure: (error) =>
+      error instanceof Error && error.message === 'service unavailable'
+        ? 'outage'
+        : 'unknown',
+    healthCheck: { check: health.check, reuseUpForFailuresMs: 30_000 },
+    outage: { enabled: true, recoveryProbe: healthRecoveryProbe },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  async function failItemFetch(itemId: string, error: string) {
+    env.serverTable.setNextFetchError(itemId, error);
+    env.scheduleItemFetch('highPriority', itemId);
+    await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+  }
+
+  // -- A failure while the backend is up: the reuse window starts --
+  session.log.addMark('a failure is answered "up"');
+  await failItemFetch('users||1', 'internal error');
+  expect(health.check).toHaveBeenCalledTimes(1);
+
+  // -- A moment later the backend goes down and a request reports it --
+  session.log.addMark('a 503 puts the session in outage mode');
+  health.setBackend('outage');
+  await failItemFetch('users||2', 'service unavailable');
+  // `classifyFailure` answered on its own: no health request.
+  expect(health.check).toHaveBeenCalledTimes(1);
+
+  // -- The recovery check runs 1s after the "up", well inside its 30s --
+  session.log.addMark('recovery check 1s after the "up"');
+  await advanceTime(
+    healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+  );
+
+  // Entering outage mode dropped the "up" from a second ago, so the recovery
+  // check had nothing to reuse: it asked the health endpoint, and the outage
+  // is still active.
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(getGlobalOfflineStatusSummary(sessionKey).outage)
+    .toMatchInlineSnapshot(`
+      active: '✅'
+      enabled: '✅'
+    `);
+
+  // -- The backend comes back: the next recovery check ends the outage --
+  session.log.addMark('the backend is back');
+  health.setBackend('up');
+  await advanceTime(
+    healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+  );
+  expect(health.check).toHaveBeenCalledTimes(3);
+
+  // -- A failure right after recovering --
+  session.log.addMark('a failure right after recovering asks again');
+  await failItemFetch('users||1', 'internal error');
+
+  // The window ended when the session entered outage mode, and the
+  // recovery check's "up" does not start a new one: the failure asks.
+  expect(health.check).toHaveBeenCalledTimes(4);
+
+  // -- That answer starts a new window for the next failures --
+  session.log.addMark('the next failure reuses that answer');
+  await failItemFetch('users||3', 'internal error');
+  expect(health.check).toHaveBeenCalledTimes(4);
+  // The failures answered "up" show their own error; users||2 failed during
+  // the outage and shows the offline error.
+  expect(getUsersErrors(env)).toMatchInlineSnapshot(`
+    items: ['internal error', 'Offline', 'internal error']
+    list: null
+  `);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+
+    >>> a failure is answered "up"
+
+    >>> a 503 puts the session in outage mode
+
+    -> at: 160ms ⋅ session: offline (outage) ⋅ healthChecks: 1
+
+    >>> recovery check 1s after the "up"
+
+    -> at: 1260ms ⋅ session: offline (outage) ⋅ healthChecks: 2
+
+    >>> the backend is back
+
+    -> at: 2360ms ⋅ session: online ⋅ healthChecks: 3
+
+    >>> a failure right after recovering asks again
+
+    >>> the next failure reuses that answer
     "
   `);
 

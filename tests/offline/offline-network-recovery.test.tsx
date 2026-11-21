@@ -18,6 +18,7 @@ import {
   createOfflineUsersEnv,
   healthRecoveryProbe,
   trackOfflineSession,
+  userItemIds,
 } from './offlineHealthCheckTestShared';
 import { userRowSchema } from './offlineReplayTestShared';
 import {
@@ -810,8 +811,6 @@ test('fetches attempted while a recovery check is in flight do not multiply the 
 // cannot be reached from this device.
 // ---------------------------------------------------------------------------
 
-const userItemIds = ['users||1', 'users||2', 'users||3'];
-
 test('a burst of requests failing while the backend is unreachable costs one health check, enters network mode and recovers through the same check', async () => {
   const sessionKey = 'health-check-unreachable-session';
   const health = createHealthCheckMock();
@@ -898,6 +897,68 @@ test('a burst of requests failing while the backend is unreachable costs one hea
     >>> 2nd recovery check: reachable again
 
     -> at: 2310ms ⋅ session: online ⋅ healthChecks: 3
+    "
+  `);
+
+  session.unmount();
+});
+
+test('a reused "up" answer is dropped when the browser goes offline, so the first failure after reconnecting asks the health check again', async () => {
+  const sessionKey = 'health-check-reuse-up-network-session';
+  const health = createHealthCheckMock();
+  const env = createOfflineUsersEnv(sessionKey, {
+    healthCheck: { check: health.check, reuseUpForFailuresMs: 30_000 },
+    network: { ...network.config, recoveryProbe: healthRecoveryProbe },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  async function failUser1Fetch(error: string) {
+    env.serverTable.setNextFetchError('users||1', error);
+    env.scheduleItemFetch('highPriority', 'users||1');
+    await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+  }
+
+  // -- An endpoint fails twice while the backend is up --
+  session.log.addMark('two failures while the backend is up');
+  await failUser1Fetch('internal error');
+  await failUser1Fetch('internal error');
+
+  // The second failure reused the "up" of the first one.
+  expect(health.check).toHaveBeenCalledTimes(1);
+
+  // -- The browser loses the connection for a few seconds --
+  session.log.addMark('the browser is offline for 2s');
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(2_000);
+  act(() => {
+    network.goOnline();
+  });
+
+  // -- Reconnected, but the backend is not reachable from here yet --
+  session.log.addMark('a failure after reconnecting');
+  health.setBackend('unreachable');
+  await failUser1Fetch('failed to fetch');
+
+  // Still inside the 30s of the old "up", but going offline dropped it: the
+  // failure asked the health check, which found the backend unreachable.
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(env.getItemQueryState('users||1')?.error?.message).toBe('Offline');
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+
+    >>> two failures while the backend is up
+
+    >>> the browser is offline for 2s
+
+    -> at: 300ms ⋅ session: offline (network) ⋅ healthChecks: 1
+    -> at: 2300ms ⋅ session: online ⋅ healthChecks: 1
+
+    >>> a failure after reconnecting
+
+    -> at: 2410ms ⋅ session: offline (network) ⋅ healthChecks: 2
     "
   `);
 

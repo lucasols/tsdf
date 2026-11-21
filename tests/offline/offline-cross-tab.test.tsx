@@ -1,15 +1,17 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type {
   CollectionOfflineOperationDefinition,
   DocumentOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
   PersistentStorageSchema,
   ValidPayload,
 } from '../../src/main';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { createOfflineNetworkMock } from '../../src/testing';
+import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
@@ -624,6 +626,15 @@ type CreateUserWithIdOperations = {
   >;
 };
 
+/** Deletes a user. A user created offline is created and then deleted. */
+type DeleteUserOperations = {
+  deleteUser: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { id: string }
+  >;
+};
+
 async function openUsersTab(
   name: string,
   options: {
@@ -651,7 +662,10 @@ async function openUsersTab(
   });
   const env = createCollectionStoreTestEnv<
     { name: string },
-    CreateUserOperations & RenameUserOperations & CreateUserWithIdOperations
+    CreateUserOperations &
+      RenameUserOperations &
+      CreateUserWithIdOperations &
+      DeleteUserOperations
   >(
     Object.fromEntries(
       (options.loadedUsers ?? []).map((payload) => [
@@ -735,6 +749,18 @@ async function openUsersTab(
                 });
               },
             },
+            deleteUser: {
+              inputSchema: rc_object({ id: rc_string }),
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.id],
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent delete ${input.id}`);
+                await env.serverTable.delayedRemoveItem(input.id);
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.deleteItemState(input.id);
+              },
+            },
           },
         },
       },
@@ -753,6 +779,27 @@ async function openUsersTab(
     reconciledUsers,
     getUserName(payload: string) {
       return env.apiStore.getItemState(payload)?.data?.value.name ?? null;
+    },
+    /** What code holding a user's temp id resolves it to in this tab. */
+    resolveTempItemPayload(payload: string) {
+      return env.apiStore.resolveTempItemPayload(payload);
+    },
+    /**
+     * The name a screen of this tab renders for the user, with the changes
+     * still waiting to be sent applied (`null` for a deleted user). The
+     * screen does not fetch on its own.
+     */
+    async renderUserName(payload: string) {
+      const screen = renderHook(() =>
+        env.apiStore.useItem(payload, {
+          disableRefetches: true,
+          disableRefetchOnMount: true,
+        }),
+      );
+      await advanceTime(10);
+      const userName = screen.result.current.data?.value.name ?? null;
+      screen.unmount();
+      return userName;
     },
     /**
      * Whether the user is marked for a refetch: set when the store is
@@ -793,6 +840,19 @@ async function openUsersTab(
       });
       await advanceTime(10);
     },
+    /** Deletes a user offline, removing it from the screen right away. */
+    async queueDelete(payload: string) {
+      await env.apiStore.performMutation(payload, {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState(payload);
+        },
+        mutation: async () => {
+          await env.serverTable.delayedRemoveItem(payload);
+        },
+        offline: { operation: 'deleteUser', input: { id: payload } },
+      });
+      await advanceTime(10);
+    },
     /**
      * Creates a user offline under an id generated in this tab, showing it
      * right away.
@@ -827,6 +887,16 @@ async function openUsersTab(
 
 const usersListQuery = { tableId: 'users' } as const;
 
+/** Deletes a user. A user created offline is created and then deleted. */
+type DeleteListQueryUserOperations = {
+  deleteUser: ListQueryOfflineOperationDefinition<
+    { id: number; name: string },
+    ListQueryParams,
+    string,
+    { id: string }
+  >;
+};
+
 /**
  * Opens a simulated tab (see `openTab`) with a users list-query store whose
  * offline `createUser` operation lists the new user under a temp id
@@ -858,7 +928,7 @@ async function openUsersListTab(
     { id: number; name: string },
     false,
     false,
-    CreateListQueryUserOperations
+    CreateListQueryUserOperations & DeleteListQueryUserOperations
   >(
     {},
     {
@@ -894,15 +964,73 @@ async function openUsersListTab(
                 return result;
               },
             },
+            deleteUser: {
+              inputSchema: rc_object({ id: rc_string }),
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.id],
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent delete ${input.id}`);
+                await env.serverTable.delayedRemoveItem(input.id);
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.deleteItemState(input.id);
+              },
+            },
           },
         },
       },
     },
   );
 
+  const reconciledUsers: string[] = [];
+  const seenByReconciledListeners: {
+    listRows: string[];
+    resolvedTempId: string;
+  }[] = [];
+  env.apiStore.storeEvents.on('tempEntityReconciled', ({ payload }) => {
+    reconciledUsers.push(`${payload.tempId} -> ${payload.finalPayload}`);
+    seenByReconciledListeners.push({
+      listRows: tab.getListRows(),
+      resolvedTempId: tab.resolveTempItemPayload(payload.tempId),
+    });
+  });
+
   const tab = {
     name,
     storeManager,
+    /** `tempEntityReconciled` events this tab's store emitted, in order. */
+    reconciledUsers,
+    /**
+     * What a `tempEntityReconciled` listener of this tab read from the store
+     * when it was called: the rows of the users list and what the temp id of
+     * the event resolved to.
+     */
+    seenByReconciledListeners,
+    /** The user stored under `payload` in this tab, if any. */
+    getUser(payload: string) {
+      return env.apiStore.getItemState(payload);
+    },
+    /** What code holding a user's temp id resolves it to in this tab. */
+    resolveTempItemPayload(payload: string) {
+      return env.apiStore.resolveTempItemPayload(payload);
+    },
+    /**
+     * The name a screen of this tab renders for the user, with the changes
+     * still waiting to be sent applied (`null` for a deleted user). The
+     * screen does not fetch on its own.
+     */
+    async renderUserName(payload: string) {
+      const screen = renderHook(() =>
+        env.apiStore.useItem(payload, {
+          disableRefetches: true,
+          disableRefetchOnMount: true,
+        }),
+      );
+      await advanceTime(10);
+      const userName = screen.result.current.data?.name ?? null;
+      screen.unmount();
+      return userName;
+    },
     /** The rows the users list shows, like `Ada (temp id)`. */
     getListRows() {
       const query = env.apiStore.getQueryState(usersListQuery);
@@ -932,6 +1060,19 @@ async function openUsersListTab(
           return result;
         },
         offline: { operation: 'createUser', input: { name: userName } },
+      });
+      await advanceTime(10);
+    },
+    /** Deletes a user offline, removing it from the list right away. */
+    async queueDelete(payload: string) {
+      await env.apiStore.performMutation(payload, {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState(payload);
+        },
+        mutation: async () => {
+          await env.serverTable.delayedRemoveItem(payload);
+        },
+        offline: { operation: 'deleteUser', input: { id: payload } },
       });
       await advanceTime(10);
     },
@@ -1749,6 +1890,74 @@ test('a user created offline stays in the list of its tab when a tab on another 
   `);
 });
 
+test('a user created and then deleted offline stays deleted in the tab that did it while another tab sends both changes', async () => {
+  network.setOffline();
+  await openUsersTab('A', { focused: true });
+  const tabB = await openUsersTab('B', { focused: false });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+
+  // While offline the user creates Ada in tab B and then deletes her there.
+  await tabB.queueCreate('Ada');
+  await tabB.queueDelete('temp:Ada');
+  expect(await tabB.renderUserName('temp:Ada')).toBeNull();
+
+  // On reconnect tab A sends the creation and then the deletion. This is
+  // right before the deletion is saved: the server holds Ada.
+  network.goOnline();
+  await advanceTime(2_200);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A sent create Ada', 'tab A sent delete users||Ada']`,
+  );
+  expect(sharedUsersServer.items.has('users||Ada')).toBe(true);
+
+  // A screen of tab B that resolves the temp id it holds still renders Ada
+  // as deleted: the deletion tab B queued follows her to her final id.
+  const adaInTabB = tabB.resolveTempItemPayload('temp:Ada');
+  expect(adaInTabB).toBe('users||Ada');
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
+
+  // Once the deletion is saved Ada is gone from the server and stays
+  // deleted in tab B
+  await advanceTime(3_000);
+  expect(sharedUsersServer.items.has('users||Ada')).toBe(false);
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
+});
+
+test('a listed user created and then deleted offline stays deleted in the tab that did it while another tab sends both changes', async () => {
+  network.setOffline();
+  await openUsersListTab('A', { focused: true, listOpen: true });
+  const tabB = await openUsersListTab('B', { focused: false, listOpen: true });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+
+  // While offline the user creates Ada in tab B and then deletes her there.
+  await tabB.queueCreate('Ada');
+  await tabB.queueDelete('temp:Ada');
+  expect(await tabB.renderUserName('temp:Ada')).toBeNull();
+
+  // On reconnect tab A sends the creation and then the deletion. This is
+  // right before the deletion is saved: the server holds Ada.
+  network.goOnline();
+  await advanceTime(2_200);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A sent create Ada', 'tab A sent delete users||2']`,
+  );
+  expect(sharedUserRowsServer.items.has('users||2')).toBe(true);
+
+  // A screen of tab B that resolves the temp id it holds still renders Ada
+  // as deleted: the deletion tab B queued follows her to her final id.
+  const adaInTabB = tabB.resolveTempItemPayload('temp:Ada');
+  expect(adaInTabB).toBe('users||2');
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
+
+  // Once the deletion is saved Ada is gone from the server and stays
+  // deleted in tab B
+  await advanceTime(3_000);
+  expect(sharedUserRowsServer.items.has('users||2')).toBe(false);
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
+});
+
 test('"+1" clicks queued at the same moment in two tabs all reach the server', async () => {
   network.setOffline();
   const tabA = await openTab('A', { focused: true });
@@ -2043,4 +2252,217 @@ test('discarding a user created offline with a client-generated id removes it fr
       leader: '❌'
       resolutions: []
   `);
+});
+
+describe('a record created offline is saved while several tabs are open', () => {
+  test('a user created offline in one tab keeps its row in the other tab once it is saved, and both tabs learn the final id', async () => {
+    network.setOffline();
+    const tabA = await openUsersListTab('A', { focused: true, listOpen: true });
+    const tabB = await openUsersListTab('B', {
+      focused: false,
+      listOpen: true,
+    });
+    // Tab A keeps the focus and leads
+    setDocumentHidden(false);
+
+    // While offline the user adds Ada from the users list in tab A. Tab B
+    // shows the new row too, and the user opens Ada's page there: it only
+    // knows her temp id.
+    await tabA.queueCreate('Ada');
+    expect({
+      tabA: tabA.getListRows(),
+      tabB: tabB.getListRows(),
+      tabBOpenPage: tabB.getUser('temp:Ada'),
+    }).toMatchInlineSnapshot(`
+      tabA: ['Grace (id 1)', 'Ada (temp id)']
+      tabB: ['Grace (id 1)', 'Ada (temp id)']
+      tabBOpenPage: { id: -1, name: 'Ada' }
+    `);
+
+    // Back online: tab A sends the creation and the server assigns `users||2`
+    network.goOnline();
+    await advanceTime(3_000);
+    expect(serverCalls).toMatchInlineSnapshot(`['tab A sent create Ada']`);
+
+    // Both tabs replaced the temp row with the final one, in the same
+    // position of the list
+    expect({ tabA: tabA.getListRows(), tabB: tabB.getListRows() })
+      .toMatchInlineSnapshot(`
+        tabA: ['Grace (id 1)', 'Ada (id 2)']
+        tabB: ['Grace (id 1)', 'Ada (id 2)']
+      `);
+    expect({
+      tabA: { temp: tabA.getUser('temp:Ada'), final: tabA.getUser('users||2') },
+      tabB: { temp: tabB.getUser('temp:Ada'), final: tabB.getUser('users||2') },
+    }).toMatchInlineSnapshot(`
+      tabA:
+        final: { id: 2, name: 'Ada' }
+        temp: null
+
+      tabB:
+        final: { id: 2, name: 'Ada' }
+        temp: null
+    `);
+
+    // Both tabs are told which final id replaced the temp one, so the page
+    // open on Ada in tab B can follow her...
+    expect({ tabA: tabA.reconciledUsers, tabB: tabB.reconciledUsers })
+      .toMatchInlineSnapshot(`
+        tabA: ['temp:Ada -> users||2']
+        tabB: ['temp:Ada -> users||2']
+      `);
+    // ...and code that still holds the temp id later can resolve it
+    expect({
+      tabA: tabA.resolveTempItemPayload('temp:Ada'),
+      tabB: tabB.resolveTempItemPayload('temp:Ada'),
+      unknown: tabB.resolveTempItemPayload('temp:Unknown'),
+    }).toMatchInlineSnapshot(`
+      tabA: 'users||2'
+      tabB: 'users||2'
+      unknown: 'temp:Unknown'
+    `);
+
+    // The listeners were called with the store already updated, in the tab
+    // that sent the creation too: the list shows the saved row and the temp
+    // id already resolves to the final one
+    expect({
+      tabA: tabA.seenByReconciledListeners,
+      tabB: tabB.seenByReconciledListeners,
+    }).toMatchInlineSnapshot(`
+      tabA:
+        - listRows: ['Grace (id 1)', 'Ada (id 2)']
+          resolvedTempId: 'users||2'
+      tabB:
+        - listRows: ['Grace (id 1)', 'Ada (id 2)']
+          resolvedTempId: 'users||2'
+    `);
+  });
+
+  test('a tab that does not show the users list still learns the final id of a user created offline', async () => {
+    network.setOffline();
+    const tabA = await openUsersListTab('A', { focused: true, listOpen: true });
+    // Tab B is on another screen: for example it only holds the temp id in a
+    // link to the user's page
+    const tabB = await openUsersListTab('B', {
+      focused: false,
+      listOpen: false,
+    });
+    setDocumentHidden(false);
+
+    await tabA.queueCreate('Ada');
+    network.goOnline();
+    await advanceTime(3_000);
+
+    expect({
+      reconciled: tabB.reconciledUsers,
+      resolved: tabB.resolveTempItemPayload('temp:Ada'),
+      // The saved user reaches every tab through the store's tab sync
+      final: tabB.getUser('users||2'),
+    }).toMatchInlineSnapshot(`
+      final: { id: 2, name: 'Ada' }
+      reconciled: ['temp:Ada -> users||2']
+      resolved: 'users||2'
+    `);
+  });
+
+  test('a user created offline in one tab and sent by a tab opened later keeps her place in the list of the tab that created her', async () => {
+    network.setOffline();
+    const creator = await openUsersListTab('creator', {
+      focused: true,
+      listOpen: true,
+    });
+
+    await creator.queueCreate('Ada');
+
+    // The user opens the app in another tab while still offline. It starts
+    // with the creation waiting to be sent and, being the focused tab, it is
+    // the one that sends it once the connection is back. It has no list
+    // mounted: only the tab that created Ada shows her.
+    const late = await openUsersListTab('late', {
+      focused: true,
+      listOpen: false,
+    });
+    network.goOnline();
+
+    // Stop right after the creation is saved, before the lists are fetched
+    // again: the row is moved by the reconciliation, not by a refetch
+    for (let step = 0; step < 50 && serverCalls.length === 0; step++) {
+      await advanceTime(100);
+    }
+    await advanceTime(1_300);
+    expect(serverCalls).toMatchInlineSnapshot(`['tab late sent create Ada']`);
+
+    // The saved user took the place of the temp row
+    expect({
+      list: creator.getListRows(),
+      temp: creator.getUser('temp:Ada'),
+      final: creator.getUser('users||2'),
+    }).toMatchInlineSnapshot(`
+      final: { id: 2, name: 'Ada' }
+      list: ['Grace (id 1)', 'Ada (id 2)']
+      temp: null
+    `);
+    expect({ creator: creator.reconciledUsers, late: late.reconciledUsers })
+      .toMatchInlineSnapshot(`
+        creator: ['temp:Ada -> users||2']
+        late: ['temp:Ada -> users||2']
+      `);
+    expect(creator.resolveTempItemPayload('temp:Ada')).toMatchInlineSnapshot(
+      `"users||2"`,
+    );
+
+    // The list fetched again after the replay keeps her there
+    await advanceTime(5_000);
+    expect(creator.getListRows()).toMatchInlineSnapshot(
+      `['Grace (id 1)', 'Ada (id 2)']`,
+    );
+  });
+
+  test('a user created offline in one tab is replaced by the saved user in the other tab, and both tabs learn the final id', async () => {
+    network.setOffline();
+    const tabA = await openUsersTab('A', { focused: true });
+    const tabB = await openUsersTab('B', { focused: false });
+    // Tab A keeps the focus and leads
+    setDocumentHidden(false);
+
+    // While offline the user creates Ada in tab A. Tab B gets her too.
+    await tabA.queueCreate('Ada');
+    expect({
+      tabA: tabA.getUserName('temp:Ada'),
+      tabB: tabB.getUserName('temp:Ada'),
+    }).toMatchInlineSnapshot(`
+      tabA: 'Ada'
+      tabB: 'Ada'
+    `);
+
+    network.goOnline();
+    await advanceTime(3_000);
+    expect(serverCalls).toMatchInlineSnapshot(`['tab A sent create Ada']`);
+
+    expect({
+      tabA: {
+        temp: tabA.getUserName('temp:Ada'),
+        final: tabA.getUserName('users||Ada'),
+      },
+      tabB: {
+        temp: tabB.getUserName('temp:Ada'),
+        final: tabB.getUserName('users||Ada'),
+      },
+    }).toMatchInlineSnapshot(`
+      tabA: { final: 'Ada', temp: null }
+      tabB: { final: 'Ada', temp: null }
+    `);
+    expect({ tabA: tabA.reconciledUsers, tabB: tabB.reconciledUsers })
+      .toMatchInlineSnapshot(`
+        tabA: ['temp:Ada -> users||Ada']
+        tabB: ['temp:Ada -> users||Ada']
+      `);
+    expect({
+      tabA: tabA.resolveTempItemPayload('temp:Ada'),
+      tabB: tabB.resolveTempItemPayload('temp:Ada'),
+    }).toMatchInlineSnapshot(`
+      tabA: 'users||Ada'
+      tabB: 'users||Ada'
+    `);
+  });
 });
