@@ -1303,8 +1303,8 @@ export function createOfflineStoreController<
       onOfflineCycle: () => {
         resetReplayRetryState();
       },
-      onTempEntitiesCancelled: hasCancelledWithOperations
-        ? discardWorkCancelledWithExternalTempEntities
+      onEntitiesCancelled: hasCancelledWithOperations
+        ? discardWorkCancelledWithExternalEntities
         : undefined,
       findCreationResolutionId,
       hasQueuedCreation,
@@ -3586,7 +3586,7 @@ export function createOfflineStoreController<
     ]);
 
     if (cancelledEntityKeys.size > 0) {
-      await current.session.notifyTempEntitiesCancelled(
+      await current.session.notifyEntitiesCancelled(
         storeName,
         cancelledEntityKeys,
         getEntityKeyOfPayload,
@@ -3606,7 +3606,7 @@ export function createOfflineStoreController<
    * A `kind: 'delete'` operation of this store succeeded: the other stores of
    * the session drop their work declared `cancelledWith` one of the entities
    * it references (`getEntityRefs`), as for a cancelled creation (see
-   * `discardWorkCancelledWithExternalTempEntities`). Only the stores attached
+   * `discardWorkCancelledWithExternalEntities`). Only the stores attached
    * in this tab are notified.
    *
    * An entity this store still has a creation for, queued or waiting for a
@@ -3635,7 +3635,7 @@ export function createOfflineStoreController<
     }
     if (deletedEntityKeys.size === 0) return;
 
-    await current.session.notifyTempEntitiesCancelled(
+    await current.session.notifyEntitiesCancelled(
       storeName,
       deletedEntityKeys,
       getEntityKeyOfPayload,
@@ -3653,7 +3653,7 @@ export function createOfflineStoreController<
    * the work of this store declared as `cancelledWith` one of them, with its
    * own temp lifecycles.
    */
-  async function discardWorkCancelledWithExternalTempEntities(
+  async function discardWorkCancelledWithExternalEntities(
     sourceStoreName: string,
     cancelledEntityKeys: ReadonlySet<string>,
     getSourceEntityKey: (entityRef: ValidPayload) => string | undefined,
@@ -5228,15 +5228,19 @@ export function createOfflineStoreController<
             : prepared,
         ),
       handleDirectSuccess: async () => {
+        // Before the offline status is cleared, which resumes the replay, so
+        // that the other stores drop their work for the deleted entities
+        // before sending it.
+        if (prepared.operation.kind === 'delete') {
+          const successCurrent = ensureActiveSession();
+          if (successCurrent?.sessionKey === prepared.currentSessionKey) {
+            await notifyEntitiesDeleted(
+              successCurrent,
+              getPreparedEntityRefs(prepared),
+            );
+          }
+        }
         await clearOfflineStatusOnSuccess(prepared.currentSessionKey);
-        if (prepared.operation.kind !== 'delete') return;
-
-        const successCurrent = ensureActiveSession();
-        if (successCurrent?.sessionKey !== prepared.currentSessionKey) return;
-        await notifyEntitiesDeleted(
-          successCurrent,
-          getPreparedEntityRefs(prepared),
-        );
       },
       classifyError: async (error) => {
         const preparedCurrent = ensureActiveSession();

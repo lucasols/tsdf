@@ -3,7 +3,9 @@ import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { describe, expect, test } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { normalizeError } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -18,7 +20,10 @@ import {
   tasksQuery,
 } from './offlineCancelUnsentCreationShared';
 import { getSortedSessionQueueSummary } from './offlineReplayTestShared';
-import { summarizeResolution } from './offlineTestShared';
+import {
+  classifyRetryableReplayFailure,
+  summarizeResolution,
+} from './offlineTestShared';
 
 setupCancelUnsentCreationTests();
 
@@ -55,10 +60,10 @@ type NotesEnv = ReturnType<
 function createTasksAndNotesEnv(
   sessionKey: string,
   tasksOptions?: TasksEnvOptions,
+  storeManager = createStoreManagerForSession(sessionKey),
 ) {
   const tasksStoreName = `${sessionKey}-tasks`;
   const notesStoreName = `${sessionKey}-notes`;
-  const storeManager = createStoreManagerForSession(sessionKey);
   const tasks = createTasksEnv(
     sessionKey,
     tasksStoreName,
@@ -659,6 +664,112 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
       .     | tasks||1: Outline and budget | Write report, Review budget | [notes] ui-changed
       4.01s | tasks||1: Outline and budget | Write report, Review budget | -- back online: the notes save fails once and waits to be sent again
       .     | tasks||1: Outline and budget | Write report, Review budget | -- the user deletes task 1 online
+      .     | tasks||1: Outline and budget | Review budget               | [tasks] ui-changed
+      .     | tasks||1: Outline and budget | Review budget               | [tasks||1] >delete-item-started (value: {"id":1,"name":"Write report"})
+      4.85s | tasks||1: Outline and budget | Review budget               | [tasks||1] <delete-item-persisted (value: {"id":1,"name":"Write report"})
+      5.22s | tasks||1: Outline and budget | Review budget               | 🔴 >list-fetch-started
+      6.02s | tasks||1: Outline and budget | Review budget               | 🔴 <list-fetch-finished (value: {"count":1})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('a delete sent during a server outage that ends it drops the notes queued for the task before they are sent again', async () => {
+    const sessionKey = 'outage-recovery-delete-drops-notes';
+    let isServerDown = false;
+    // An app that does not queue new changes while the server is down: they
+    // are sent right away, and fail while the outage lasts.
+    const storeManager = createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        network: network.config,
+        classifyFailure: (error) =>
+          error instanceof Error && error.message === 'server error'
+            ? 'outage'
+            : 'ignore',
+        // The server is asked again 30s after the outage was detected.
+        outage: { enabled: true, recoveryCheck: () => !isServerDown },
+        mutationQueueing: { outage: 'disallow' },
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+      },
+    });
+
+    network.setOffline();
+    const env = createTasksAndNotesEnv(sessionKey, undefined, storeManager);
+    const list = env.renderTasksAndNotes();
+    await flushAllTimers();
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline: edit the notes of task 1',
+    ]);
+    await env.saveNotes('tasks||1', 'Outline and budget');
+
+    // Back online the server is down: the notes save fails and stays queued
+    // until the outage ends.
+    isServerDown = true;
+    env.notesFaults.push('server-error');
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'back online, but the server is down: the notes save stays queued',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(1_000);
+    expect(storeManager.getOfflineStatus().outage.active).toMatchInlineSnapshot(
+      `"✅"`,
+    );
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { taskId: 'tasks||1', text: 'Outline and budget' }
+        operation: 'saveNotes'
+    `);
+
+    // The server comes back before it is asked again, and the user deletes
+    // the task: the delete is sent right away and its success ends the
+    // outage, which resumes the replay of the queue.
+    isServerDown = false;
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'the server is back: the user deletes task 1',
+    ]);
+    let directDelete = Promise.resolve<unknown>(null);
+    act(() => {
+      directDelete = env.tasks.apiStore.performMutation('tasks||1', {
+        optimisticUpdate: () => {
+          env.tasks.apiStore.deleteItemState('tasks||1');
+        },
+        mutation: () => {
+          env.tasks.sentRequests.push('deleteTask tasks||1');
+          return env.tasks.serverTable.deleteItem('tasks||1');
+        },
+        offline: { operation: 'deleteTask', input: { itemId: 'tasks||1' } },
+      });
+    });
+    await resolveAfterAllTimers(directDelete);
+    await flushAllTimers();
+
+    // The only notes request is the one that failed during the outage: the
+    // queued notes are dropped before the replay resumes, instead of being
+    // sent for a task the server no longer has.
+    expect(env.getSentRequests()).toMatchInlineSnapshot(
+      `['deleteTask tasks||1', 'saveNotes tasks||1 "Outline and budget"']`,
+    );
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.notes.apiStore.getOfflineResolutions().map(summarizeResolution),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(storeManager.getOfflineStatus().outage.active).toMatchInlineSnapshot(
+      `"❌"`,
+    );
+    expect(env.tasks.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | notes                        | tasks                       |
+      0     | tasks||1: Outline            | Write report, Review budget | [tasks, notes] ui-initialized
+      3.01s | tasks||1: Outline            | Write report, Review budget | -- offline: edit the notes of task 1
+      .     | tasks||1: Outline and budget | Write report, Review budget | [notes] ui-changed
+      4.01s | tasks||1: Outline and budget | Write report, Review budget | -- back online, but the server is down: the notes save stays queued
+      .     | tasks||1: Outline and budget | Write report, Review budget | -- the server is back: the user deletes task 1
       .     | tasks||1: Outline and budget | Review budget               | [tasks] ui-changed
       .     | tasks||1: Outline and budget | Review budget               | [tasks||1] >delete-item-started (value: {"id":1,"name":"Write report"})
       4.85s | tasks||1: Outline and budget | Review budget               | [tasks||1] <delete-item-persisted (value: {"id":1,"name":"Write report"})

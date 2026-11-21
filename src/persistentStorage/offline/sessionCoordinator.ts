@@ -257,7 +257,7 @@ type SessionRegistration = {
    * same way.
    * Only registered by stores with `cancelledWith` operations.
    */
-  onTempEntitiesCancelled?: (
+  onEntitiesCancelled?: (
     sourceStoreName: string,
     cancelledEntityKeys: ReadonlySet<string>,
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
@@ -1410,7 +1410,7 @@ class SessionOfflineCoordinator {
    * the server (cancelled or discarded creations), or no longer exist there
    * (successful deletes). Only reaches the stores attached in this tab.
    */
-  async notifyTempEntitiesCancelled(
+  async notifyEntitiesCancelled(
     sourceStoreName: string,
     cancelledEntityKeys: ReadonlySet<string>,
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
@@ -1420,13 +1420,13 @@ class SessionOfflineCoordinator {
     for (const registration of this.#registrations.values()) {
       if (
         registration.storeName === sourceStoreName ||
-        !registration.onTempEntitiesCancelled
+        !registration.onEntitiesCancelled
       ) {
         continue;
       }
 
       pendingCleanups.push(
-        registration.onTempEntitiesCancelled(
+        registration.onEntitiesCancelled(
           sourceStoreName,
           cancelledEntityKeys,
           getEntityKey,
