@@ -545,6 +545,7 @@ await storeManager.setForcedOfflineMode(false);
 ```
 
 - While forced, the session's network detection reports offline regardless of `navigator.onLine` / `network.getIsOffline`: fetches are served from cache, offline-enabled mutations are queued, and neither replay nor recovery checks run. Successful requests and browser `online` events cannot end it.
+- Only the offline session goes offline: the real connection stays up, so requests that do not go through the session still reach the server and succeed. That includes fetches of stores without `persistentStorage.offline`, mutations without an `offline` descriptor, offline-enabled mutations while `mutationQueueing.network` is `'disallow'`, and the app's own requests. Cut the connection (e.g. Playwright's `context.setOffline(true)`) to test how those fail.
 - The flag is persisted per session key in `localStorage` and read synchronously when the session boots, so it survives reloads and the first fetches after a reload are already offline. It stays on until it is turned off.
 - It is shared with the other tabs of the same session: open tabs follow the toggle, tabs opened later boot with it.
 - Turning it off hands control back to the real network detection. If the network is up, the session recovers and replays queued work exactly like a normal reconnect; if the detection (`navigator.onLine` / `network.getIsOffline`) still reports offline, the session stays offline.

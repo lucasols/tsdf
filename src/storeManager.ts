@@ -121,6 +121,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * `false` hands control back to the real detection, which recovers and
    * replays like a normal reconnect.
    *
+   * Only the offline session goes offline: requests that do not go through it
+   * (stores without offline support, mutations without an `offline`
+   * descriptor or with network queueing disallowed, the app's own requests)
+   * still reach the server.
+   *
    * The flag is persisted per session key in `localStorage`, read
    * synchronously at boot (the first fetches after a reload are already
    * offline) and shared with the other tabs of the session. It stays on until
