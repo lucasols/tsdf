@@ -1,7 +1,10 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
-import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
+import {
+  offlineConnectivityError,
+  type OfflineAwareFetchController,
+} from '../persistentStorage/offline/fetchRuntime';
 import { isOfflineStoreError } from '../persistentStorage/offline/offlineStoreError.typeGuards';
 import {
   BatchRequest,
@@ -31,6 +34,7 @@ import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
   getFallbackMissingRequestedFields,
+  getGenuinelyMissingRequestedFields,
   getStaleOrMissingRequestedFields,
   snapshotIsFullyLoaded,
 } from './itemFieldUtils';
@@ -1180,6 +1184,51 @@ export function createFetchApi<
     return getUnresolvedPendingInvalidationFields(itemKey).length === 0;
   }
 
+  /**
+   * Whether a settled read cannot be answered from the cache while offline:
+   * the fetch for the requested fields was not sent, so a cached item still
+   * lacks some of them. Same rule as the hooks: stale is not missing, so
+   * invalidated fields whose (stale) data is still present count as cached.
+   * The O(1) offline check runs first, so online reads and stores without an
+   * offline session never scan the items.
+   */
+  function isMissingRequestedFieldsOffline(
+    itemKeys: readonly string[],
+    fields: string[] | undefined,
+  ): boolean {
+    if (!partialResources) return false;
+    if (!offlineController?.shouldTreatFetchAsOffline?.()) return false;
+
+    const { inferFields } = partialResources;
+
+    return itemKeys.some((itemKey) => {
+      const itemState = readItemState(itemKey);
+
+      if (fields === undefined) {
+        // A full invalidation resets `loadedFields` but leaves the marker,
+        // which proves the item still present was complete when invalidated.
+        return (
+          !snapshotIsFullyLoaded(
+            itemState?.loadedFields,
+            itemState?.item,
+            inferFields,
+          ) && !(itemsPendingFullInvalidation.has(itemKey) && itemState?.item)
+        );
+      }
+
+      return (
+        getGenuinelyMissingRequestedFields(
+          itemKey,
+          itemState,
+          fields,
+          inferFields,
+          itemsPendingFullInvalidation,
+          getUnresolvedPendingInvalidationFields(itemKey),
+        ).length > 0
+      );
+    });
+  }
+
   async function awaitListQueryFetch(
     params: QueryPayload,
     options: { size?: number; timeoutMs?: number; fields?: FieldsInput } = {},
@@ -1256,6 +1305,14 @@ export function createFetchApi<
 
     if (!query) {
       return { items: [], error: new NotFoundStoreError(), hasMore: false };
+    }
+
+    if (isMissingRequestedFieldsOffline(query.items, fields)) {
+      return {
+        items: [],
+        error: new StoreFetchError(offlineConnectivityError, 'fetch'),
+        hasMore: query.hasMore,
+      };
     }
 
     return {
@@ -1491,6 +1548,13 @@ export function createFetchApi<
 
     if (!itemQuery || !item) {
       return { data: null, error: new NotFoundStoreError() };
+    }
+
+    if (isMissingRequestedFieldsOffline([itemKey], fields)) {
+      return {
+        data: null,
+        error: new StoreFetchError(offlineConnectivityError, 'fetch'),
+      };
     }
 
     return { data: item, error: null };
