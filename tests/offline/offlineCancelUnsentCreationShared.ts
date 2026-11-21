@@ -633,7 +633,20 @@ export function createTasksEnv(
   };
 }
 
+const commentInputSchema = rc_object({ text: rc_string, taskId: rc_string });
+const commentSchema = rc_object({ value: commentInputSchema });
+const editCommentInputSchema = rc_object({
+  itemId: rc_string,
+  text: rc_string,
+});
+const commentWithIdInputSchema = rc_object({
+  id: rc_string,
+  text: rc_string,
+  taskId: rc_string,
+});
+
 type CommentItem = { text: string; taskId: string };
+
 type CommentsOperations = {
   addComment: CollectionOfflineOperationDefinition<
     { value: CommentItem },
@@ -655,18 +668,6 @@ type CommentsOperations = {
     unknown
   >;
 };
-
-const commentInputSchema = rc_object({ text: rc_string, taskId: rc_string });
-const commentSchema = rc_object({ value: commentInputSchema });
-const editCommentInputSchema = rc_object({
-  itemId: rc_string,
-  text: rc_string,
-});
-const commentWithIdInputSchema = rc_object({
-  id: rc_string,
-  text: rc_string,
-  taskId: rc_string,
-});
 
 type CommentsEnv = ReturnType<
   typeof createCollectionStoreTestEnv<CommentItem, CommentsOperations>
