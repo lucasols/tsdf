@@ -796,15 +796,7 @@ export function createOfflineStoreController<
       return false;
     }
 
-    const affectedEntityRefs =
-      prepared.entityRefs ??
-      resolveNormalizedRefs(
-        getOperationRawEntityRefs(
-          prepared.operation,
-          prepared.operationName,
-          prepared.validatedInput,
-        ),
-      );
+    const affectedEntityRefs = getPreparedEntityRefs(prepared);
     const entityRefs = [
       ...affectedEntityRefs,
       ...(prepared.operation.dependsOn
@@ -884,6 +876,22 @@ export function createOfflineStoreController<
               externalEntityRef.entityRef,
             ),
         )
+    );
+  }
+
+  /** The entities the mutation affects (`getEntityRefs`). */
+  function getPreparedEntityRefs(
+    prepared: PreparedQueuedMutation,
+  ): OfflineEntityRef[] {
+    return (
+      prepared.entityRefs ??
+      resolveNormalizedRefs(
+        getOperationRawEntityRefs(
+          prepared.operation,
+          prepared.operationName,
+          prepared.validatedInput,
+        ),
+      )
     );
   }
 
@@ -3594,6 +3602,26 @@ export function createOfflineStoreController<
     await discardTempLifecycles(args.current, [args.resolution]);
   }
 
+  /**
+   * A `kind: 'delete'` operation of this store succeeded: the other stores of
+   * the session drop their work declared `cancelledWith` one of the entities
+   * it references (`getEntityRefs`), as for a cancelled creation (see
+   * `discardWorkCancelledWithExternalTempEntities`). Only the stores attached
+   * in this tab are notified.
+   */
+  async function notifyEntitiesDeleted(
+    current: ActiveSessionState,
+    deletedEntityRefs: readonly OfflineEntityRef[],
+  ): Promise<void> {
+    if (deletedEntityRefs.length === 0) return;
+
+    await current.session.notifyTempEntitiesCancelled(
+      storeName,
+      new Set(deletedEntityRefs.map((entityRef) => entityRef.entityKey)),
+      getEntityKeyOfPayload,
+    );
+  }
+
   /** Key of an entity payload of this store, as its entity refs hold it. */
   function getEntityKeyOfPayload(entityRef: ValidPayload): string | undefined {
     return resolveNormalizedRefs([entityRef])[0]?.entityKey;
@@ -3601,8 +3629,9 @@ export function createOfflineStoreController<
 
   /**
    * Another store of the session reported entities created offline that will
-   * never exist on the server: drops the work of this store declared as
-   * `cancelledWith` one of them, with its own temp lifecycles.
+   * never exist on the server, or entities a delete removed from it: drops
+   * the work of this store declared as `cancelledWith` one of them, with its
+   * own temp lifecycles.
    */
   async function discardWorkCancelledWithExternalTempEntities(
     sourceStoreName: string,
@@ -4932,6 +4961,10 @@ export function createOfflineStoreController<
           const shouldSkip = await operation.shouldSkipSync(replayCheckCtx);
 
           if (shouldSkip) {
+            // The server already has the change: a delete is done.
+            if (operation.kind === 'delete') {
+              await notifyEntitiesDeleted(current, entryToUse.entityRefs);
+            }
             await removeEntry(entryToUse.id, current);
             void deleteOrphanedDependencyUploads(current, [entryToUse]);
             continue;
@@ -5022,6 +5055,11 @@ export function createOfflineStoreController<
         });
         if (isPromise(successfulExecuteSync)) {
           await successfulExecuteSync;
+        }
+        // Before the replay head moves past the delete, so that the other
+        // stores drop their work for the deleted entities before sending it.
+        if (operation.kind === 'delete') {
+          await notifyEntitiesDeleted(current, entryToUse.entityRefs);
         }
 
         refreshDerivedState(current);
@@ -5169,8 +5207,17 @@ export function createOfflineStoreController<
             ? { ...prepared, mayHaveBeenApplied: true }
             : prepared,
         ),
-      handleDirectSuccess: () =>
-        clearOfflineStatusOnSuccess(prepared.currentSessionKey),
+      handleDirectSuccess: async () => {
+        await clearOfflineStatusOnSuccess(prepared.currentSessionKey);
+        if (prepared.operation.kind !== 'delete') return;
+
+        const successCurrent = ensureActiveSession();
+        if (successCurrent?.sessionKey !== prepared.currentSessionKey) return;
+        await notifyEntitiesDeleted(
+          successCurrent,
+          getPreparedEntityRefs(prepared),
+        );
+      },
       classifyError: async (error) => {
         const preparedCurrent = ensureActiveSession();
         if (

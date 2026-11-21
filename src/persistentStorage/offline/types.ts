@@ -1599,6 +1599,10 @@ export type OfflineOperationDefinition<
    * refetching them. Return only the
    * created items, change existing items in a separate `update` operation, and
    * reference the items the creation needs with `dependsOn`.
+   *
+   * Likewise, every entity a `delete` references is treated as deleted by it
+   * once it succeeds: the queued work of other stores declared `cancelledWith`
+   * any of them is dropped. Return only the deleted entities.
    */
   kind: OfflineOperationKind;
   /**
@@ -1992,6 +1996,12 @@ export type CollectionOfflineOperationDefinition<
    * together with everything queued under it, and its own temp entities are
    * removed from the store.
    *
+   * The same happens when a `kind: 'delete'` operation of the other store
+   * that references one of them (`getEntityRefs`) succeeds, sent online or
+   * replayed: the entity no longer exists on the server. A delete that is
+   * only queued, fails into a manual resolution or is discarded drops
+   * nothing, and does not change when this operation is sent.
+   *
    * While the creation of one of them waits for a manual resolution, this
    * operation is not sent either: it is held behind that resolution
    * (`blockedResolutionCount > 0`) and follows the decision, sent after the
@@ -1999,8 +2009,8 @@ export type CollectionOfflineOperationDefinition<
    * `discard`. While that creation is still queued, this operation is queued
    * behind it even when made online, instead of sent directly. This
    * only covers the stores attached in the tab that replays or queues this
-   * operation, and the decision is only followed by the stores attached in
-   * the tab where it is made.
+   * operation, and the decision (or the successful delete) is only followed
+   * by the stores attached in the tab where it is made.
    *
    * It does not rewrite the input when the other entity gets its final ref
    * (a temp entity's server id). Entities of the same store are declared
@@ -2143,6 +2153,12 @@ export type ListQueryOfflineOperationDefinition<
    * together with everything queued under it, and its own temp entities are
    * removed from the store.
    *
+   * The same happens when a `kind: 'delete'` operation of the other store
+   * that references one of them (`getEntityRefs`) succeeds, sent online or
+   * replayed: the entity no longer exists on the server. A delete that is
+   * only queued, fails into a manual resolution or is discarded drops
+   * nothing, and does not change when this operation is sent.
+   *
    * While the creation of one of them waits for a manual resolution, this
    * operation is not sent either: it is held behind that resolution
    * (`blockedResolutionCount > 0`) and follows the decision, sent after the
@@ -2150,8 +2166,8 @@ export type ListQueryOfflineOperationDefinition<
    * `discard`. While that creation is still queued, this operation is queued
    * behind it even when made online, instead of sent directly. This
    * only covers the stores attached in the tab that replays or queues this
-   * operation, and the decision is only followed by the stores attached in
-   * the tab where it is made.
+   * operation, and the decision (or the successful delete) is only followed
+   * by the stores attached in the tab where it is made.
    *
    * It does not rewrite the input when the other entity gets its final ref
    * (a temp entity's server id). Entities of the same store are declared
