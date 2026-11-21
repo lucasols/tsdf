@@ -19,7 +19,7 @@ This skill is a concise map of the API. For anything not covered explicitly, rea
 
 Use `ListQueryStore` only when items must be shared between list views and detail views, or you need pagination, derived queries, optimistic list rules, partial resources, or offset pagination. Otherwise prefer `CollectionStore`.
 
-Docs: `docs/document-store.md`, `docs/collection-store.md`, `docs/list-query-store.md`.
+Check more on docs: `docs/document-store.md`, `docs/collection-store.md`, `docs/list-query-store.md`.
 
 ## Setup
 
@@ -60,7 +60,7 @@ const userStore = createDocumentStore<User>({
 
 `getSessionKey` returning `false` disables persistence and tab sync until a session is ready. Stores with the same `id` and different session keys are isolated. Deployed apps should provide a stable `getAppVersion` build identifier so tabs running different bundles cannot exchange fetch activity or snapshots; this is separate from per-store `persistentStorage.version`.
 
-Docs: `docs/store-manager.md`, `docs/README.md` (full options matrix).
+Check more on docs: `docs/store-manager.md`, `docs/README.md` (full options matrix).
 
 ## Hooks
 
@@ -79,7 +79,7 @@ Every store ships React hooks with consistent behavior:
 
 Return shape: `{ data, status, error, isLoading, ... }`. `status` is `'idle' | 'loading' | 'success' | 'error' | 'refetching'` plus `'loadingMore'` (list queries) or `'deleted'` (items).
 
-Docs: `docs/hooks.md` (every hook + options + return values).
+Check more on docs: `docs/hooks.md` (every hook + options + return values).
 
 ## Fetch scheduling
 
@@ -96,7 +96,7 @@ Requests within `baseCoalescingWindowMs` are merged into a single scheduler flus
 
 Imperative cache-or-fetch reads return `t-result` values with `StoreFetchError` errors: Document `getDataFromStateOrFetch`, Collection `getItemFromStateOrFetch`, List Query `getQueryFromStateOrFetch` / `getItemFromStateOrFetch`. They return loaded state by default, fetch if missing, and accept `ignoreStaleState` to fetch when cached state has `refetchOnMount`.
 
-Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
+Check more on docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 
 ## Optimization features
 
@@ -107,7 +107,7 @@ Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 - **Bulk hooks** — `useMultipleItems` and `useMultipleListQueries` let callers subscribe to many resources through one hook while sharing the same scheduler/cache machinery.
 - **Selectors + deep equality** — hook `selector` options reduce re-renders by returning only the data the component needs.
 
-Docs: `docs/batch-fetching.md`, `docs/hooks.md`.
+Check more on docs: `docs/batch-fetching.md`, `docs/hooks.md`.
 
 ## Cache limits
 
@@ -115,7 +115,7 @@ Docs: `docs/batch-fetching.md`, `docs/hooks.md`.
 
 Mounted hooks, in-flight fetches, and in-flight mutations are protected from eviction. List Query may evict whole inactive queries under item pressure to avoid leaving cached queries partially loaded. Use `onStateCleanup` to release app resources after cache-limit eviction.
 
-Docs: `docs/cache-limits.md`.
+Check more on docs: `docs/cache-limits.md`.
 
 ## Mutations
 
@@ -153,7 +153,7 @@ if (result.ok) {
 - Lifecycle events: `store.storeEvents.on('mutationStart' | 'mutationEnd', ...)`.
 - Items created offline: `store.storeEvents.on('tempEntityReconciled', ({ payload: { tempId, finalPayload } }) => ...)` fires in every tab when the item is saved; `store.resolveTempItemPayload(payload)` returns the final payload later (Collection, List Query).
 
-Docs: `docs/mutations.md`.
+Check more on docs: `docs/mutations.md`.
 
 ## Invalidation
 
@@ -167,7 +167,7 @@ Same-or-higher pending invalidations swallow lower ones. Hooks with `disableRefe
 
 Utilities: use `GET_ALL` as the all-payload predicate and `{ all: true }` to invalidate every List Query query and item.
 
-Docs: `docs/invalidation.md`.
+Check more on docs: `docs/invalidation.md`.
 
 ## Persistent storage
 
@@ -205,7 +205,7 @@ Deleting a store leaves its data behind: list it in `createStoreManager({ remove
 
 Utilities: `clearSessionStorage(sessionKey, adapter)`, `clearAllSessionStorage(sessionKey)`.
 
-Docs: `docs/persistent-storage.md`.
+Check more on docs: `docs/persistent-storage.md`.
 
 ## Offline
 
@@ -247,7 +247,7 @@ Multiple tabs of a session share one queue: only the leading (visible) tab repla
 
 Testing: `await storeManager.setForcedOfflineMode(true | false)` forces the session offline without cutting the connection (survives reloads, shared across tabs, reported as `getOfflineStatus().isForcedOffline`; requires `offlineSession.network`). `createOfflineNetworkMock()` from `tsdf/testing` mocks the network status in unit tests. See `docs/offline.md#forced-offline-mode`, `docs/offline.md#testing`.
 
-Docs: `docs/offline.md`.
+Check more on docs: `docs/offline.md`.
 
 ## Real-time updates
 
@@ -271,13 +271,13 @@ storeManager.onTransportReconnect(); // notify attached realtime stores after re
 
 `usesRealTimeUpdates: true` auto-disables `revalidateOnWindowFocus` and defaults hooks to `disableRefetchOnMount: true`.
 
-Docs: `docs/real-time-updates.md`.
+Check more on docs: `docs/real-time-updates.md`.
 
 ## List Query specific features
 
-- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`). Docs: `docs/optimistic-list-updates.md`.
-- **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Docs: `docs/partial-resources.md`.
-- **Offset pagination** (set `TOffsetPagination = true`) — real offset/limit pagination instead of size-mode re-fetches. `fetchListFn` receives `{ offset, limit }`; `offsetPagination: { maxInvalidationLimit, maxParallel }`. Docs: `docs/offset-pagination.md`.
+- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`). Check more on docs: `docs/optimistic-list-updates.md`.
+- **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Check more on docs: `docs/partial-resources.md`.
+- **Offset pagination** (set `TOffsetPagination = true`) — real offset/limit pagination instead of size-mode re-fetches. `fetchListFn` receives `{ offset, limit }`; `offsetPagination: { maxInvalidationLimit, maxParallel }`. Check more on docs: `docs/offset-pagination.md`.
 - **`derivedQueries`** — hook results computed locally from already-materialized items when `isComplete(...)` returns `true`; results expose `isDerived: true` and `hasMore: false`, and never materialize a query entry.
 - **`addItemToState(payload, data, { addItemToQueries: { queries, appendTo } })`** — insert a new item into specific queries with `'start' | 'end' | (payloads) => index` placement.
 
@@ -285,7 +285,7 @@ Docs: `docs/real-time-updates.md`.
 
 Automatic when all tabs share the same store `id`, `getSessionKey()`, and (when configured) `getAppVersion()`. Tabs deduplicate `fetch-start`/`fetch-success` activity and apply confirmed snapshots in version order over `BroadcastChannel`. Background tabs get an extended coalescing window so duplicate background work is dropped. Use a build-specific `getAppVersion` in deployed apps to isolate incompatible bundles.
 
-Docs: `docs/browser-tabs-sync.md`.
+Check more on docs: `docs/browser-tabs-sync.md`.
 
 ## Shared types and utilities
 
