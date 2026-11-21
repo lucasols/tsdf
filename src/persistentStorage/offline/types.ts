@@ -1992,9 +1992,18 @@ export type CollectionOfflineOperationDefinition<
    * together with everything queued under it, and its own temp entities are
    * removed from the store.
    *
-   * This only drives that cleanup: it does not delay the replay of this
-   * operation nor rewrite its input when the other entity gets its final
-   * ref. Entities of the same store are declared with `dependsOn`.
+   * While the creation of one of them waits for a manual resolution, this
+   * operation is not sent either: it is held behind that resolution
+   * (`blockedResolutionCount > 0`) and follows the decision, sent after the
+   * creation on `retry` (default scope), `requeue` or `commit`, dropped on
+   * `discard`. This
+   * only covers the stores attached in the tab that replays or queues this
+   * operation, and the decision is only followed by the stores attached in
+   * the tab where it is made.
+   *
+   * It does not rewrite the input when the other entity gets its final ref
+   * (a temp entity's server id). Entities of the same store are declared
+   * with `dependsOn`.
    */
   cancelledWith?: (
     ctx: OperationEntityRefsContext<TInput>,
@@ -2133,9 +2142,18 @@ export type ListQueryOfflineOperationDefinition<
    * together with everything queued under it, and its own temp entities are
    * removed from the store.
    *
-   * This only drives that cleanup: it does not delay the replay of this
-   * operation nor rewrite its input when the other entity gets its final
-   * ref. Entities of the same store are declared with `dependsOn`.
+   * While the creation of one of them waits for a manual resolution, this
+   * operation is not sent either: it is held behind that resolution
+   * (`blockedResolutionCount > 0`) and follows the decision, sent after the
+   * creation on `retry` (default scope), `requeue` or `commit`, dropped on
+   * `discard`. This
+   * only covers the stores attached in the tab that replays or queues this
+   * operation, and the decision is only followed by the stores attached in
+   * the tab where it is made.
+   *
+   * It does not rewrite the input when the other entity gets its final ref
+   * (a temp entity's server id). Entities of the same store are declared
+   * with `dependsOn`.
    */
   cancelledWith?: (
     ctx: OperationEntityRefsContext<TInput>,

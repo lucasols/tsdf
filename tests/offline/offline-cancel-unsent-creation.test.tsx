@@ -1515,10 +1515,16 @@ describe('items of other stores', () => {
     await flushAllTimers();
     await env.addComment('Ask Ana about dates', 'temp:Plan trip');
 
-    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
-      - input: { taskId: 'temp:Plan trip', text: 'Ask Ana about dates' }
-        operation: 'addComment'
-    `);
+    // The comment could not be sent before the task exists: instead of the
+    // queue, it waits behind the creation of the task, in the comments store.
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.comments.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`- { blockedBy: 1, op: 'addComment' }`);
 
     env.tasks.addTimelineComments('beforeNextAction', [
       'discard the failed task creation',
@@ -1534,6 +1540,9 @@ describe('items of other stores', () => {
 
     // The task will never exist, so its comment is dropped with it.
     expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
     expect(
       env.getLocalComments(['temp:Ask Ana about dates']),
     ).toMatchInlineSnapshot(`temp:Ask Ana about dates: null`);
@@ -1569,5 +1578,225 @@ describe('items of other stores', () => {
     `);
 
     list.unmount();
+  });
+
+  /**
+   * Offline: creates task 50 with an id the app generates, then adds comment
+   * c1 to it (also with a client-generated id, declared `cancelledWith` the
+   * task) and edits the comment. Back online, the creation of the task fails
+   * on every attempt (3) until it asks for a manual decision.
+   */
+  async function commentOnTaskWhoseCreationKeepsFailing(sessionKey: string) {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv(sessionKey);
+    const list = env.renderTasksAndComments();
+    await flushAllTimers();
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline: create task 50, add a comment to it and edit the comment',
+    ]);
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'tasks||50',
+    );
+    await advanceTime(1_000);
+    await env.editComment('comments||c1', 'Ask Ana about the dates');
+
+    env.tasks.faults.createTaskWithId.push(
+      'request-lost',
+      'request-lost',
+      'request-lost',
+    );
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'back online: the task creation keeps failing until it needs a decision',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    const failedCreation = env.tasks.apiStore.getOfflineResolutions()[0];
+    if (failedCreation?.operation !== 'createTaskWithId') {
+      throw new Error('Expected the failed task creation');
+    }
+
+    return { env, list, failedCreation };
+  }
+
+  test('the comments of a task whose creation with a client-generated id keeps failing are not sent before it: they wait for its decision and are sent after it once the user sends it again', async () => {
+    const { env, list, failedCreation } =
+      await commentOnTaskWhoseCreationKeepsFailing('held-comments-retry');
+
+    // Online, the user adds another comment to the task.
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'online: add another comment to the task',
+    ]);
+    await env.addCommentWithId('comments||c2', 'Book flights', 'tasks||50');
+    await flushAllTimers();
+
+    // The comments would be sent for a task the server does not have: they
+    // are held behind the creation of the task, in the comments store (also
+    // the one added online, which is not sent directly), and the edit waits
+    // behind its comment. The only decision the user can make is the
+    // creation of the task.
+    expect(env.tasks.sentRequests).toMatchInlineSnapshot(`
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+    `);
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.comments.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`
+      - { blockedBy: 1, op: 'addCommentWithId' }
+      - { blockedBy: 1, op: 'editComment' }
+      - { blockedBy: 1, op: 'addCommentWithId' }
+    `);
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'the user asks to send the task creation again',
+    ]);
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // The task is created first, then the comments and the edit, in the
+    // order they were made.
+    expect([...env.tasks.sentRequests.slice(3), ...env.sentRequests])
+      .toMatchInlineSnapshot(`
+      - 'createTaskWithId tasks||50'
+      - 'addCommentWithId comments||c1 "Ask Ana about dates" to tasks||50'
+      - 'editComment comments||c1 to "Ask Ana about the dates"'
+      - 'addCommentWithId comments||c2 "Book flights" to tasks||50'
+    `);
+    expect(env.comments.serverTable.getAll()).toMatchInlineSnapshot(`
+      comments||c1: { taskId: 'tasks||50', text: 'Ask Ana about the dates' }
+      comments||c2: { taskId: 'tasks||50', text: 'Book flights' }
+    `);
+    expect(env.tasks.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(env.tasks.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | comments                              | tasks                                  |
+      0      | no comments                           | Write report, Review budget            | [tasks, comments] ui-initialized
+      3.01s  | no comments                           | Write report, Review budget            | -- offline: create task 50, add a comment to it and edit the comment
+      .      | no comments                           | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .      | no comments                           | Write report, Review budget, Plan trip | offline:createTaskWithId queued
+      4.01s  | Ask Ana about dates                   | Write report, Review budget, Plan trip | [comments] ui-changed
+      5.01s  | Ask Ana about the dates               | Write report, Review budget, Plan trip | [comments] ui-changed
+      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | -- back online: the task creation keeps failing until it needs a decision
+      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      10.01s | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      15.01s | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
+      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | -- online: add another comment to the task
+      .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | [comments] ui-changed
+      16.01s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | -- the user asks to send the task creation again
+      .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      17.21s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | offline:createTaskWithId replay-finished
+      20.82s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
+      21.62s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":3})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('discarding the failed creation of a task with a client-generated id drops the comments held behind it, without sending them', async () => {
+    const { env, list, failedCreation } =
+      await commentOnTaskWhoseCreationKeepsFailing('held-comments-discard');
+
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'discard' },
+      );
+    });
+    await flushAllTimers();
+
+    // The comment and its edit go with the task: nothing is sent for them,
+    // nothing is left to decide, and the comment is removed locally.
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(env.getLocalComments(['comments||c1'])).toMatchInlineSnapshot(
+      `comments||c1: null`,
+    );
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
+
+    list.unmount();
+  });
+
+  test('a comment held while the creation of its task waits for a conflict decision is sent once the user keeps the task the server has', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('held-comment-commit');
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'tasks||50',
+    );
+
+    // On reconnect the server already has a task with that id: the creation
+    // reports a conflict, and the comment waits behind it.
+    env.tasks.conflicts.createTaskWithId = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.tasks.conflicts.createTaskWithId = false;
+    const conflict = env.tasks.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the task creation conflict');
+    }
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+
+    // The user keeps the task of the server: the comment is sent to it.
+    env.tasks.serverTable.setItem('tasks||50', { id: 50, name: 'Plan trip' });
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        conflict.id,
+        'createTaskWithId',
+        { action: 'commit' },
+      );
+    });
+    await flushAllTimers();
+
+    // Keeping the task sends nothing for it, and the comment held behind its
+    // creation is queued again and sent to it.
+    expect([
+      ...env.tasks.sentRequests,
+      ...env.sentRequests,
+    ]).toMatchInlineSnapshot(
+      `['addCommentWithId comments||c1 "Ask Ana about dates" to tasks||50']`,
+    );
+    expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
   });
 });

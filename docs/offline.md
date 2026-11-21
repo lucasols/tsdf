@@ -267,7 +267,7 @@ Collection and list-query operations also define:
 
 - `getEntityRefs({ input })` - Returns affected item/entity refs.
 - `dependsOn({ input })` - Optional dependencies on other offline entities of the same store.
-- `cancelledWith({ input })` - Optional entities of other stores whose cancelled creation also drops this work. See [Deleting entities created offline](#deleting-entities-created-offline).
+- `cancelledWith({ input })` - Optional entities of other stores whose cancelled creation also drops this work, and whose creation waiting for a resolution holds it. See [Deleting entities created offline](#deleting-entities-created-offline).
 
 Optional replay behavior:
 
@@ -393,7 +393,7 @@ addComment: {
 },
 ```
 
-When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. A comment added with a client-generated id instead of a temporary entity is removed the same way when it was never sent, with the work queued on it and the work of other stores declared as `cancelledWith` it. `cancelledWith` only drives this cleanup: it does not delay replay or rewrite the input when the task gets its server id, and it only reaches stores that are instantiated in the tab where the cancellation happens.
+When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. A comment added with a client-generated id instead of a temporary entity is removed the same way when it was never sent, or when it was held behind the task's creation, with the work queued on it and the work of other stores declared as `cancelledWith` it. While the task's creation waits for a resolution, the comments are held behind it like the work of the tasks store (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)). `cancelledWith` does not rewrite the input when the task gets its server id, so it fits entities whose id the app generates on the client best. It only reaches stores that are instantiated in the tab: work is held only when the tab that queues or replays it has the task's store, and the decision about the creation (cancel, discard, retry) only reaches the stores of the tab where it is made. Held work a decision did not reach stays as a resolution of its own, no longer blocked, for the user to retry or discard.
 
 ## Conflict Resolution
 
@@ -428,6 +428,8 @@ They follow the decision about the creation: `retry` (default scope) sends the c
 A blocked mutation was never sent, so a later mutation of the same entity treats it like an unsent queued one: an `accumulation` operation merges into it, and a `supersedes` operation prunes it. This keeps the order the user made the changes in, e.g. moving a task under the waiting entity and then back under a server task sends only the second move, and retrying the creation does not move the task again. When the merged input no longer depends on the waiting entity, it is queued and sent right away. To make this possible, an online mutation of such an operation for an entity with blocked work is queued instead of sent directly. A mutation of an operation with neither `accumulation` nor `supersedes` does not touch the blocked one: it is sent first, and the blocked one is sent after it once the creation is retried.
 
 When the merged input still depends on the waiting entity, the changes merged into it go with the decision about the creation too: discarding the creation also drops them, e.g. a rename of a server task merged into its held move under the waiting entity.
+
+The work of other stores declared as `cancelledWith` the waiting entity is held the same way, in its own store: it is a blocked resolution of that store, sent after the creation on `retry` (default scope), `requeue` or `commit`, and dropped with it on `discard`. See [Deleting entities created offline](#deleting-entities-created-offline) for its limits.
 
 ### Resolving From A Session-Wide UI
 

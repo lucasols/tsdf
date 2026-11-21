@@ -261,6 +261,26 @@ type SessionRegistration = {
     cancelledEntityKeys: ReadonlySet<string>,
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
   ) => Promise<void>;
+  /**
+   * Id of the manual resolution the creation of `entityRef` (an entity
+   * payload of the store) waits for, if any: the other stores hold their work
+   * declared as `cancelledWith` that entity behind it.
+   */
+  findCreationResolutionId?: (entityRef: ValidPayload) => string | undefined;
+  /**
+   * Called when another store of the session sent again, or kept, creations
+   * that waited for a manual resolution. `releasedEntityKeys` holds their
+   * keys in the source store, `getEntityKey` keys an entity payload of that
+   * store the same way, and the work released after them must be queued
+   * from `minQueueOrder` on. Only registered by stores with `cancelledWith`
+   * operations.
+   */
+  onCreationsReleased?: (
+    sourceStoreName: string,
+    releasedEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
+    minQueueOrder: number,
+  ) => Promise<void>;
   /** Another tab saved or removed (`null`) a queue entry of the store. */
   onRemoteQueueEntryChange?: (
     entryId: string,
@@ -1399,6 +1419,59 @@ class SessionOfflineCoordinator {
     // The source store already applied the cancellation: a store that fails
     // to clean up its work is reported without failing it.
     for (const result of await Promise.allSettled(pendingCleanups)) {
+      if (result.status === 'rejected') {
+        this.#onPersistentStorageError?.(result.reason);
+      }
+    }
+  }
+
+  /**
+   * Id of the manual resolution the creation of `entityRef` waits for in
+   * store `storeName`, when that store is attached in this tab.
+   */
+  findCreationResolutionId(
+    storeName: string,
+    entityRef: ValidPayload,
+  ): string | undefined {
+    return this.#registrations
+      .get(storeName)
+      ?.findCreationResolutionId?.(entityRef);
+  }
+
+  /**
+   * Lets the other stores of the session queue again the work they held
+   * behind creations of `sourceStoreName` that waited for a manual
+   * resolution, once those creations were sent again or kept.
+   */
+  async notifyCreationsReleased(
+    sourceStoreName: string,
+    releasedEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
+    minQueueOrder: number,
+  ): Promise<void> {
+    const pendingRequeues: Promise<void>[] = [];
+
+    for (const registration of this.#registrations.values()) {
+      if (
+        registration.storeName === sourceStoreName ||
+        !registration.onCreationsReleased
+      ) {
+        continue;
+      }
+
+      pendingRequeues.push(
+        registration.onCreationsReleased(
+          sourceStoreName,
+          releasedEntityKeys,
+          getEntityKey,
+          minQueueOrder,
+        ),
+      );
+    }
+
+    // The source store already applied its decision: a store that fails to
+    // queue its held work again is reported without failing it.
+    for (const result of await Promise.allSettled(pendingRequeues)) {
       if (result.status === 'rejected') {
         this.#onPersistentStorageError?.(result.reason);
       }

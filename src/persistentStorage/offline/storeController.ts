@@ -782,7 +782,13 @@ export function createOfflineStoreController<
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
   ): boolean {
-    if (queueEntries.size === 0 && resolutions.size === 0) return false;
+    if (
+      queueEntries.size === 0 &&
+      resolutions.size === 0 &&
+      !prepared.operation.cancelledWith
+    ) {
+      return false;
+    }
 
     const affectedEntityRefs =
       prepared.entityRefs ??
@@ -1260,6 +1266,10 @@ export function createOfflineStoreController<
       onTempEntitiesCancelled: hasCancelledWithOperations
         ? discardWorkCancelledWithExternalTempEntities
         : undefined,
+      findCreationResolutionId,
+      onCreationsReleased: hasCancelledWithOperations
+        ? requeueWorkHeldBehindExternalCreations
+        : undefined,
       onRemoteQueueEntryChange: (entryId, entry) => {
         applyRecordChangeFromAnotherTab(() => {
           if (entry) {
@@ -1676,6 +1686,28 @@ export function createOfflineStoreController<
       }
     }
 
+    // Work held behind the creation of an entity of another store (see
+    // `getExternalCreationResolutionIds`).
+    if (hasCancelledWithOperations) {
+      for (const resolution of resolutions.values()) {
+        for (const blockerId of getExternalCreationResolutionIds(resolution)) {
+          getOrCreateSet(blockedResolutionIdsByResolutionId, resolution.id).add(
+            blockerId,
+          );
+          getOrCreateSet(
+            blockedByResolutionIdsByResolutionId,
+            resolution.id,
+          ).add(blockerId);
+          for (const entityRef of resolution.entityRefs) {
+            getOrCreateSet(
+              blockedByResolutionIdsByEntityKey,
+              entityRef.entityKey,
+            ).add(blockerId);
+          }
+        }
+      }
+    }
+
     return {
       blockedByResolutionIdsByResolutionId: toSortedArrayMap(
         blockedByResolutionIdsByResolutionId,
@@ -1966,11 +1998,11 @@ export function createOfflineStoreController<
     return highestQueueOrder + 1;
   }
 
-  function previewQueueOrders(count: number): {
-    queueOrders: number[];
-    nextQueueOrderValue: number;
-  } {
-    const baseQueueOrder = Math.max(nextQueueOrder, Date.now());
+  function previewQueueOrders(
+    count: number,
+    minQueueOrder = 0,
+  ): { queueOrders: number[]; nextQueueOrderValue: number } {
+    const baseQueueOrder = Math.max(nextQueueOrder, Date.now(), minQueueOrder);
     const queueOrders = Array.from({ length: count }, (_, index) => {
       return baseQueueOrder + index;
     });
@@ -2915,9 +2947,11 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Whether the work targets or depends on a temp entity whose creation is
-   * held in a manual resolution. Such work cannot be sent (the server does
-   * not know the entity) until that resolution is decided.
+   * Whether the work targets or depends on an entity whose creation (temp
+   * entity or client-generated id) is held in a manual resolution, or is
+   * declared `cancelledWith` such an entity of another store. Such work cannot
+   * be sent (the server does not know the entity) until that resolution is
+   * decided.
    */
   function isHeldBehindTempCreateResolution(
     workItem: Pick<
@@ -2942,7 +2976,175 @@ export function createOfflineStoreController<
       }
     }
 
-    return false;
+    return getExternalCreationResolutionIds(workItem).length > 0;
+  }
+
+  /**
+   * Ids of the manual resolutions that the creations of the entities of other
+   * stores the work is declared `cancelledWith` wait for. Sent now, the work
+   * would reach the server before those entities exist, so it is held behind
+   * them like the work on an entity of this store. Only the stores attached
+   * in this tab are known.
+   */
+  function getExternalCreationResolutionIds(
+    workItem: Pick<OfflineQueueEntry, 'operation' | 'input'>,
+  ): string[] {
+    if (!hasCancelledWithOperations || !activeSession) return [];
+
+    const externalEntityRefs = operations[workItem.operation]?.cancelledWith?.({
+      input: workItem.input,
+    });
+    if (!externalEntityRefs) return [];
+
+    const resolutionIds: string[] = [];
+    for (const externalEntityRef of externalEntityRefs) {
+      if (externalEntityRef.storeName === storeName) continue;
+
+      const resolutionId = activeSession.session.findCreationResolutionId(
+        externalEntityRef.storeName,
+        externalEntityRef.entityRef,
+      );
+      if (resolutionId !== undefined) resolutionIds.push(resolutionId);
+    }
+
+    return resolutionIds;
+  }
+
+  /**
+   * Id of the manual resolution the creation of an entity of this store
+   * waits for, if any. Lets the other stores hold their work declared
+   * `cancelledWith` that entity (see `getExternalCreationResolutionIds`).
+   */
+  function findCreationResolutionId(
+    entityRef: ValidPayload,
+  ): string | undefined {
+    if (resolutions.size === 0) return undefined;
+
+    const entityKey = getEntityKeyOfPayload(entityRef);
+    if (entityKey === undefined) return undefined;
+
+    for (const resolution of resolutions.values()) {
+      if (getCreatedEntityKeys(resolution).includes(entityKey)) {
+        return resolution.id;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Another store of the session sent again, or kept, creations that waited
+   * for a manual resolution: queues again, after them, the held work of this
+   * store declared `cancelledWith` one of them that waits for nothing else,
+   * with the work held behind it.
+   */
+  async function requeueWorkHeldBehindExternalCreations(
+    sourceStoreName: string,
+    releasedEntityKeys: ReadonlySet<string>,
+    getSourceEntityKey: (entityRef: ValidPayload) => string | undefined,
+    minQueueOrder: number,
+  ): Promise<void> {
+    await hydrateIfNeeded();
+    const current = ensureActiveSession();
+    if (!current || resolutions.size === 0) return;
+
+    const dependencySnapshot = createResolutionDependencySnapshot();
+    const releasedWork = new Map<string, PersistedOfflineResolutionRecord>();
+    for (const resolution of [...resolutions.values()].sort(
+      compareResolutionRecords,
+    )) {
+      if (
+        releasedWork.has(resolution.id) ||
+        !isBlockedDependencyResolution(resolution) ||
+        dependencySnapshot.blockedByResolutionIdsByResolutionId.has(
+          resolution.id,
+        ) ||
+        !isCancelledWithExternalEntity(
+          resolution,
+          sourceStoreName,
+          releasedEntityKeys,
+          getSourceEntityKey,
+        )
+      ) {
+        continue;
+      }
+
+      for (const workItem of collectRetryResolutionChain({
+        resolution,
+        scope: 'self-and-descendants',
+      })) {
+        releasedWork.set(workItem.id, workItem);
+      }
+    }
+    if (releasedWork.size === 0) return;
+
+    await requeueResolutions(
+      current,
+      [...releasedWork.values()],
+      undefined,
+      minQueueOrder,
+    );
+  }
+
+  /**
+   * Lets the other stores of the session queue again the work they held
+   * behind the creations of `releasedWork`, which was just queued again or
+   * kept (see `requeueWorkHeldBehindExternalCreations`).
+   */
+  async function notifyCreationsReleased(
+    current: ActiveSessionState,
+    releasedWork: readonly PersistedOfflineResolutionRecord[],
+  ): Promise<void> {
+    const releasedEntityKeys = new Set(
+      releasedWork.flatMap((workItem) => getCreatedEntityKeys(workItem)),
+    );
+    if (releasedEntityKeys.size === 0) return;
+
+    await current.session.notifyCreationsReleased(
+      storeName,
+      releasedEntityKeys,
+      getEntityKeyOfPayload,
+      nextQueueOrder,
+    );
+  }
+
+  /** Work held behind a creation waiting for a decision, never sent. */
+  function isBlockedDependencyResolution(
+    resolution: PersistedOfflineResolutionRecord,
+  ): boolean {
+    return (
+      resolution.kind === 'retry-exhausted' &&
+      resolution.lastReplayError.message ===
+        BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE
+    );
+  }
+
+  /**
+   * Whether the work is declared `cancelledWith` one of the `entityKeys` of
+   * store `sourceStoreName`, keyed by `getSourceEntityKey` like that store's
+   * own entity refs: equivalent payloads match whatever their shape.
+   */
+  function isCancelledWithExternalEntity(
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'input' | 'operation'
+    >,
+    sourceStoreName: string,
+    entityKeys: ReadonlySet<string>,
+    getSourceEntityKey: (entityRef: ValidPayload) => string | undefined,
+  ): boolean {
+    const externalEntityRefs = operations[workItem.operation]?.cancelledWith?.({
+      input: workItem.input,
+    });
+
+    return (
+      externalEntityRefs !== undefined &&
+      externalEntityRefs.some((externalEntityRef) => {
+        if (externalEntityRef.storeName !== sourceStoreName) return false;
+        const entityKey = getSourceEntityKey(externalEntityRef.entityRef);
+        return entityKey !== undefined && entityKeys.has(entityKey);
+      })
+    );
   }
 
   /**
@@ -2983,13 +3185,7 @@ export function createOfflineStoreController<
     resolution: PersistedOfflineResolutionRecord,
     dependencySnapshot?: ResolutionDependencySnapshot,
   ): boolean {
-    if (
-      resolution.kind !== 'retry-exhausted' ||
-      resolution.lastReplayError.message !==
-        BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE
-    ) {
-      return false;
-    }
+    if (!isBlockedDependencyResolution(resolution)) return false;
 
     return dependencySnapshot
       ? dependencySnapshot.blockedByResolutionIdsByResolutionId.has(
@@ -3012,7 +3208,7 @@ export function createOfflineStoreController<
       'operation' | 'input' | 'entityRefs'
     >,
     removedEntityKeys: Set<string>,
-    unsentEntityKeys: ReadonlySet<string>,
+    droppedEntityKeys: ReadonlySet<string>,
     cancelledEntityKeys: Set<string>,
   ): void {
     for (const entityKey of getClientIdCreatedEntityKeys(workItem)) {
@@ -3030,9 +3226,10 @@ export function createOfflineStoreController<
         pendingEntity: undefined,
       });
       removedEntityKeys.add(entityKey);
-      // Like a temp entity, an item whose creation was never sent will never
-      // exist on the server: the work of other stores on it is dropped too.
-      if (unsentEntityKeys.has(entityKey)) {
+      // Like a temp entity, an item whose creation was never sent, or was
+      // discarded while it waited for a decision, will not get the work of
+      // other stores on it: that work is dropped too.
+      if (droppedEntityKeys.has(entityKey)) {
         cancelledEntityKeys.add(entityKey);
       }
     }
@@ -3147,12 +3344,13 @@ export function createOfflineStoreController<
    * removed by the caller) was cancelled before being sent or discarded:
    *
    * - the queued work and manual resolutions of this store that target or
-   *   depend on those entities, or on the items an unsent dropped creation
-   *   added with a client-generated id, recursively
+   *   depend on those entities, or on the items an unsent or discarded
+   *   creation added with a client-generated id, recursively
    * - the temp entities themselves, and the items the dropped work created
    *   with a client-generated id
    * - the work of other stores declared as `cancelledWith` those entities,
-   *   or the items unsent dropped creations added with a client-generated id
+   *   or the items unsent or discarded creations added with a
+   *   client-generated id
    *
    * The server entities the dropped work changed optimistically are
    * refetched, and the staged uploads only the dropped work and `tempCreates`
@@ -3179,27 +3377,24 @@ export function createOfflineStoreController<
     // the work on its item (see `isHeldBehindTempCreateResolution`), which
     // goes with it.
     const parentEntityKeys: string[] = [];
-    const unsentClientIdEntityKeys = new Set<string>();
-    function addUnsentClientIdCreation(
+    // Items created with a client-generated id that are dropped with the
+    // work held behind them, here and in other stores.
+    const droppedClientIdEntityKeys = new Set<string>();
+    function addDroppedClientIdCreation(
       workItem: OfflineQueueEntry | PersistedOfflineResolutionRecord,
     ): void {
       for (const entityKey of getClientIdCreatedEntityKeys(workItem)) {
         parentEntityKeys.push(entityKey);
-        unsentClientIdEntityKeys.add(entityKey);
+        droppedClientIdEntityKeys.add(entityKey);
       }
     }
 
     for (const tempCreate of tempCreates) {
       parentEntityKeys.push(...getTempLifecycleEntityKeys(tempCreate));
-      // A resolution still held behind another creation was never sent.
-      if (
-        'syncState' in tempCreate
-          ? isUnsentQueueEntry(tempCreate)
-          : isHeldBehindTempCreateResolution(tempCreate)
-      ) {
-        addUnsentClientIdCreation(tempCreate);
-      } else if (!('syncState' in tempCreate)) {
-        parentEntityKeys.push(...getClientIdCreatedEntityKeys(tempCreate));
+      // A queue entry still unsent, or any creation resolution: one waiting
+      // for a decision holds the work on its item, which goes with it.
+      if (!('syncState' in tempCreate) || isUnsentQueueEntry(tempCreate)) {
+        addDroppedClientIdCreation(tempCreate);
       }
     }
 
@@ -3212,7 +3407,7 @@ export function createOfflineStoreController<
         if (descendantQueueEntries.has(queueEntry.id)) continue;
         descendantQueueEntries.set(queueEntry.id, queueEntry);
         if (isUnsentQueueEntry(queueEntry)) {
-          addUnsentClientIdCreation(queueEntry);
+          addDroppedClientIdCreation(queueEntry);
         }
       }
       for (const resolution of descendants.resolutions) {
@@ -3220,7 +3415,7 @@ export function createOfflineStoreController<
         descendantResolutions.set(resolution.id, resolution);
         // Work on an entity whose creation never succeeded waits behind that
         // creation, so a descendant resolution was never sent.
-        addUnsentClientIdCreation(resolution);
+        addDroppedClientIdCreation(resolution);
       }
     }
 
@@ -3248,7 +3443,7 @@ export function createOfflineStoreController<
       rollbackClientIdCreatedItems(
         workItem,
         removedEntityKeys,
-        unsentClientIdEntityKeys,
+        droppedClientIdEntityKeys,
         cancelledEntityKeys,
       );
       for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
@@ -3330,19 +3525,11 @@ export function createOfflineStoreController<
         'input' | 'operation'
       >,
     ): boolean {
-      const externalEntityRefs = operations[
-        workItem.operation
-      ]?.cancelledWith?.({ input: workItem.input });
-
-      return (
-        externalEntityRefs !== undefined &&
-        externalEntityRefs.some((externalEntityRef) => {
-          if (externalEntityRef.storeName !== sourceStoreName) return false;
-          // Keyed by the source store, like its own entity refs: equivalent
-          // payloads match whatever their shape.
-          const entityKey = getSourceEntityKey(externalEntityRef.entityRef);
-          return entityKey !== undefined && cancelledEntityKeys.has(entityKey);
-        })
+      return isCancelledWithExternalEntity(
+        workItem,
+        sourceStoreName,
+        cancelledEntityKeys,
+        getSourceEntityKey,
       );
     }
 
@@ -3449,15 +3636,18 @@ export function createOfflineStoreController<
   /**
    * Queues `resolutionsToRequeue` again, in order, and removes them.
    * `sentResolutionId` is the resolution whose attempts were exhausted: the
-   * server may have applied it.
+   * server may have applied it. `minQueueOrder` queues them after the work
+   * of another store they must follow.
    */
   async function requeueResolutions(
     current: ActiveSessionState,
     resolutionsToRequeue: PersistedOfflineResolutionRecord[],
     sentResolutionId: string | undefined,
+    minQueueOrder?: number,
   ): Promise<void> {
     const { queueOrders, nextQueueOrderValue } = previewQueueOrders(
       resolutionsToRequeue.length,
+      minQueueOrder,
     );
     nextQueueOrder = nextQueueOrderValue;
 
@@ -3487,11 +3677,7 @@ export function createOfflineStoreController<
       if (
         entry &&
         resolution.id === sentResolutionId &&
-        !(
-          resolution.kind === 'retry-exhausted' &&
-          resolution.lastReplayError.message ===
-            BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE
-        )
+        !isBlockedDependencyResolution(resolution)
       ) {
         entry.attempts = 1;
       }
@@ -4557,6 +4743,29 @@ export function createOfflineStoreController<
       // into the queue, and must not be deleted if one ever gets here
       if (!operation) return;
 
+      // Queued before the creation of an entity of another store it belongs
+      // to failed: it waits for the decision about that creation, with the
+      // work queued on top of it.
+      if (
+        operation.cancelledWith &&
+        getExternalCreationResolutionIds(nextEntry).length > 0
+      ) {
+        const heldResolution = buildRetryExhaustedResolutionRecord(
+          current,
+          nextEntry,
+          { message: BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE },
+        );
+        await persistResolution(heldResolution, current, true);
+        await removeEntry(nextEntry.id, current, true);
+        await promoteBlockedTempCreateDescendants({
+          current,
+          parentEntry: nextEntry,
+          parentResolutionId: heldResolution.id,
+        });
+        refreshDerivedState(current);
+        continue;
+      }
+
       const shouldCheckSkipBeforeRetry =
         nextEntry.syncState === 'needs-confirmation';
       const conflictHandling = operation.conflictHandling;
@@ -4945,11 +5154,16 @@ export function createOfflineStoreController<
       }
 
       const scope = resolutionAction?.scope ?? 'self-and-descendants';
-      await requeueResolutions(
-        current,
-        collectRetryResolutionChain({ resolution: resolutionRecord, scope }),
-        resolutionRecord.id,
-      );
+      const retriedWork = collectRetryResolutionChain({
+        resolution: resolutionRecord,
+        scope,
+      });
+      await requeueResolutions(current, retriedWork, resolutionRecord.id);
+      // Like the held work of this store, the work other stores held behind
+      // these creations is sent after them, unless only the creation is sent.
+      if (scope === 'self-and-descendants') {
+        await notifyCreationsReleased(current, retriedWork);
+      }
       return;
     }
 
@@ -4987,23 +5201,30 @@ export function createOfflineStoreController<
         const descendant = resolutions.get(id);
         if (descendant) heldDescendants.set(id, descendant);
       }
-      if (heldDescendants.size === 0) return;
 
       // A replacement creation held behind another creation waiting for a
       // decision still holds the work on its entity.
-      dropDescendantsHeldElsewhere(
-        heldDescendants,
-        createResolutionDependencySnapshot(),
-        undefined,
-      );
-      if (heldDescendants.size === 0) return;
+      if (heldDescendants.size > 0) {
+        dropDescendantsHeldElsewhere(
+          heldDescendants,
+          createResolutionDependencySnapshot(),
+          undefined,
+        );
+      }
 
       // Kept in the order collected, which sends parents first.
-      await requeueResolutions(
-        current,
-        [...heldDescendants.values()],
-        undefined,
-      );
+      if (heldDescendants.size > 0) {
+        await requeueResolutions(
+          current,
+          [...heldDescendants.values()],
+          undefined,
+        );
+      }
+      // The work other stores held behind these creations follows them.
+      await notifyCreationsReleased(current, [
+        resolutionRecord,
+        ...heldDescendants.values(),
+      ]);
     };
 
     if (action === 'requeue') {
