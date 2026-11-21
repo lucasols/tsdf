@@ -272,15 +272,17 @@ type SessionRegistration = {
    * that waited for a manual resolution. `releasedEntityKeys` holds their
    * keys in the source store, `getEntityKey` keys an entity payload of that
    * store the same way, and the work released after them must be queued
-   * from `minQueueOrder` on. Only registered by stores with `cancelledWith`
-   * operations.
+   * from `minQueueOrder` on. Resolves to the queue order from which the work
+   * released after the one of this store must be queued (`minQueueOrder`
+   * when it released nothing). Only registered by stores with
+   * `cancelledWith` operations.
    */
   onCreationsReleased?: (
     sourceStoreName: string,
     releasedEntityKeys: ReadonlySet<string>,
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
     minQueueOrder: number,
-  ) => Promise<void>;
+  ) => Promise<number>;
   /**
    * Called when a creation of another store of the session started or
    * stopped waiting for a manual resolution, so the store reports again the
@@ -1449,18 +1451,21 @@ class SessionOfflineCoordinator {
   /**
    * Lets the other stores of the session queue again the work they held
    * behind creations of `sourceStoreName` that waited for a manual
-   * resolution, once those creations were sent again or kept.
+   * resolution, once those creations were sent again or kept. Resolves to
+   * the queue order that follows all the work queued again.
    */
   async notifyCreationsReleased(
     sourceStoreName: string,
     releasedEntityKeys: ReadonlySet<string>,
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
     minQueueOrder: number,
-  ): Promise<void> {
-    // One store at a time: a store that queues its work again releases in
-    // turn the work held behind it, and work held behind creations of two
-    // stores released together (e.g. a comment and a file of the same task)
-    // must be queued again only once, by the last of them.
+  ): Promise<number> {
+    // One store at a time, each queueing after the ones before it: a store
+    // that queues its work again releases in turn the work held behind it,
+    // and work held behind creations of two stores released together (e.g. a
+    // comment and a file of the same task) must be queued again only once,
+    // by the last of them and after the work of both.
+    let nextQueueOrder = minQueueOrder;
     for (const registration of this.#registrations.values()) {
       if (
         registration.storeName === sourceStoreName ||
@@ -1470,11 +1475,11 @@ class SessionOfflineCoordinator {
       }
 
       try {
-        await registration.onCreationsReleased(
+        nextQueueOrder = await registration.onCreationsReleased(
           sourceStoreName,
           releasedEntityKeys,
           getEntityKey,
-          minQueueOrder,
+          nextQueueOrder,
         );
       } catch (error) {
         // The source store already applied its decision: a store that fails
@@ -1482,6 +1487,8 @@ class SessionOfflineCoordinator {
         this.#onPersistentStorageError?.(error);
       }
     }
+
+    return nextQueueOrder;
   }
 
   /**

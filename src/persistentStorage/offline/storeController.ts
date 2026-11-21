@@ -621,6 +621,8 @@ export function createOfflineStoreController<
   // Ids of the resolutions the creations of this store wait for, as last
   // reported to the session (see `refreshDerivedState`).
   let publishedCreationResolutionIds = '';
+  // Ids of the resolutions being queued again (see `requeueResolutions`).
+  const requeuingResolutionIds = new Set<string>();
   const replayRetryMaxFailures =
     sessionConfig.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
   const replayRetryIntervalMs =
@@ -3070,10 +3072,10 @@ export function createOfflineStoreController<
     releasedEntityKeys: ReadonlySet<string>,
     getSourceEntityKey: (entityRef: ValidPayload) => string | undefined,
     minQueueOrder: number,
-  ): Promise<void> {
+  ): Promise<number> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
-    if (!current || resolutions.size === 0) return;
+    if (!current || resolutions.size === 0) return minQueueOrder;
 
     const dependencySnapshot = createResolutionDependencySnapshot();
     const releasedWork = new Map<string, PersistedOfflineResolutionRecord>();
@@ -3103,13 +3105,13 @@ export function createOfflineStoreController<
         releasedWork.set(workItem.id, workItem);
       }
     }
-    if (releasedWork.size === 0) return;
+    if (releasedWork.size === 0) return minQueueOrder;
 
     const requeuedWork = [...releasedWork.values()];
     await requeueResolutions(current, requeuedWork, undefined, minQueueOrder);
     // The work other stores held behind the creations queued again follows
     // them in turn (e.g. the reactions to a comment held behind its task).
-    await notifyCreationsReleased(current, requeuedWork);
+    return notifyCreationsReleased(current, requeuedWork);
   }
 
   /**
@@ -3135,18 +3137,19 @@ export function createOfflineStoreController<
   /**
    * Lets the other stores of the session queue again the work they held
    * behind the creations of `releasedWork`, which was just queued again or
-   * kept (see `requeueWorkHeldBehindExternalCreations`).
+   * kept (see `requeueWorkHeldBehindExternalCreations`). Resolves to the
+   * queue order that follows this work and the work they queued again.
    */
   async function notifyCreationsReleased(
     current: ActiveSessionState,
     releasedWork: readonly PersistedOfflineResolutionRecord[],
-  ): Promise<void> {
+  ): Promise<number> {
     const releasedEntityKeys = new Set(
       releasedWork.flatMap((workItem) => getCreatedEntityKeys(workItem)),
     );
-    if (releasedEntityKeys.size === 0) return;
+    if (releasedEntityKeys.size === 0) return nextQueueOrder;
 
-    await current.session.notifyCreationsReleased(
+    return current.session.notifyCreationsReleased(
       storeName,
       releasedEntityKeys,
       getEntityKeyOfPayload,
@@ -3686,6 +3689,38 @@ export function createOfflineStoreController<
    * of another store they must follow.
    */
   async function requeueResolutions(
+    current: ActiveSessionState,
+    resolutionsToRequeue: PersistedOfflineResolutionRecord[],
+    sentResolutionId: string | undefined,
+    minQueueOrder?: number,
+  ): Promise<void> {
+    // A resolution is only removed once its entry is saved: until then, a
+    // decision or a release made at the same time (e.g. a "retry all" action
+    // deciding the two creations some work waits for) still finds it, and
+    // must not queue it a second time.
+    const unclaimedResolutions = resolutionsToRequeue.filter(
+      (resolution) => !requeuingResolutionIds.has(resolution.id),
+    );
+    if (unclaimedResolutions.length === 0) return;
+
+    for (const resolution of unclaimedResolutions) {
+      requeuingResolutionIds.add(resolution.id);
+    }
+    try {
+      await requeueClaimedResolutions(
+        current,
+        unclaimedResolutions,
+        sentResolutionId,
+        minQueueOrder,
+      );
+    } finally {
+      for (const resolution of unclaimedResolutions) {
+        requeuingResolutionIds.delete(resolution.id);
+      }
+    }
+  }
+
+  async function requeueClaimedResolutions(
     current: ActiveSessionState,
     resolutionsToRequeue: PersistedOfflineResolutionRecord[],
     sentResolutionId: string | undefined,

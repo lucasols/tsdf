@@ -2070,99 +2070,103 @@ describe('items of other stores', () => {
     );
   });
 
-  test('work that belongs to items of two stores, both held behind the same failed task creation, is sent only once after the user sends the task creation again', async () => {
-    type LinkedItem = { belongsTo: string[] };
-    type LinkedItemInput = {
-      id: string;
-      belongsTo: { storeName: string; id: string }[];
-    };
-    type LinkedItemsOperations = {
-      addWithId: CollectionOfflineOperationDefinition<
-        { value: LinkedItem },
-        string,
-        LinkedItemInput,
-        unknown
-      >;
-    };
+  type LinkedItem = { belongsTo: string[] };
+  type LinkedItemInput = {
+    id: string;
+    belongsTo: { storeName: string; id: string }[];
+  };
+  type LinkedItemsOperations = {
+    addWithId: CollectionOfflineOperationDefinition<
+      { value: LinkedItem },
+      string,
+      LinkedItemInput,
+      unknown
+    >;
+  };
 
-    network.setOffline();
-    const sessionKey = 'held-shared-descendant-retry';
-    const env = createTasksAndCommentsEnv(sessionKey);
-
-    /**
-     * One more store of the session, whose items are added with a
-     * client-generated id and declared `cancelledWith` the items of other
-     * stores they belong to. Its requests are logged with the ones of the
-     * comments store, to assert the order they are sent in.
-     */
-    function createLinkedItemsStore(name: string) {
-      const storeName = `${sessionKey}-${name}`;
-      const linkedItems = createCollectionStoreTestEnv<
-        LinkedItem,
-        LinkedItemsOperations
-      >(
-        {},
-        {
-          id: storeName,
-          getSessionKey: () => sessionKey,
-          storeManager: env.storeManager,
-          testScenario: 'loaded',
-          persistentStorage: {
-            adapter: 'local-sync',
-            schema: rc_object({
-              value: rc_object({ belongsTo: rc_array(rc_string) }),
-            }),
-            payloadSchema: rc_string,
-            offline: {
-              operations: {
-                addWithId: {
-                  inputSchema: rc_object({
-                    id: rc_string,
-                    belongsTo: rc_array(
-                      rc_object({ storeName: rc_string, id: rc_string }),
-                    ),
-                  }),
-                  kind: 'create',
-                  getEntityRefs: ({ input }) => [input.id],
-                  cancelledWith: ({ input }) =>
-                    input.belongsTo.map((parent) => ({
-                      storeName: parent.storeName,
-                      entityRef: parent.id,
-                    })),
-                  execute: async ({ input }) => {
-                    env.sentRequests.push(`add ${input.id}`);
-                    await linkedItems.serverTable.delayedSetItem(input.id, {
-                      belongsTo: input.belongsTo.map((parent) => parent.id),
-                    });
-                  },
-                  onSuccessExecute: () => {},
+  /**
+   * One more store of the session, whose items are added with a
+   * client-generated id and declared `cancelledWith` the items of other
+   * stores they belong to. Its requests are logged with the ones of the
+   * comments store, to assert the order they are sent in.
+   */
+  function createLinkedItemsStore(
+    env: ReturnType<typeof createTasksAndCommentsEnv>,
+    sessionKey: string,
+    name: string,
+  ) {
+    const storeName = `${sessionKey}-${name}`;
+    const linkedItems = createCollectionStoreTestEnv<
+      LinkedItem,
+      LinkedItemsOperations
+    >(
+      {},
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        storeManager: env.storeManager,
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: rc_object({
+            value: rc_object({ belongsTo: rc_array(rc_string) }),
+          }),
+          payloadSchema: rc_string,
+          offline: {
+            operations: {
+              addWithId: {
+                inputSchema: rc_object({
+                  id: rc_string,
+                  belongsTo: rc_array(
+                    rc_object({ storeName: rc_string, id: rc_string }),
+                  ),
+                }),
+                kind: 'create',
+                getEntityRefs: ({ input }) => [input.id],
+                cancelledWith: ({ input }) =>
+                  input.belongsTo.map((parent) => ({
+                    storeName: parent.storeName,
+                    entityRef: parent.id,
+                  })),
+                execute: async ({ input }) => {
+                  env.sentRequests.push(`add ${input.id}`);
+                  await linkedItems.serverTable.delayedSetItem(input.id, {
+                    belongsTo: input.belongsTo.map((parent) => parent.id),
+                  });
                 },
+                onSuccessExecute: () => {},
               },
             },
           },
         },
-      );
+      },
+    );
 
-      function add(id: string, belongsTo: LinkedItemInput['belongsTo']) {
-        const value = { belongsTo: belongsTo.map((parent) => parent.id) };
-        return act(async () => {
-          await linkedItems.apiStore.performMutation(id, {
-            optimisticUpdate: () => {
-              linkedItems.apiStore.addItemToState(id, { value });
-            },
-            mutation: () => linkedItems.serverTable.delayedSetItem(id, value),
-            offline: { operation: 'addWithId', input: { id, belongsTo } },
-          });
+    function add(id: string, belongsTo: LinkedItemInput['belongsTo']) {
+      const value = { belongsTo: belongsTo.map((parent) => parent.id) };
+      return act(async () => {
+        await linkedItems.apiStore.performMutation(id, {
+          optimisticUpdate: () => {
+            linkedItems.apiStore.addItemToState(id, { value });
+          },
+          mutation: () => linkedItems.serverTable.delayedSetItem(id, value),
+          offline: { operation: 'addWithId', input: { id, belongsTo } },
         });
-      }
-
-      return { storeName, add, env: linkedItems };
+      });
     }
+
+    return { storeName, add, env: linkedItems };
+  }
+
+  test('work that belongs to items of two stores, both held behind the same failed task creation, is sent only once after the user sends the task creation again', async () => {
+    network.setOffline();
+    const sessionKey = 'held-shared-descendant-retry';
+    const env = createTasksAndCommentsEnv(sessionKey);
 
     // Files attached to a task, and quotes of a file inside a comment: a
     // quote belongs to both its comment and its file.
-    const files = createLinkedItemsStore('files');
-    const quotes = createLinkedItemsStore('quotes');
+    const files = createLinkedItemsStore(env, sessionKey, 'files');
+    const quotes = createLinkedItemsStore(env, sessionKey, 'quotes');
 
     // Offline: create task 50, comment on it, attach a file to it and quote
     // the file in the comment.
@@ -2239,6 +2243,148 @@ describe('items of other stores', () => {
       quotes||q1:
         belongsTo: ['comments||c1', 'files||f1']
     `);
+    expect(env.storeManager.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('work that belongs to items of two stores is sent after both of them, even when one of the stores sends more held work than the other', async () => {
+    network.setOffline();
+    const sessionKey = 'held-shared-descendant-order';
+    const env = createTasksAndCommentsEnv(sessionKey);
+    const files = createLinkedItemsStore(env, sessionKey, 'files');
+    const quotes = createLinkedItemsStore(env, sessionKey, 'quotes');
+
+    // Offline: create task 50, add three comments and one file to it, and
+    // quote the file in the last comment.
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    await env.addCommentWithId('comments||c1', 'Dates?', 'tasks||50');
+    await advanceTime(1_000);
+    await env.addCommentWithId('comments||c2', 'Budget?', 'tasks||50');
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c3',
+      'See the itinerary',
+      'tasks||50',
+    );
+    await advanceTime(1_000);
+    await files.add('files||f1', [
+      { storeName: env.tasksStoreName, id: 'tasks||50' },
+    ]);
+    await advanceTime(1_000);
+    await quotes.add('quotes||q1', [
+      { storeName: env.commentsStoreName, id: 'comments||c3' },
+      { storeName: files.storeName, id: 'files||f1' },
+    ]);
+
+    // Back online, the task creation fails on every attempt (3) until it
+    // asks for a manual decision, with everything else held behind it.
+    env.tasks.faults.createTaskWithId.push(
+      'request-lost',
+      'request-lost',
+      'request-lost',
+    );
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    const failedCreation = env.tasks.apiStore.getOfflineResolutions()[0];
+    if (failedCreation?.operation !== 'createTaskWithId') {
+      throw new Error('Expected the failed task creation');
+    }
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+
+    // The user asks to send the task creation again.
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // The quote is sent after its comment, although the comments store had
+    // three items to send again and the files store, which released the
+    // quote, only one: a server that checks the comment exists would
+    // otherwise refuse the quote.
+    expect([...env.tasks.sentRequests.slice(3), ...env.sentRequests])
+      .toMatchInlineSnapshot(`
+        - 'createTaskWithId tasks||50'
+        - 'addCommentWithId comments||c1 "Dates?" to tasks||50'
+        - 'addCommentWithId comments||c2 "Budget?" to tasks||50'
+        - 'addCommentWithId comments||c3 "See the itinerary" to tasks||50'
+        - 'add files||f1'
+        - 'add quotes||q1'
+      `);
+    expect(env.storeManager.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('work held behind two task creations that both wait for a decision is sent only once when the user decides both at the same time', async () => {
+    network.setOffline();
+    const sessionKey = 'held-shared-descendant-bulk-decision';
+    const env = createTasksAndCommentsEnv(sessionKey);
+    // Links between two tasks: a link belongs to both of them.
+    const links = createLinkedItemsStore(env, sessionKey, 'links');
+
+    // Offline: create tasks 50 and 51, and link them.
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+    await advanceTime(1_000);
+    await env.tasks.createTaskWithId(51, 'Book flights');
+    await advanceTime(1_000);
+    await links.add('links||l1', [
+      { storeName: env.tasksStoreName, id: 'tasks||50' },
+      { storeName: env.tasksStoreName, id: 'tasks||51' },
+    ]);
+
+    // On reconnect the server already has tasks with those ids: both
+    // creations report a conflict, and the link waits behind both.
+    env.tasks.conflicts.createTaskWithId = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.tasks.conflicts.createTaskWithId = false;
+    const conflicts = env.tasks.apiStore.getOfflineResolutions();
+    expect(
+      [...conflicts, ...links.env.apiStore.getOfflineResolutions()].map(
+        (resolution) =>
+          pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+      ),
+    ).toMatchInlineSnapshot(`
+      - op: 'createTaskWithId'
+      - op: 'createTaskWithId'
+      - { blockedBy: 2, op: 'addWithId' }
+    `);
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+
+    // The user keeps the tasks of the server with a "keep all" action, which
+    // decides both conflicts at the same time.
+    env.tasks.serverTable.setItem('tasks||50', { id: 50, name: 'Plan trip' });
+    env.tasks.serverTable.setItem('tasks||51', {
+      id: 51,
+      name: 'Book flights',
+    });
+    await act(async () => {
+      await Promise.all(
+        conflicts.map(async (conflict) => {
+          await env.tasks.apiStore.resolveOfflineResolution(
+            conflict.id,
+            'createTaskWithId',
+            { action: 'commit' },
+          );
+        }),
+      );
+    });
+    await flushAllTimers();
+
+    // Each decision releases the link, which waits for nothing else once
+    // both are made: it is still sent only once.
+    expect(env.sentRequests).toMatchInlineSnapshot(`['add links||l1']`);
     expect(env.storeManager.getOfflineResolutions()).toMatchInlineSnapshot(
       `[]`,
     );
