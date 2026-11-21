@@ -69,7 +69,7 @@
   },
   "devDependencies": {
     "@ls-stack/fast-lint": "^0.7.0",
-    "@playwright/test": "^1.58.2",
+    "@playwright/test": "^1.65.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.0.3",
     "@types/react": "^18.3.27",
