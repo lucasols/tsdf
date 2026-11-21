@@ -543,15 +543,16 @@ export type ItemOfflineState = {
   /** Whether the item is waiting for a manual resolution. */
   requiresResolution: boolean;
   /**
-   * Whether the item was created offline through a `tempEntity` /
-   * `tempEntities` operation and the server has not confirmed it yet, so it is
-   * still tracked under its temporary payload. Creations queued without a temp
-   * entity (e.g. with a client-generated id) report `false`. It stays `true`
-   * while the creation itself is being sent, so the server may already have
-   * it while `syncState` is `syncing` or `needs-confirmation`; only with
-   * `syncState: 'pending'` has it not been sent yet. Once the server entity is
-   * reconciled, the temporary payload has no state anymore and the final
-   * payload reports any mutation still queued with `isUnsentCreation: false`.
+   * Whether the item was created offline and the server has not confirmed
+   * its creation yet: a `tempEntity` / `tempEntities` creation still tracked
+   * under its temporary payload, or a `create` without temp entity (an item
+   * with a client-generated id) still queued or waiting for a manual
+   * resolution. It stays `true` while the creation itself is being sent, so
+   * the server may already have it while `syncState` is `syncing` or
+   * `needs-confirmation`; only with `syncState: 'pending'` has it not been
+   * sent yet. Once the server entity is reconciled (or the creation of a
+   * client-generated id succeeds), the mutations still queued for the item
+   * report `isUnsentCreation: false`.
    */
   isUnsentCreation: boolean;
   /**
@@ -564,12 +565,14 @@ export type ItemOfflineState = {
    * with an operation that cancels pending creations (see
    * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}) sends
    * nothing, unless one operation created it together with other entities
-   * (see that option). A creation queued after its direct online request
-   * failed, or sent again with `requeue` after a conflict, also reports
-   * `false`: an earlier request may have created a server item, but the
-   * temporary payload can't target it, so the delete still only discards
-   * local work and that server item is left as is. Always `false` for items
-   * that are not unsent creations.
+   * (see that option). A temp entity whose creation was queued after its
+   * direct online request failed, or sent again with `requeue` after a
+   * conflict, also reports `false`: an earlier request may have created a
+   * server item, but the temporary payload can't target it, so the delete
+   * still only discards local work and that server item is left as is. An
+   * item with a client-generated id reports `true` in that case: the delete
+   * can target its id, so it is sent after the creation. Always `false` for
+   * items that are not unsent creations.
    */
   creationAttempted: boolean;
 };
@@ -624,6 +627,12 @@ export type GlobalOfflineEntity = {
  */
 export type InternalGlobalOfflineEntity = GlobalOfflineEntity & {
   payload?: ValidPayload;
+  /**
+   * Set while a `create` without temp entity (an item with a client-generated
+   * id) of the entity waits to be confirmed by the server, in the queue or in
+   * a manual resolution (see {@link ItemOfflineState.isUnsentCreation}).
+   */
+  isClientIdCreation?: true;
 };
 
 /** Reference to an entity participating in offline sync tracking. */
@@ -1983,9 +1992,19 @@ export type CollectionOfflineOperationDefinition<
    * together with everything queued under it, and its own temp entities are
    * removed from the store.
    *
-   * This only drives that cleanup: it does not delay the replay of this
-   * operation nor rewrite its input when the other entity gets its final
-   * ref. Entities of the same store are declared with `dependsOn`.
+   * While the creation of one of them waits for a manual resolution, this
+   * operation is not sent either: it is held behind that resolution
+   * (`blockedResolutionCount > 0`) and follows the decision, sent after the
+   * creation on `retry` (default scope), `requeue` or `commit`, dropped on
+   * `discard`. While that creation is still queued, this operation is queued
+   * behind it even when made online, instead of sent directly. This
+   * only covers the stores attached in the tab that replays or queues this
+   * operation, and the decision is only followed by the stores attached in
+   * the tab where it is made.
+   *
+   * It does not rewrite the input when the other entity gets its final ref
+   * (a temp entity's server id). Entities of the same store are declared
+   * with `dependsOn`.
    */
   cancelledWith?: (
     ctx: OperationEntityRefsContext<TInput>,
@@ -2124,9 +2143,19 @@ export type ListQueryOfflineOperationDefinition<
    * together with everything queued under it, and its own temp entities are
    * removed from the store.
    *
-   * This only drives that cleanup: it does not delay the replay of this
-   * operation nor rewrite its input when the other entity gets its final
-   * ref. Entities of the same store are declared with `dependsOn`.
+   * While the creation of one of them waits for a manual resolution, this
+   * operation is not sent either: it is held behind that resolution
+   * (`blockedResolutionCount > 0`) and follows the decision, sent after the
+   * creation on `retry` (default scope), `requeue` or `commit`, dropped on
+   * `discard`. While that creation is still queued, this operation is queued
+   * behind it even when made online, instead of sent directly. This
+   * only covers the stores attached in the tab that replays or queues this
+   * operation, and the decision is only followed by the stores attached in
+   * the tab where it is made.
+   *
+   * It does not rewrite the input when the other entity gets its final ref
+   * (a temp entity's server id). Entities of the same store are declared
+   * with `dependsOn`.
    */
   cancelledWith?: (
     ctx: OperationEntityRefsContext<TInput>,

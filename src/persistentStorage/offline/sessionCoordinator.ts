@@ -84,8 +84,14 @@ import {
 function stripInternalEntityPayload(
   entity: InternalGlobalOfflineEntity,
 ): GlobalOfflineEntity {
-  if (!('payload' in entity)) return entity;
-  const { payload: _payload, ...publicEntity } = entity;
+  if (!('payload' in entity) && !('isClientIdCreation' in entity)) {
+    return entity;
+  }
+  const {
+    payload: _payload,
+    isClientIdCreation: _isClientIdCreation,
+    ...publicEntity
+  } = entity;
   return publicEntity;
 }
 
@@ -255,6 +261,42 @@ type SessionRegistration = {
     cancelledEntityKeys: ReadonlySet<string>,
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
   ) => Promise<void>;
+  /**
+   * Id of the manual resolution the creation of `entityRef` (an entity
+   * payload of the store) waits for, if any: the other stores hold their work
+   * declared as `cancelledWith` that entity behind it.
+   */
+  findCreationResolutionId?: (entityRef: ValidPayload) => string | undefined;
+  /**
+   * Whether the creation of `entityRef` (an entity payload of the store) is
+   * still queued: the other stores queue their online work declared as
+   * `cancelledWith` that entity behind it.
+   */
+  hasQueuedCreation?: (entityRef: ValidPayload) => boolean;
+  /**
+   * Called when another store of the session sent again, or kept, creations
+   * that waited for a manual resolution. `releasedEntityKeys` holds their
+   * keys in the source store, `getEntityKey` keys an entity payload of that
+   * store the same way, and the work released after them must be queued
+   * from `minQueueOrder` on. Resolves to the queue order from which the work
+   * released after the one of this store must be queued (`minQueueOrder`
+   * when it released nothing). Only registered by stores with
+   * `cancelledWith` operations.
+   */
+  onCreationsReleased?: (
+    sourceStoreName: string,
+    releasedEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
+    minQueueOrder: number,
+  ) => Promise<number>;
+  /**
+   * Called when a creation of another store of the session started or
+   * stopped waiting for a manual resolution, so the store reports again the
+   * resolutions its work is held behind. Only registered by stores with
+   * `cancelledWith` operations. `isRemoteChange` tells that another tab made
+   * the change, and already published and persisted what follows from it.
+   */
+  onCreationResolutionsChanged?: (isRemoteChange?: boolean) => void;
   /** Another tab saved or removed (`null`) a queue entry of the store. */
   onRemoteQueueEntryChange?: (
     entryId: string,
@@ -1395,6 +1437,89 @@ class SessionOfflineCoordinator {
     for (const result of await Promise.allSettled(pendingCleanups)) {
       if (result.status === 'rejected') {
         this.#onPersistentStorageError?.(result.reason);
+      }
+    }
+  }
+
+  /**
+   * Id of the manual resolution the creation of `entityRef` waits for in
+   * store `storeName`, when that store is attached in this tab.
+   */
+  findCreationResolutionId(
+    storeName: string,
+    entityRef: ValidPayload,
+  ): string | undefined {
+    return this.#registrations
+      .get(storeName)
+      ?.findCreationResolutionId?.(entityRef);
+  }
+
+  /**
+   * Whether the creation of `entityRef` is still queued in store `storeName`,
+   * when that store is attached in this tab.
+   */
+  hasQueuedCreation(storeName: string, entityRef: ValidPayload): boolean {
+    return (
+      this.#registrations.get(storeName)?.hasQueuedCreation?.(entityRef) ===
+      true
+    );
+  }
+
+  /**
+   * Lets the other stores of the session queue again the work they held
+   * behind creations of `sourceStoreName` that waited for a manual
+   * resolution, once those creations were sent again or kept. Resolves to
+   * the queue order that follows all the work queued again.
+   */
+  async notifyCreationsReleased(
+    sourceStoreName: string,
+    releasedEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
+    minQueueOrder: number,
+  ): Promise<number> {
+    // One store at a time, each queueing after the ones before it: a store
+    // that queues its work again releases in turn the work held behind it,
+    // and work held behind creations of two stores released together (e.g. a
+    // comment and a file of the same task) must be queued again only once,
+    // by the last of them and after the work of both.
+    let nextQueueOrder = minQueueOrder;
+    for (const registration of this.#registrations.values()) {
+      if (
+        registration.storeName === sourceStoreName ||
+        !registration.onCreationsReleased
+      ) {
+        continue;
+      }
+
+      try {
+        nextQueueOrder = await registration.onCreationsReleased(
+          sourceStoreName,
+          releasedEntityKeys,
+          getEntityKey,
+          nextQueueOrder,
+        );
+      } catch (error) {
+        // The source store already applied its decision: a store that fails
+        // to queue its held work again is reported without failing it.
+        this.#onPersistentStorageError?.(error);
+      }
+    }
+
+    return nextQueueOrder;
+  }
+
+  /**
+   * Lets the other stores of the session report again the resolutions their
+   * work is held behind, after a creation of `sourceStoreName` started or
+   * stopped waiting for a manual resolution.
+   */
+  notifyCreationResolutionsChanged(
+    sourceStoreName: string,
+    isRemoteChange?: boolean,
+  ): void {
+    for (const registration of this.#registrations.values()) {
+      if (registration.storeName !== sourceStoreName) {
+        registration.onCreationResolutionsChanged?.(isRemoteChange);
       }
     }
   }

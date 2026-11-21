@@ -2,9 +2,13 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, vi } from 'vitest';
-import type { ListQueryOfflineOperationDefinition } from '../../src/main';
+import type {
+  CollectionOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
+} from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -13,6 +17,7 @@ import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   deleteItemInputSchema,
   getSortedQueueSummary,
+  getSortedSessionQueueSummary,
   userPatchSchema,
 } from './offlineReplayTestShared';
 import {
@@ -103,6 +108,13 @@ type TasksOperations = {
     { id: number; name: string; parentId: string },
     { reason: string }
   >;
+  createTaskWithId: ListQueryOfflineOperationDefinition<
+    TaskRow,
+    ListQueryParams,
+    string,
+    { id: number; name: string },
+    { reason: string }
+  >;
   renameTask: ListQueryOfflineOperationDefinition<
     TaskRow,
     ListQueryParams,
@@ -143,6 +155,7 @@ const taskRowSchema = rc_object({
   parentId: rc_string.optionalKey(),
 });
 const subtaskInputSchema = rc_object({ name: rc_string, parentId: rc_string });
+const taskWithIdInputSchema = rc_object({ id: rc_number, name: rc_string });
 const subtaskWithIdInputSchema = rc_object({
   id: rc_number,
   name: rc_string,
@@ -163,12 +176,14 @@ export const tasksQuery = { tableId: 'tasks' } as const;
  * - a subtask, or an existing task moved under another one, declares its
  *   parent task with `dependsOn`
  * - `createSubtaskWithId` creates a subtask whose id (`tasks||<id>`) the app
- *   generates on the client, so it needs no temp row
+ *   generates on the client, so it needs no temp row; `createTaskWithId` does
+ *   the same for a top-level task
  * - when `conflicts.createTask` (or `conflicts.createSubtask`) is set, the
  *   replay of a task (or subtask) creation reports a conflict (the server
  *   already has a task with that name) instead of sending it; with
- *   `conflicts.createSubtaskWithId` the replay of `createSubtaskWithId`
- *   reports that the server already has a task with that id
+ *   `conflicts.createSubtaskWithId` (or `conflicts.createTaskWithId`) the
+ *   replay of `createSubtaskWithId` (or `createTaskWithId`) reports that the
+ *   server already has a task with that id
  * - `editTask` sends a partial change of a task (name and/or parent); the
  *   offline edits of the same task are merged into one request
  * - deleting a task supersedes its queued edits and, when the task was
@@ -185,14 +200,15 @@ export function createTasksEnv(
 ) {
   let nextTaskId = 3;
   const sentRequests: string[] = [];
-  const faults: Record<'createTask' | 'deleteTask', NetworkFault[]> = {
-    createTask: [],
-    deleteTask: [],
-  };
+  const faults: Record<
+    'createTask' | 'createTaskWithId' | 'deleteTask',
+    NetworkFault[]
+  > = { createTask: [], createTaskWithId: [], deleteTask: [] };
   const conflicts = {
     createTask: false,
     createSubtask: false,
     createSubtaskWithId: false,
+    createTaskWithId: false,
   };
 
   async function createOnServer(input: { name: string; parentId?: string }) {
@@ -300,6 +316,30 @@ export function createTasksEnv(
                 const itemId = `tasks||${input.id}`;
                 sentRequests.push(`createSubtaskWithId ${itemId}`);
                 await env.serverTable.delayedSetItem(itemId, input);
+              },
+              onSuccessExecute: () => {},
+            },
+            createTaskWithId: {
+              inputSchema: taskWithIdInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`tasks||${input.id}`],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () =>
+                  conflicts.createTaskWithId ? { reason: 'id-taken' } : false,
+              },
+              execute: async ({ input }) => {
+                const itemId = `tasks||${input.id}`;
+                sentRequests.push(`createTaskWithId ${itemId}`);
+                const fault = faults.createTaskWithId.shift();
+                if (fault === 'request-lost') {
+                  throw new Error('connection lost');
+                }
+
+                await env.serverTable.delayedSetItem(itemId, input);
+                if (fault === 'response-lost') {
+                  throw new Error('connection lost');
+                }
               },
               onSuccessExecute: () => {},
             },
@@ -463,6 +503,23 @@ export function createTasksEnv(
     });
   }
 
+  function createTaskWithId(id: number, name: string) {
+    return act(async () => {
+      await env.apiStore.performMutation(`tasks||${id}`, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            `tasks||${id}`,
+            { id, name },
+            { addItemToQueries: { queries: [tasksQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () =>
+          env.serverTable.delayedSetItem(`tasks||${id}`, { id, name }),
+        offline: { operation: 'createTaskWithId', input: { id, name } },
+      });
+    });
+  }
+
   function renameTask(itemId: string, name: string) {
     return act(async () => {
       await env.apiStore.performMutation(itemId, {
@@ -556,6 +613,7 @@ export function createTasksEnv(
     createTask,
     createSubtask,
     createSubtaskWithId,
+    createTaskWithId,
     renameTask,
     moveTask,
     editTask,
@@ -571,6 +629,237 @@ export function createTasksEnv(
     getServerTasks: () =>
       Object.values(env.serverTable.getAll()).map(
         (task) => `${task.id}: ${task.name}`,
+      ),
+  };
+}
+
+const commentInputSchema = rc_object({ text: rc_string, taskId: rc_string });
+const commentSchema = rc_object({ value: commentInputSchema });
+const editCommentInputSchema = rc_object({
+  itemId: rc_string,
+  text: rc_string,
+});
+const commentWithIdInputSchema = rc_object({
+  id: rc_string,
+  text: rc_string,
+  taskId: rc_string,
+});
+
+type CommentItem = { text: string; taskId: string };
+
+type CommentsOperations = {
+  addComment: CollectionOfflineOperationDefinition<
+    { value: CommentItem },
+    string,
+    CommentItem,
+    unknown,
+    { id: string; text: string; taskId: string }
+  >;
+  editComment: CollectionOfflineOperationDefinition<
+    { value: CommentItem },
+    string,
+    { itemId: string; text: string },
+    unknown
+  >;
+  addCommentWithId: CollectionOfflineOperationDefinition<
+    { value: CommentItem },
+    string,
+    { id: string; text: string; taskId: string },
+    unknown
+  >;
+};
+
+type CommentsEnv = ReturnType<
+  typeof createCollectionStoreTestEnv<CommentItem, CommentsOperations>
+>;
+
+/**
+ * A task list plus a separate comments collection in the same offline
+ * session. Comments can be added offline (temp items `temp:<text>`), also
+ * to a task that was itself created offline: `cancelledWith` tells the
+ * comments store which task of the tasks store a queued comment belongs to.
+ * `addCommentWithId` adds a comment whose id the app generates on the
+ * client, so it needs no temp item.
+ */
+export function createTasksAndCommentsEnv(sessionKey: string) {
+  const tasksStoreName = `${sessionKey}-tasks`;
+  const commentsStoreName = `${sessionKey}-comments`;
+  const storeManager = createStoreManagerForSession(sessionKey);
+  const tasks = createTasksEnv(sessionKey, tasksStoreName, storeManager);
+  const sentRequests: string[] = [];
+  let nextCommentId = 1;
+
+  const comments: CommentsEnv = createCollectionStoreTestEnv<
+    CommentItem,
+    CommentsOperations
+  >(
+    {},
+    {
+      id: commentsStoreName,
+      getSessionKey: () => sessionKey,
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: commentSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            addComment: {
+              inputSchema: commentInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.text}`],
+              cancelledWith: ({ input }) => [
+                { storeName: tasksStoreName, entityRef: input.taskId },
+              ],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ value: input }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                  finalData: {
+                    value: { text: result.text, taskId: result.taskId },
+                  },
+                }),
+              },
+              execute: async ({ input }) => {
+                sentRequests.push(
+                  `addComment "${input.text}" to ${input.taskId}`,
+                );
+                const result = { id: `comments||${nextCommentId}`, ...input };
+                nextCommentId += 1;
+                await comments.serverTable.delayedSetItem(result.id, input);
+                return result;
+              },
+            },
+            editComment: {
+              inputSchema: editCommentInputSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: async ({ input }) => {
+                sentRequests.push(
+                  `editComment ${input.itemId} to "${input.text}"`,
+                );
+                await comments.serverTable.delayedUpdateItem(input.itemId, {
+                  text: input.text,
+                });
+                return { text: input.text };
+              },
+              onSuccessExecute: ({ input }) => {
+                comments.apiStore.updateItemState(input.itemId, (draft) => {
+                  draft.value.text = input.text;
+                });
+              },
+            },
+            addCommentWithId: {
+              inputSchema: commentWithIdInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [input.id],
+              cancelledWith: ({ input }) => [
+                { storeName: tasksStoreName, entityRef: input.taskId },
+              ],
+              execute: async ({ input: { id, text, taskId } }) => {
+                sentRequests.push(
+                  `addCommentWithId ${id} "${text}" to ${taskId}`,
+                );
+                await comments.serverTable.delayedSetItem(id, { text, taskId });
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  function addComment(text: string, taskId: string) {
+    return act(async () => {
+      await comments.apiStore.performMutation(null, {
+        mutation: async () => {
+          const result = { id: 'comments||online', text, taskId };
+          await comments.serverTable.delayedSetItem(result.id, {
+            text,
+            taskId,
+          });
+          return result;
+        },
+        offline: { operation: 'addComment', input: { text, taskId } },
+      });
+    });
+  }
+
+  function addCommentWithId(id: string, text: string, taskId: string) {
+    return act(async () => {
+      await comments.apiStore.performMutation(id, {
+        optimisticUpdate: () => {
+          comments.apiStore.addItemToState(id, { value: { text, taskId } });
+        },
+        mutation: () =>
+          comments.serverTable.delayedSetItem(id, { text, taskId }),
+        offline: { operation: 'addCommentWithId', input: { id, text, taskId } },
+      });
+    });
+  }
+
+  function editComment(itemId: string, text: string) {
+    return act(async () => {
+      await comments.apiStore.performMutation(itemId, {
+        optimisticUpdate: () => {
+          comments.apiStore.updateItemState(itemId, (draft) => {
+            draft.value.text = text;
+          });
+        },
+        mutation: async () => {
+          await comments.serverTable.delayedUpdateItem(itemId, { text });
+          return { text };
+        },
+        offline: { operation: 'editComment', input: { itemId, text } },
+      });
+    });
+  }
+
+  /**
+   * Mounts the task list and tracks, in the timeline of the tasks store,
+   * the visible tasks and the comments the comments store holds locally.
+   */
+  function renderTasksAndComments() {
+    return renderHook(() => {
+      const query = tasks.apiStore.useListQuery(tasksQuery, {
+        itemSelector: (item) => item.name,
+      });
+      const localComments = comments.store.useSelector((state) =>
+        Object.values(state)
+          .map((comment) => comment?.data?.value.text)
+          .filter((text) => text !== undefined)
+          .join(', '),
+      );
+
+      tasks.trackItemUI('tasks', query.items.join(', '));
+      tasks.trackItemUI('comments', localComments || 'no comments');
+      return query;
+    });
+  }
+
+  return {
+    tasks,
+    comments,
+    storeManager,
+    tasksStoreName,
+    commentsStoreName,
+    sentRequests,
+    addComment,
+    addCommentWithId,
+    editComment,
+    renderTasksAndComments,
+    /** Queued mutations of both stores, in replay order. */
+    getSessionQueue: () =>
+      getSortedSessionQueueSummary(sessionKey, ['operation', 'input']),
+    /** Text of the comments that exist locally, by payload. */
+    getLocalComments: (payloads: string[]) =>
+      Object.fromEntries(
+        payloads.map((payload) => [
+          payload,
+          comments.apiStore.getItemState(payload)?.data?.value.text ?? null,
+        ]),
       ),
   };
 }

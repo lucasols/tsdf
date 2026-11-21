@@ -1898,7 +1898,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
     hook.unmount();
   });
 
-  test('an edit queued after the creation needs its own decision and does not bring the item back', async () => {
+  test('an edit queued after the creation waits for it and is dropped with it, without refetching the item', async () => {
     network.setOffline();
     const { env, createUserOffline, discardResolution, renderScreens } =
       createClientIdCreateEnv(
@@ -1912,6 +1912,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
       'offline: create Linus and rename him',
     ]);
     await createUserOffline(3, 'Linus');
+    await advanceTime(1_000);
     await act(async () => {
       await env.apiStore.performMutation('users||3', {
         optimisticUpdate: () => {
@@ -1933,7 +1934,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await flushAllTimers();
 
     env.addTimelineComments('beforeNextAction', [
-      'back online: both changes are rejected until they need a resolution',
+      'back online: the creation is rejected until it needs a resolution',
     ]);
     act(() => {
       network.goOnline();
@@ -1941,39 +1942,31 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await advanceTime(30_000);
     await flushAllTimers();
 
-    // Unlike the changes made on top of a temp entity, the rename is not held
-    // behind the failed creation: it is sent on its own, the server does not
-    // know Linus, and it waits for its own decision (it is not blocked by the
-    // creation).
+    // Like the changes made on top of a temp entity, the rename is not sent
+    // for a user the server does not know: it is held behind the failed
+    // creation, which is the only decision left to the user.
     expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
       .toMatchInlineSnapshot(`
-        - error: 'creation rejected'
+        - blocks: 1
+          error: 'creation rejected'
           input: 'itemId: "users||3", managerId: undefined, name: "Linus"'
           kind: 'retry-exhausted'
           on: 'item:users||3'
           op: 'createUser'
-        - error: 'Item not found: users||3'
+        - blockedBy: 1
+          error: 'Blocked by unresolved dependency'
           input: 'itemId: "users||3", name: "Linus T."'
           kind: 'retry-exhausted'
           on: 'item:users||3'
           op: 'patchUserName'
       `);
 
-    // Discarding the creation removes Linus. Nothing is refetched while the
-    // rename still waits for a decision.
+    // Discarding the creation removes Linus and drops the rename with it.
+    // Nothing is refetched for Linus: the server does not have him.
     env.addTimelineComments('beforeNextAction', [
-      'discard the creation: Linus is removed, no refetch',
+      'discard the creation: Linus and his rename are dropped, no refetch',
     ]);
     await discardResolution('createUser');
-
-    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
-
-    // Discarding the rename refetches what it changed: the lists and Linus,
-    // which the server does not have. He stays removed.
-    env.addTimelineComments('beforeNextAction', [
-      'discard the rename: Linus is refetched and not found',
-    ]);
-    await discardResolution('patchUserName');
 
     expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
@@ -1982,25 +1975,18 @@ describe('discarding a failed offline creation with a client-generated id', () =
       time   | linus     | rows          |
       0      | -         | -             | -- offline: create Linus and rename him
       .      | -         | -             | offline:createUser queued
-      .      | -         | -             | offline:patchUserName queued
+      1s     | -         | -             | offline:patchUserName queued
       .      | Linus T.  | Ada, Linus T. | [rows, linus] ui-initialized
-      3.01s  | Linus T.  | Ada, Linus T. | -- back online: both changes are rejected until they need a resolution
+      3s     | Linus T.  | Ada, Linus T. | -- back online: the creation is rejected until it needs a resolution
       .      | Linus T.  | Ada, Linus T. | offline:createUser replay-started
-      8.01s  | Linus T.  | Ada, Linus T. | offline:createUser replay-started
-      13.01s | Linus T.  | Ada, Linus T. | offline:createUser replay-started
+      8s     | Linus T.  | Ada, Linus T. | offline:createUser replay-started
+      13s    | Linus T.  | Ada, Linus T. | offline:createUser replay-started
       .      | Linus T.  | Ada, Linus T. | offline:createUser resolution-required
-      .      | Linus T.  | Ada, Linus T. | offline:patchUserName replay-started
-      19.21s | Linus T.  | Ada, Linus T. | offline:patchUserName replay-started
-      25.41s | Linus T.  | Ada, Linus T. | offline:patchUserName replay-started
-      26.61s | Linus T.  | Ada, Linus T. | offline:patchUserName resolution-required
-      33.01s | Linus T.  | Ada, Linus T. | -- discard the creation: Linus is removed, no refetch
+      .      | Linus T.  | Ada, Linus T. | offline:patchUserName resolution-required
+      33s    | Linus T.  | Ada, Linus T. | -- discard the creation: Linus and his rename are dropped, no refetch
       .      | - deleted | Ada           | [rows, linus] ui-changed
-      34.02s | - deleted | Ada           | -- discard the rename: Linus is refetched and not found
-      .      | - deleted | Ada           | 🔴 >list-fetch-started
-      .      | - loading | Ada           | [linus] ui-changed
-      .      | - loading | Ada           | 🟠 [users||3] >fetch-started
-      34.82s | - loading | Ada           | 🔴 <list-fetch-finished (value: {"count":1})
-      .      | - error   | Ada           | [linus] ui-changed
+      33.01s | - deleted | Ada           | 🔴 >list-fetch-started
+      33.81s | - deleted | Ada           | 🔴 <list-fetch-finished (value: {"count":1})
       "
     `);
 

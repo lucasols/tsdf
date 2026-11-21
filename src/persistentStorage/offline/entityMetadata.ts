@@ -1,4 +1,8 @@
-import type { GlobalOfflineEntity, ItemOfflineState } from './types';
+import type {
+  GlobalOfflineEntity,
+  InternalGlobalOfflineEntity,
+  ItemOfflineState,
+} from './types';
 
 export function createOfflineEntityLookup(
   entities: readonly GlobalOfflineEntity[],
@@ -13,10 +17,11 @@ export function createOfflineEntityLookup(
 }
 
 const storeEntityLookupsBySessionEntities = new WeakMap<
-  readonly GlobalOfflineEntity[],
-  Map<string, Map<string, GlobalOfflineEntity>>
+  readonly InternalGlobalOfflineEntity[],
+  Map<string, Map<string, InternalGlobalOfflineEntity>>
 >();
-const emptyEntityLookup: ReadonlyMap<string, GlobalOfflineEntity> = new Map();
+const emptyEntityLookup: ReadonlyMap<string, InternalGlobalOfflineEntity> =
+  new Map();
 
 /**
  * Entities of one store keyed by entity key, for a snapshot of the session's
@@ -25,9 +30,9 @@ const emptyEntityLookup: ReadonlyMap<string, GlobalOfflineEntity> = new Map();
  * instead of each scanning the whole session on every change.
  */
 export function getOfflineStoreEntityLookup(
-  sessionEntities: readonly GlobalOfflineEntity[],
+  sessionEntities: readonly InternalGlobalOfflineEntity[],
   storeName: string,
-): ReadonlyMap<string, GlobalOfflineEntity> {
+): ReadonlyMap<string, InternalGlobalOfflineEntity> {
   let lookupsByStoreName =
     storeEntityLookupsBySessionEntities.get(sessionEntities);
 
@@ -55,18 +60,20 @@ export function getOfflineStoreEntityLookup(
 }
 
 /**
- * @param attemptedCreationEntityIds - ids of the session's temp entities
+ * @param attemptedCreationEntityIds - ids of the session's unsent creations
  * whose creation was already sent or waits for a manual resolution
  */
 export function toItemOfflineState(
-  entity: GlobalOfflineEntity | undefined,
+  entity: InternalGlobalOfflineEntity | undefined,
   attemptedCreationEntityIds: readonly string[],
 ): ItemOfflineState | null {
   if (entity?.entityKind !== 'item') return null;
 
-  // Same rule as the stores' `unsentCreationItemKeys`: a temp entity that
-  // was not reconciled to its server payload yet.
-  const isUnsentCreation = entity.tempId !== undefined;
+  // A temp entity not reconciled to its server payload yet (the stores'
+  // `unsentCreationItemKeys`), or an item with a client-generated id whose
+  // creation the server has not confirmed yet.
+  const isUnsentCreation =
+    entity.tempId !== undefined || entity.isClientIdCreation === true;
 
   return {
     syncState: entity.syncState,
