@@ -25,9 +25,9 @@ setupCancelUnsentCreationTests();
 const notesInputSchema = rc_object({ taskId: rc_string, text: rc_string });
 const notesSchema = rc_object({ value: rc_object({ text: rc_string }) });
 
-type NotesItem = { text: string };
-
 type TasksEnvOptions = Parameters<typeof createTasksEnv>[3];
+
+type NotesItem = { text: string };
 
 type NotesOperations = {
   saveNotes: CollectionOfflineOperationDefinition<
@@ -485,6 +485,102 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
       17.05s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] <delete-item-persisted (value: {"id":50,"name":"Plan trip"})
       22.42s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 >list-fetch-started
       23.22s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('a task deleted and created again with the same id while offline keeps the notes written after: the delete, the creation and the notes are all sent', async () => {
+    network.setOffline();
+    const env = createTasksAndNotesEnv('recreated-task-keeps-notes');
+    const list = env.renderTasksAndNotes();
+    await flushAllTimers();
+
+    // Offline: the user deletes task 1, undoes the delete (the app creates the
+    // task again with the same id), then edits its notes.
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline: delete task 1',
+    ]);
+    await env.tasks.deleteTask('tasks||1');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'the user undoes the delete: the task is created again with the same id',
+    ]);
+    await env.tasks.createTaskWithId(1, 'Write report');
+    await advanceTime(1_000);
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'the user edits the notes of the task',
+    ]);
+    await env.saveNotes('tasks||1', 'Outline and budget');
+
+    // The three mutations wait in the order they were made.
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { itemId: 'tasks||1' }
+        operation: 'deleteTask'
+      - input: { id: 1, name: 'Write report' }
+        operation: 'createTaskWithId'
+      - input: { taskId: 'tasks||1', text: 'Outline and budget' }
+        operation: 'saveNotes'
+    `);
+
+    env.tasks.addTimelineComments('beforeNextAction', ['back online']);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // The delete succeeds while the creation of the same task is still
+    // queued: the task will exist again, so the notes written for it are kept
+    // and sent after the creation, instead of being dropped with the delete.
+    expect(env.getSentRequests()).toMatchInlineSnapshot(`
+      - 'deleteTask tasks||1'
+      - 'createTaskWithId tasks||1'
+      - 'saveNotes tasks||1 "Outline and budget"'
+    `);
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    // Nothing is left for the user to resolve, in either store.
+    expect(env.tasks.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(env.notes.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    // The server has the task again, with the notes the user wrote.
+    expect(env.tasks.getServerTasks()).toMatchInlineSnapshot(
+      `['2: Review budget', '1: Write report']`,
+    );
+    expect(env.notes.serverTable.getAll()).toMatchInlineSnapshot(
+      `tasks||1: { text: 'Outline and budget' }`,
+    );
+    // The notes column keeps the edit through the whole replay. (The task row
+    // leaves the list after the replay until the list is refetched, which is
+    // how the tasks store shows a re-created id, with or without notes.)
+    expect(env.tasks.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | notes                        | tasks                       |
+      0     | tasks||1: Outline            | Write report, Review budget | [tasks, notes] ui-initialized
+      3.01s | tasks||1: Outline            | Write report, Review budget | -- offline: delete task 1
+      .     | tasks||1: Outline            | Review budget               | [tasks] ui-changed
+      .     | tasks||1: Outline            | Review budget               | offline:deleteTask queued
+      4.01s | tasks||1: Outline            | Review budget               | -- the user undoes the delete: the task is created again with the same id
+      .     | tasks||1: Outline            | Review budget, Write report | [tasks] ui-changed
+      .     | tasks||1: Outline            | Review budget, Write report | offline:createTaskWithId queued
+      5.01s | tasks||1: Outline            | Review budget, Write report | -- the user edits the notes of the task
+      .     | tasks||1: Outline and budget | Review budget, Write report | [notes] ui-changed
+      .     | tasks||1: Outline and budget | Review budget, Write report | -- back online
+      .     | tasks||1: Outline and budget | Review budget, Write report | offline:deleteTask replay-started
+      .     | tasks||1: Outline and budget | Review budget, Write report | [tasks||1] >delete-item-started (value: {"id":1,"name":"Write report"})
+      5.85s | tasks||1: Outline and budget | Review budget, Write report | [tasks||1] <delete-item-persisted (value: {"id":1,"name":"Write report"})
+      6.21s | tasks||1: Outline and budget | Review budget, Write report | offline:deleteTask replay-finished
+      .     | tasks||1: Outline and budget | Review budget, Write report | offline:createTaskWithId replay-started
+      7.41s | tasks||1: Outline and budget | Review budget, Write report | [tasks||1] server-data-changed (value: {"id":1,"name":"Write report"})
+      .     | tasks||1: Outline and budget | Review budget, Write report | offline:createTaskWithId replay-finished
+      .     | tasks||1: Outline and budget | Review budget               | [tasks] ui-changed
+      8.62s | tasks||1: Outline and budget | Review budget               | 🔴 >list-fetch-started
+      9.42s | tasks||1: Outline and budget | Review budget               | 🔴 <list-fetch-finished (value: {"count":2})
+      .     | tasks||1: Outline and budget | Review budget, Write report | [tasks] ui-changed
       "
     `);
 

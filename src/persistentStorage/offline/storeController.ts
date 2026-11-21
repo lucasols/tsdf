@@ -3608,6 +3608,11 @@ export function createOfflineStoreController<
    * it references (`getEntityRefs`), as for a cancelled creation (see
    * `discardWorkCancelledWithExternalTempEntities`). Only the stores attached
    * in this tab are notified.
+   *
+   * An entity this store still has a creation for, queued or waiting for a
+   * manual resolution, is left out: it was created again after the delete
+   * (same client-generated id), so the work of the other stores follows that
+   * creation instead.
    */
   async function notifyEntitiesDeleted(
     current: ActiveSessionState,
@@ -3615,9 +3620,24 @@ export function createOfflineStoreController<
   ): Promise<void> {
     if (deletedEntityRefs.length === 0) return;
 
+    const deletedEntityKeys = new Set(
+      deletedEntityRefs.map((entityRef) => entityRef.entityKey),
+    );
+    for (const entry of queueEntries.values()) {
+      for (const entityKey of getCreatedEntityKeys(entry)) {
+        deletedEntityKeys.delete(entityKey);
+      }
+    }
+    for (const resolution of resolutions.values()) {
+      for (const entityKey of getCreatedEntityKeys(resolution)) {
+        deletedEntityKeys.delete(entityKey);
+      }
+    }
+    if (deletedEntityKeys.size === 0) return;
+
     await current.session.notifyTempEntitiesCancelled(
       storeName,
-      new Set(deletedEntityRefs.map((entityRef) => entityRef.entityKey)),
+      deletedEntityKeys,
       getEntityKeyOfPayload,
     );
   }

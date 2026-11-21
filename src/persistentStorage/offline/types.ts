@@ -2000,7 +2000,10 @@ export type CollectionOfflineOperationDefinition<
    * that references one of them (`getEntityRefs`) succeeds, sent online or
    * replayed: the entity no longer exists on the server. A delete that is
    * only queued, fails into a manual resolution or is discarded drops
-   * nothing, and does not change when this operation is sent.
+   * nothing, and does not change when this operation is sent. Nothing is
+   * dropped either for an entity the other store still has a creation of,
+   * queued or waiting for a manual resolution (created again with the same
+   * client-generated id after the delete).
    *
    * While the creation of one of them waits for a manual resolution, this
    * operation is not sent either: it is held behind that resolution
@@ -2157,7 +2160,10 @@ export type ListQueryOfflineOperationDefinition<
    * that references one of them (`getEntityRefs`) succeeds, sent online or
    * replayed: the entity no longer exists on the server. A delete that is
    * only queued, fails into a manual resolution or is discarded drops
-   * nothing, and does not change when this operation is sent.
+   * nothing, and does not change when this operation is sent. Nothing is
+   * dropped either for an entity the other store still has a creation of,
+   * queued or waiting for a manual resolution (created again with the same
+   * client-generated id after the delete).
    *
    * While the creation of one of them waits for a manual resolution, this
    * operation is not sent either: it is held behind that resolution
