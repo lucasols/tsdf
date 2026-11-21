@@ -934,7 +934,10 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
   remountedHook.unmount();
 });
 
-function createPartialUsersEnv(sessionKey: string) {
+function createPartialUsersEnv(
+  sessionKey: string,
+  partialResources = partialUserResourcesConfig,
+) {
   return createListQueryStoreTestEnv(
     { users: [{ id: 1, name: 'Ada', age: 30, city: 'London' }] },
     {
@@ -944,7 +947,7 @@ function createPartialUsersEnv(sessionKey: string) {
         getSessionKey: () => sessionKey,
         offlineSession: { network: network.config },
       }),
-      partialResources: partialUserResourcesConfig,
+      partialResources,
       persistentStorage: {
         adapter: 'local-sync',
         schema: partialUserRowSchema,
@@ -1828,6 +1831,145 @@ test('when imperative list query reads ask for fields that are not cached while 
     awaitUncachedFields: 'ok [{"name":"Ada","age":30}]'
     cachedFields: 'ok [{"name":"Ada","age":30}]'
     uncachedFields: 'ok [{"name":"Ada","age":30}]'
+  `);
+});
+
+/**
+ * Reads the `users||1` item and the users query with each of the four
+ * imperative read APIs, requesting the same `fields` in all of them.
+ */
+async function readWithEveryImperativeApi(
+  env: ReturnType<typeof createPartialUsersEnv>,
+  fields: '*' | string[],
+) {
+  const usersQuery = { tableId: 'users' };
+  const awaitedItem = await resolveAfterAllTimers(
+    env.apiStore.awaitItemFetch('users||1', { fields }),
+  );
+  const awaitedQuery = await resolveAfterAllTimers(
+    env.apiStore.awaitListQueryFetch(usersQuery, { fields }),
+  );
+  const query = await resolveAfterAllTimers(
+    env.apiStore.getQueryFromStateOrFetch(usersQuery, { fields }),
+  );
+
+  return {
+    getItemFromStateOrFetch: describeRead(
+      await resolveAfterAllTimers(
+        env.apiStore.getItemFromStateOrFetch('users||1', { fields }),
+      ),
+    ),
+    awaitItemFetch: awaitedItem.error
+      ? describeRead({ ok: false, error: awaitedItem.error })
+      : describeRead({ ok: true, value: awaitedItem.data }),
+    getQueryFromStateOrFetch: query.ok
+      ? describeRead({ ok: true, value: query.value.items.map((i) => i.data) })
+      : describeRead(query),
+    awaitListQueryFetch: awaitedQuery.error
+      ? describeRead({ ok: false, error: awaitedQuery.error })
+      : describeRead({
+          ok: true,
+          value: awaitedQuery.items.map((i) => i.data),
+        }),
+  };
+}
+
+test('when a fully loaded item is invalidated before going offline, imperative reads of all its fields still resolve with the cached data, and refetch it after recovering', async () => {
+  const env = createPartialUsersEnv('offline-invalidated-imperative-reads');
+  const usersQuery = { tableId: 'users' };
+
+  // Every field of the item is loaded (and so cached) while online.
+  await resolveAfterAllTimers(
+    env.apiStore.awaitListQueryFetch(usersQuery, { fields: '*' }),
+  );
+
+  // The server copy changes and the item is invalidated (e.g. by a realtime
+  // event) while no screen is mounted to refetch it: the cached item is now
+  // stale, but every one of its fields is still there.
+  env.serverTable.updateItem('users||1', { age: 31 });
+  act(() => {
+    env.apiStore.invalidateItem('users||1');
+  });
+  await flushAllTimers();
+
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  // Stale is not missing: the refetch of the invalidated item cannot run
+  // offline, but no requested field was lost, so every read is answered with
+  // the cached (stale `age: 30`) item instead of the offline error.
+  expect(await readWithEveryImperativeApi(env, '*')).toMatchInlineSnapshot(`
+    awaitItemFetch: 'ok {"id":1,"name":"Ada","age":30,"city":"London"}'
+    awaitListQueryFetch: 'ok [{"id":1,"name":"Ada","age":30,"city":"London"}]'
+    getItemFromStateOrFetch: 'ok {"id":1,"name":"Ada","age":30,"city":"London"}'
+    getQueryFromStateOrFetch: 'ok [{"id":1,"name":"Ada","age":30,"city":"London"}]'
+  `);
+
+  // After recovering, the same reads refetch the invalidated item and get the
+  // server copy (`age: 31`).
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(await readWithEveryImperativeApi(env, '*')).toMatchInlineSnapshot(`
+    awaitItemFetch: 'ok {"id":1,"name":"Ada","age":31,"city":"London"}'
+    awaitListQueryFetch: 'ok [{"id":1,"name":"Ada","age":31,"city":"London"}]'
+    getItemFromStateOrFetch: 'ok {"id":1,"name":"Ada","age":31,"city":"London"}'
+    getQueryFromStateOrFetch: 'ok [{"id":1,"name":"Ada","age":31,"city":"London"}]'
+  `);
+});
+
+test('when a loaded field is invalidated before going offline, imperative reads of it still resolve with the cached data, while reads of a field that was never loaded fail with the offline error', async () => {
+  // This store only trusts the loaded-fields tracking for the optional fields:
+  // `inferFields` vouches for nothing but the fields every snapshot has.
+  const env = createPartialUsersEnv('offline-stale-field-imperative-reads', {
+    ...partialUserResourcesConfig,
+    inferFields: () => ['id', 'name'],
+  });
+  const usersQuery = { tableId: 'users' };
+
+  // `name` and `age` are loaded (and so cached) while online, `city` never is.
+  await resolveAfterAllTimers(
+    env.apiStore.awaitListQueryFetch(usersQuery, { fields: ['name', 'age'] }),
+  );
+
+  // `age` is invalidated (e.g. by a realtime event) while no screen is mounted
+  // to refetch it: it is now stale, but its cached value is still there.
+  act(() => {
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: 'users||1',
+      queryPayload: usersQuery,
+      fields: ['age'],
+    });
+  });
+  await flushAllTimers();
+
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  // Stale is not missing: the refetch of `age` cannot run offline, but its
+  // cached value was not lost, so the reads are answered from the cache.
+  expect(await readWithEveryImperativeApi(env, ['name', 'age']))
+    .toMatchInlineSnapshot(`
+    awaitItemFetch: 'ok {"name":"Ada","age":30}'
+    awaitListQueryFetch: 'ok [{"name":"Ada","age":30}]'
+    getItemFromStateOrFetch: 'ok {"name":"Ada","age":30}'
+    getQueryFromStateOrFetch: 'ok [{"name":"Ada","age":30}]'
+  `);
+
+  // `city` was never loaded, so there is nothing cached to answer with: these
+  // reads still fail with the offline error instead of a partial item.
+  expect(await readWithEveryImperativeApi(env, ['name', 'city']))
+    .toMatchInlineSnapshot(`
+    awaitItemFetch: 'offline error'
+    awaitListQueryFetch: 'offline error'
+    getItemFromStateOrFetch: 'offline error'
+    getQueryFromStateOrFetch: 'offline error'
   `);
 });
 

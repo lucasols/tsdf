@@ -34,6 +34,7 @@ import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
   getFallbackMissingRequestedFields,
+  getGenuinelyMissingRequestedFields,
   getStaleOrMissingRequestedFields,
   snapshotIsFullyLoaded,
 } from './itemFieldUtils';
@@ -1186,8 +1187,10 @@ export function createFetchApi<
   /**
    * Whether a settled read cannot be answered from the cache while offline:
    * the fetch for the requested fields was not sent, so a cached item still
-   * lacks some of them. The O(1) offline check runs first, so online reads and
-   * stores without an offline session never scan the items.
+   * lacks some of them. Same rule as the hooks: stale is not missing, so
+   * invalidated fields whose (stale) data is still present count as cached.
+   * The O(1) offline check runs first, so online reads and stores without an
+   * offline session never scan the items.
    */
   function isMissingRequestedFieldsOffline(
     itemKeys: readonly string[],
@@ -1201,13 +1204,28 @@ export function createFetchApi<
     return itemKeys.some((itemKey) => {
       const itemState = readItemState(itemKey);
 
-      return fields === undefined
-        ? !snapshotIsFullyLoaded(
+      if (fields === undefined) {
+        // A full invalidation resets `loadedFields` but leaves the marker,
+        // which proves the item still present was complete when invalidated.
+        return (
+          !snapshotIsFullyLoaded(
             itemState?.loadedFields,
             itemState?.item,
             inferFields,
-          )
-        : !fallbackItemHasRequestedFields(itemState, fields, inferFields);
+          ) && !(itemsPendingFullInvalidation.has(itemKey) && itemState?.item)
+        );
+      }
+
+      return (
+        getGenuinelyMissingRequestedFields(
+          itemKey,
+          itemState,
+          fields,
+          inferFields,
+          itemsPendingFullInvalidation,
+          getUnresolvedPendingInvalidationFields(itemKey),
+        ).length > 0
+      );
     });
   }
 
