@@ -120,6 +120,7 @@ export type {
   OfflineStoredUploadRecord,
   OfflineUpload,
   OfflineUploadAdapter,
+  OfflineUploadFile,
   OfflineUploadProgress,
   OfflineUploadRefSchema,
   OfflineUploadSource,

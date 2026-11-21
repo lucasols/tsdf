@@ -543,6 +543,7 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `resolveOfflineUpload(id)`
 - `resolveOfflineUploads(ids)`
 - `useOfflineUploads()`
+- `useOfflineUploadFile(id)` — see [Rendering staged files](#rendering-staged-files)
 
 Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
@@ -671,6 +672,53 @@ A staged upload follows the queued work that depends on it:
 After an upload that was already sent is deleted, its id keeps resolving to the same server ref for the rest of the app session, in every tab open when it was deleted: a mutation queued later that still declares it (for example from optimistic or draft data that was not updated with the server ref yet) replays with that ref without uploading again, and `resolveOfflineUpload(id)` returns it. This ref is kept in memory only: after a reload, in a tab opened later, or after `deleteOfflineUpload(id)`, the id is unknown again, so stage the file again with `saveOfflineUpload` before reusing it. Uploads deleted before they were sent (discarded, superseded or cancelled work) are not kept.
 
 Files attached directly to a mutation (`upload: { ... }` in `performMutation`) belong to that single queued mutation and are deleted with it in the same situations.
+
+### Rendering staged files
+
+An entity updated optimistically with a local file usually stores the staged upload id as its file ref. `storeManager.useOfflineUploadFile(id)` reads that staged file for rendering — also after a reload, when the object URLs the app created earlier are dead:
+
+```tsx
+type FileRef =
+  | { kind: 'local'; uploadId: string }
+  | { kind: 'server'; url: string };
+
+function Thumbnail({ file }: { file: FileRef }) {
+  // A falsy id disables the hook, so it is only used for local refs.
+  const staged = storeManager.useOfflineUploadFile(
+    file.kind === 'local' && file.uploadId,
+  );
+
+  if (file.kind === 'server') return <img src={file.url} />;
+  if (staged.status === 'success') return <img src={staged.url} />;
+
+  // `missing` / `error`: the local file is gone or unreadable.
+  return <FilePlaceholder isLoading={staged.status === 'loading'} />;
+}
+```
+
+The hook returns an `OfflineUploadFile`, a union narrowed by `status`:
+
+- `status` — `idle` (falsy id), `loading`, `success`, `missing` (no upload with this id is staged in the active session) or `error` (the upload adapter failed to read the file; the read is tried again once every component stops using the id, or right away when the id is staged again)
+- `url` — object URL of the staged file, managed by TSDF. Only set on `success`
+- `file` — the staged `File`, for reading its contents. Only set on `success`
+- `error` — the read failure. Only set on `error`
+
+Caching and URL lifetime:
+
+- Components using the same id share one read and one object URL, so the hook can be called from as many components as needed.
+- A staged file the session already holds is returned on the first render, with no `loading` state. `loading` only shows while the session is still restoring its uploads (right after a reload) or reading an upload it does not hold yet.
+- The URL exists while at least one component uses the id. It is revoked about one second after the last one stops using it (unmount or falsy id), so remounts and React StrictMode keep the same URL.
+- `replaceOfflineUpload` gives every consumer in the tab a new `url` / `file` and revokes the previous URL. Staging or replacing the id from another tab does not update a file this tab already read until the tab reloads; deletions from another tab apply right away.
+- When the upload leaves the session (`deleteOfflineUpload`, retention expiry, or a mutation-attached file being consumed) the status becomes `missing` and the URL is revoked. Staging the same id again makes it available again.
+- Use `url` directly in render (`<img src>`, `<a href>`). Do not revoke it, do not keep it outside of render, and do not create extra object URLs from `file`.
+
+The file follows the upload record, not its upload state: it stays available while the upload is `pending`, `uploading` and `uploaded`. To move from the local file to the uploaded one without a gap, derive the id from the entity as in the example above, and write the server ref into the entity when the mutation replays:
+
+- Uploads staged with `saveOfflineUpload` are deleted once the last queued work that declares them leaves the queue (see [Upload lifecycle](#upload-lifecycle)). Files attached with `performMutation({ upload })` are removed once their mutation replayed. Uploads no queued work declared stay until `deleteOfflineUpload` or retention removes them.
+- A replayed mutation releases its uploads after its `onSuccessExecute` ran (and, for a temp entity create, after the result replaced the temp entity). When `onSuccessExecute` writes the server ref into the entity, the local file stays renderable until that render, and from then on the component passes a falsy id and renders the server file.
+- Otherwise the entity keeps the local ref until it is revalidated after replay, so the hook can report `missing` for a moment in between. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
+
+Outside of these windows, a local ref paired with `missing` means the staged file was deleted or expired, not that it is about to appear.
 
 ### Upload failure handling
 

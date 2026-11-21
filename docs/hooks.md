@@ -536,3 +536,29 @@ const { isLoading, isDeleted, data } = collectionStore.useListItem(
   },
 );
 ```
+
+## useOfflineUploadFile
+
+**Source**: [Store Manager](./store-manager.md#upload-apis)
+
+Reads the file of an upload staged with `saveOfflineUpload` / `performMutation({ upload })`, to render local files (e.g. thumbnails of optimistic entities) by upload id.
+
+```tsx
+const { status, url, file, error } = storeManager.useOfflineUploadFile(
+  isLocalFile && uploadId,
+);
+```
+
+- Does not fetch from the server: it reads the session's staged uploads
+- Components using the same id share one read and one object URL
+- `url` is managed by TSDF: do not revoke it or keep it outside of render
+- A falsy id disables the hook (`status: 'idle'`)
+
+### Return value
+
+- `status` - `'idle'` | `'loading'` | `'success'` | `'missing'` | `'error'`
+- `url` - Object URL of the staged file, or `null` unless `status` is `'success'`
+- `file` - The staged `File`, or `null` unless `status` is `'success'`
+- `error` - The read failure, or `null` unless `status` is `'error'`
+
+`'missing'` means no upload with this id is staged in the active session: it was never staged, or it was deleted, expired or already consumed by its mutation. See [Offline: Rendering staged files](./offline.md#rendering-staged-files) for the URL lifetime and the pattern for switching to the uploaded file.

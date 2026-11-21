@@ -1,8 +1,9 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { rc_object, rc_parse } from 'runcheck';
+import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import {
   emitTSDFDebugLog,
@@ -20,6 +21,9 @@ import { registerOfflineUploadAdapterForSession } from '../offlineUploadRegistry
 import {
   applyRestoredUploadRef,
   createStoredUploadRecord,
+  idleUploadFile,
+  loadingUploadFile,
+  missingUploadFile,
   parseRestoredUploadRef,
   stripStoredUploadFile,
 } from '../offlineUploadsShared';
@@ -27,6 +31,7 @@ import type {
   OfflineSessionUploadsConfig,
   OfflineStoredUploadRecord,
   OfflineUpload,
+  OfflineUploadFile,
   OfflineUploadProgress,
   OfflineUploadState,
 } from '../offlineUploadTypes';
@@ -185,6 +190,16 @@ type OfflineSessionMessage =
   | SessionWorkDiscardedMessage
   | SessionUploadsRemovedMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
+
+type UploadFileEntry = {
+  /** Change listeners of the hooks currently consuming this upload id. */
+  listeners: Set<() => void>;
+  value: OfflineUploadFile;
+  /** Pending release, scheduled while no hook consumes the entry. */
+  releaseTimer: ReturnType<typeof setTimeout> | undefined;
+};
+
+function noop(): void {}
 
 type SessionReplayHead = {
   storeName: string;
@@ -385,6 +400,7 @@ export function recheckIsSessionInOfflineMode(
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
+const UPLOAD_FILE_RELEASE_DELAY_MS = 1_000;
 
 export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
@@ -860,6 +876,7 @@ class SessionOfflineCoordinator {
   #uploadOnlineSessionStabilizationTimer: ReturnType<typeof setTimeout> | null =
     null;
   #uploadRetentionToken = 0;
+  readonly #uploadFiles = new Map<string, UploadFileEntry>();
   #cleanupNetworkListeners: (() => void) | null = null;
   #canonicalConfig: SessionCanonicalConfig;
   #hasCanonicalConfig: boolean;
@@ -1554,6 +1571,34 @@ class SessionOfflineCoordinator {
   async loadUpload(id: string): Promise<File | null> {
     const record = await this.#getUploadRecord(id);
     return record?.file ?? null;
+  }
+
+  /**
+   * Latest staged file state for `id`. The first read (while rendering) starts
+   * tracking the id, so a file the session already holds is returned right
+   * away instead of going through a `loading` render.
+   */
+  getUploadFile(id: string): OfflineUploadFile {
+    return this.#getUploadFileEntry(id).value;
+  }
+
+  /**
+   * Registers a consumer of the staged file for `id`. Consumers of the same id
+   * share one entry, so the file is read and its object URL is created once.
+   */
+  subscribeUploadFile(id: string, onChange: () => void): () => void {
+    const entry = this.#getUploadFileEntry(id);
+    const listener = (): void => onChange();
+
+    clearTimeout(entry.releaseTimer);
+    entry.listeners.add(listener);
+
+    return () => {
+      entry.listeners.delete(listener);
+      if (entry.listeners.size === 0) {
+        this.#scheduleUploadFileRelease(id, entry);
+      }
+    };
   }
 
   async deleteUpload(id: string): Promise<void> {
@@ -2436,6 +2481,98 @@ class SessionOfflineCoordinator {
     });
   }
 
+  #getUploadFileEntry(id: string): UploadFileEntry {
+    const existingEntry = this.#uploadFiles.get(id);
+    if (existingEntry) return existingEntry;
+
+    const entry: UploadFileEntry = {
+      listeners: new Set(),
+      value: loadingUploadFile,
+      releaseTimer: undefined,
+    };
+    this.#uploadFiles.set(id, entry);
+    if (!this.#syncUploadFile(id, entry)) {
+      void this.#loadUploadFile(id, entry);
+    }
+    // Entries are created while rendering, so the ones whose render never
+    // commits (and therefore never subscribes) have to be released as well.
+    this.#scheduleUploadFileRelease(id, entry);
+
+    return entry;
+  }
+
+  /**
+   * Drops the file and revokes its object URL once no hook has consumed the
+   * entry for a moment. The delay keeps the URL stable across StrictMode's
+   * effect replay and components that remount right away.
+   */
+  #scheduleUploadFileRelease(id: string, entry: UploadFileEntry): void {
+    entry.releaseTimer = setTimeout(() => {
+      this.#uploadFiles.delete(id);
+      this.#setUploadFile(entry, loadingUploadFile);
+    }, UPLOAD_FILE_RELEASE_DELAY_MS);
+  }
+
+  #setUploadFile(entry: UploadFileEntry, value: OfflineUploadFile): void {
+    const previousUrl = entry.value.url;
+    entry.value = value;
+    if (previousUrl !== null) URL.revokeObjectURL(previousUrl);
+
+    for (const listener of entry.listeners) listener();
+  }
+
+  /**
+   * Aligns a consumed upload file with the in-memory upload records. Returns
+   * `false` when the session holds no record for the id.
+   */
+  #syncUploadFile(id: string, entry: UploadFileEntry): boolean {
+    const file = this.#uploads.get(id)?.file;
+
+    if (!file) {
+      // The upload left the session: deleted, expired or consumed.
+      if (entry.value.file) this.#setUploadFile(entry, missingUploadFile);
+      return false;
+    }
+
+    if (entry.value.file !== file) {
+      this.#setUploadFile(entry, {
+        status: 'success',
+        url: URL.createObjectURL(file),
+        file,
+        error: null,
+      });
+    }
+    return true;
+  }
+
+  async #loadUploadFile(id: string, entry: UploadFileEntry): Promise<void> {
+    let failure: Error | undefined;
+
+    try {
+      // Waits for the stored uploads list before reading the file on its own,
+      // so a file staged before a reload is read once and never reported as
+      // missing too early.
+      await this.#getUploadRecord(id);
+    } catch (error) {
+      failure = unknownToError(error);
+    }
+
+    if (
+      this.#uploadFiles.get(id) !== entry ||
+      this.#syncUploadFile(id, entry) ||
+      entry.value.status !== 'loading'
+    ) {
+      return;
+    }
+
+    this.#setUploadFile(
+      entry,
+      failure
+        ? { status: 'error', url: null, file: null, error: failure }
+        : missingUploadFile,
+    );
+  }
+
   async #waitForUploadRemoval(id: string): Promise<void> {
     let removal = this.#uploadRemovals.get(id);
     while (removal) {
@@ -2641,6 +2778,10 @@ class SessionOfflineCoordinator {
       { action: 'offline-session-uploads' },
     );
     this.#publishSnapshot();
+
+    for (const [id, entry] of this.#uploadFiles) {
+      this.#syncUploadFile(id, entry);
+    }
   }
 
   #buildNextUploadRecord(
@@ -2841,9 +2982,11 @@ class SessionOfflineCoordinator {
         }),
       );
     } finally {
+      // The ids already left `#uploads`, so publish that even when a storage
+      // removal failed.
+      this.#syncUploadsState();
       this.#publishUploadsRemoved(ids);
     }
-    this.#syncUploadsState();
     void this.#refreshUploadRetention();
   }
 
@@ -2895,6 +3038,12 @@ class SessionOfflineCoordinator {
         { uploads: uploads.filter((upload) => !removedIds.has(upload.id)) },
         { action: 'offline-session-uploads' },
       );
+    }
+
+    // Rendered files of the removed uploads become `missing` in this tab too.
+    for (const id of removedIds) {
+      const entry = this.#uploadFiles.get(id);
+      if (entry) this.#syncUploadFile(id, entry);
     }
   }
 
@@ -3814,6 +3963,20 @@ export function createOfflineSession<
           equalityFn: deepEqual,
         }),
       );
+    },
+    useOfflineUploadFile: (id) => {
+      const coordinator = useSessionCoordinator();
+      const subscribe = useCallback(
+        (onChange: () => void) =>
+          id ? coordinator.subscribeUploadFile(id, onChange) : noop,
+        [coordinator, id],
+      );
+      const getSnapshot = useCallback(
+        () => (id ? coordinator.getUploadFile(id) : idleUploadFile),
+        [coordinator, id],
+      );
+
+      return useSyncExternalStore(subscribe, getSnapshot);
     },
   };
 

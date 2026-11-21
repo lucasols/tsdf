@@ -1,4 +1,5 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
@@ -1354,6 +1355,46 @@ test('a file another tab uploaded and deleted is neither uploaded again nor writ
     tabB.storeManager.getOfflineUploads().map((upload) => upload.id),
   ).toMatchInlineSnapshot(`[]`);
   expect(getOpfsDirTree(opfs)).not.toContain('binary.blob');
+});
+
+test('a staged file rendered in one tab is cleared there once another tab sends its edit and deletes it', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+
+  // Offline, the user picks a photo in tab B, which renders its preview, and
+  // saves an edit that uses it.
+  await tabB.stageFile('photo');
+  const preview = renderHook(() =>
+    tabB.storeManager.useOfflineUploadFile('photo'),
+  );
+  await advanceTime(100);
+  await tabB.queueEditWithStagedFile(2, 'photo');
+  const previewUrl = preview.result.current.url;
+  expect(preview.result.current.status).toBe('success');
+
+  // The user switches to tab A, which uploads the photo on reconnect, sends
+  // the edit and deletes the photo: no queued work uses it anymore.
+  const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL');
+  setDocumentHidden(false);
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A uploaded photo', 'tab A sent doc = 2 with "server:photo"']`,
+  );
+
+  // Tab B's preview no longer exposes the deleted file, and its object URL is
+  // revoked instead of leaking.
+  const { status, url } = preview.result.current;
+  expect({ status, url }).toMatchInlineSnapshot(`
+    status: 'missing'
+    url: null
+  `);
+  expect(revokeObjectURL).toHaveBeenCalledWith(previewUrl);
+
+  preview.unmount();
 });
 
 test('deleting a sent file in one tab makes its id unknown in every open tab', async () => {

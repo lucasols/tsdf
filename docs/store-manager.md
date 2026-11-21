@@ -179,6 +179,7 @@ Upload methods:
 - `resolveOfflineUpload(id)` uploads the staged file if needed and returns its final ref
 - `resolveOfflineUploads(ids)` does the same for several ids and fails as a whole with the first transport error
 - `useOfflineUploads()`
+- `useOfflineUploadFile(id)` returns `{ status, url, file, error }` for a staged upload
 
 When the `upload` transport fails, `resolveOfflineUpload(s)` returns `Result.err(error)` with the transport error and the upload becomes `failed` (`lastError` set). The session failure classifiers are not consulted and nothing is retried automatically; calling the method again runs the upload again, and `lastError` is cleared once it succeeds. Uploads that run as a dependency of a replayed offline operation are classified and retried by the session instead. See [Offline: Upload failure handling](./offline.md#upload-failure-handling).
 
@@ -189,3 +190,11 @@ Staged uploads are deleted automatically when the last queued mutation or resolu
 The ref type returned by `resolveOfflineUpload(s)` and exposed as `OfflineUpload.resolvedRef` is inferred from the `upload` transport of `offlineSession.uploads`, as long as the manager is not annotated with the plain `StoreManager` type. `StoreManagerUploadRef<typeof storeManager>` extracts it, for example to type the upload refs of offline operations. `offlineSession.uploads.resolvedRefSchema` optionally validates refs restored from storage or received from other tabs; a ref that fails it is dropped and its upload goes back to `pending`. See [Offline: Upload refs](./offline.md#upload-refs).
 
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.
+
+`useOfflineUploadFile(id)` is the render-time counterpart of `loadOfflineUpload(id)`: components using the same id share one read and one TSDF-managed object URL (`url`), which is revoked when no component uses it anymore or when the upload is replaced, deleted or consumed. Pass a falsy id to disable it. See [Offline: Rendering staged files](./offline.md#rendering-staged-files).
+
+```tsx
+const staged = storeManager.useOfflineUploadFile(localUploadId);
+
+return staged.status === 'success' ? <img src={staged.url} /> : null;
+```

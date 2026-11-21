@@ -3,6 +3,7 @@ import type { ValidPayload } from '../utils/storeShared';
 import type {
   OfflineStoredUploadRecord,
   OfflineUpload,
+  OfflineUploadFile,
   OfflineUploadProgress,
   OfflineUploadRefSchema,
   OfflineUploadSource,
@@ -53,6 +54,18 @@ export function applyRestoredUploadRef<TUpload extends OfflineUpload>(
   delete pendingUpload.progress;
   return pendingUpload;
 }
+
+function createEmptyUploadFile(
+  status: 'idle' | 'loading' | 'missing',
+): OfflineUploadFile {
+  return { status, url: null, file: null, error: null };
+}
+
+export const idleUploadFile: OfflineUploadFile = createEmptyUploadFile('idle');
+export const loadingUploadFile: OfflineUploadFile =
+  createEmptyUploadFile('loading');
+export const missingUploadFile: OfflineUploadFile =
+  createEmptyUploadFile('missing');
 
 export function stripStoredUploadFile<
   TResolvedRef extends ValidPayload = ValidPayload,

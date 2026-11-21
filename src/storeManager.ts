@@ -30,8 +30,13 @@ import {
   defaultOfflineRuntimeConfig,
   OfflineResolutionActionError,
 } from './persistentStorage/offline/types';
+import {
+  idleUploadFile,
+  missingUploadFile,
+} from './persistentStorage/offlineUploadsShared';
 import type {
   OfflineUpload,
+  OfflineUploadFile,
   ReplaceOfflineUploadArgs,
   SaveOfflineUploadArgs,
 } from './persistentStorage/offlineUploadTypes';
@@ -183,6 +188,20 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** React hook subscribing to the manager's aggregated offline uploads. */
   useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /**
+   * React hook that reads the file of a staged upload while it is staged, to
+   * render local files (e.g. thumbnails of optimistic entities) by upload id.
+   *
+   * The returned `url` is an object URL managed by TSDF: components using the
+   * same id share one read and one URL, and the URL is revoked shortly after
+   * the last of them stops using it or as soon as the upload is replaced,
+   * deleted or leaves the session. Pass a falsy id to disable the hook (status
+   * `idle`), e.g. once the entity holds the uploaded server ref instead of the
+   * staged upload id.
+   */
+  useOfflineUploadFile: (
+    id: string | false | null | undefined,
+  ) => OfflineUploadFile;
 };
 
 /** Shared coordinator passed to every TSDF store instance in an app/session. */
@@ -350,6 +369,7 @@ function createDisabledStoreManagerOfflineApi<
     useOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
     useOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
     useOfflineUploads: () => emptyUploads,
+    useOfflineUploadFile: (id) => (id ? missingUploadFile : idleUploadFile),
   };
 }
 
@@ -561,6 +581,8 @@ export function createStoreManager<
         useOfflineResolutions: () =>
           resolvedOfflineSession.useOfflineResolutions(),
         useOfflineUploads: () => resolvedOfflineSession.useOfflineUploads(),
+        useOfflineUploadFile: (id) =>
+          resolvedOfflineSession.useOfflineUploadFile(id),
       }
     : createDisabledStoreManagerOfflineApi<TUploadRef>(options.getSessionKey);
 
