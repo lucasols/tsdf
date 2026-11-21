@@ -7,7 +7,7 @@ description: Reference for the `tsdf` React data fetching library. Use when code
 
 A typed React data fetching library built on `t-state`. It manages server data with three store types, scheduled fetches/caching, optimistic updates, granular invalidation, persistence, real-time updates, offline queueing, and cross-tab sync.
 
-This skill is a concise map of the API. For anything not covered explicitly, read the shipped docs under `node_modules/tsdf/docs/` and the types entrypoint at `node_modules/tsdf/dist/main.d.ts` — both are part of the published package.
+This skill is a concise map of the API. For anything not covered explicitly, read the shipped docs under `node_modules/tsdf/docs/` and the types entrypoint at `node_modules/tsdf/dist/main.d.ts` — both are part of the published package. Doc references like `docs/offline.md#health-check` are relative to the package root and name a heading of that file.
 
 ## Picking a store type
 
@@ -19,7 +19,7 @@ This skill is a concise map of the API. For anything not covered explicitly, rea
 
 Use `ListQueryStore` only when items must be shared between list views and detail views, or you need pagination, derived queries, optimistic list rules, partial resources, or offset pagination. Otherwise prefer `CollectionStore`.
 
-Docs: `docs/document-store.md`, `docs/collection-store.md`, `docs/list-query-store.md`.
+Check more on docs: `docs/document-store.md`, `docs/collection-store.md`, `docs/list-query-store.md`.
 
 ## Setup
 
@@ -60,7 +60,7 @@ const userStore = createDocumentStore<User>({
 
 `getSessionKey` returning `false` disables persistence and tab sync until a session is ready. Stores with the same `id` and different session keys are isolated. Deployed apps should provide a stable `getAppVersion` build identifier so tabs running different bundles cannot exchange fetch activity or snapshots; this is separate from per-store `persistentStorage.version`.
 
-Docs: `docs/store-manager.md`, `docs/README.md` (full options matrix).
+Check more on docs: `docs/store-manager.md`, `docs/README.md` (full options matrix).
 
 ## Hooks
 
@@ -69,7 +69,7 @@ Every store ships React hooks with consistent behavior:
 - Auto-fetch on mount; refetch on invalidation; deep equality to skip re-renders.
 - Falsy payload (`null` / `undefined` / `false`) disables the hook — no fetch, status `idle`. Use this instead of a separate `enabled` flag.
 - Common options: `disabled`, `disableRefetches`, `disableRefetchOnMount`, `returnIdleStatus`, `returnRefetchingStatus`, `requireFreshData`, `selector`, `debouncePayload`.
-- Use `requireFreshData` sparingly. It unconditionally schedules a high-priority fetch on every enabled hook mount—even with successful cached data—and reports `loading` until that refresh succeeds or fails. Cached `data` remains available. Prefer normal cache behavior or targeted invalidation unless the component must wait for a new server response; broad use can substantially increase request volume. It overrides `disableRefetches` / `disableRefetchOnMount` and cannot be combined with `debouncePayload` on single-item or single-query hooks.
+- Use `requireFreshData` sparingly: every enabled mount schedules a high-priority fetch even with cached data and reports `loading` until it settles, so broad use multiplies requests. Prefer normal cache behavior or targeted invalidation. See `docs/hooks.md#requirefreshdata`.
 
 | Store             | Hooks                                                                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,7 +79,7 @@ Every store ships React hooks with consistent behavior:
 
 Return shape: `{ data, status, error, isLoading, ... }`. `status` is `'idle' | 'loading' | 'success' | 'error' | 'refetching'` plus `'loadingMore'` (list queries) or `'deleted'` (items).
 
-Docs: `docs/hooks.md` (every hook + options + return values).
+Check more on docs: `docs/hooks.md` (every hook + options + return values).
 
 ## Fetch scheduling
 
@@ -96,7 +96,7 @@ Requests within `baseCoalescingWindowMs` are merged into a single scheduler flus
 
 Imperative cache-or-fetch reads return `t-result` values with `StoreFetchError` errors: Document `getDataFromStateOrFetch`, Collection `getItemFromStateOrFetch`, List Query `getQueryFromStateOrFetch` / `getItemFromStateOrFetch`. They return loaded state by default, fetch if missing, and accept `ignoreStaleState` to fetch when cached state has `refetchOnMount`.
 
-Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
+Check more on docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 
 ## Optimization features
 
@@ -106,12 +106,8 @@ Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 - **Batch groups** — `getItemsBatchKey` groups items into separate batch schedulers; return `false` to opt out for that item and use the per-item fetch function.
 - **Bulk hooks** — `useMultipleItems` and `useMultipleListQueries` let callers subscribe to many resources through one hook while sharing the same scheduler/cache machinery.
 - **Selectors + deep equality** — hook `selector` options reduce re-renders by returning only the data the component needs.
-- **Partial resources** — List Query stores with `TPartialResources = true` can fetch only requested item fields and track field-level invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`; `inferFields` handles metadata-free snapshots such as manually added or offline items.
-- **Derived queries** — `derivedQueries` compute list results from already-loaded items when `isComplete(...)` returns `true`, avoiding unnecessary query fetches and query cache entries.
-- **Cache limits** — `maxItems`, `maxQueries`, and `onStateCleanup` bound memory while protecting mounted, fetching, and mutating entries.
-- **Adaptive throttling** — `lowPriorityThrottleMs`, `mediumPriorityDelayMs`, `baseCoalescingWindowMs`, and `dynamicRealtimeThrottleMs(...)` tune work for hook mounts, background refetches, focus/reconnect, and realtime updates.
 
-Docs: `docs/batch-fetching.md`, `docs/cache-limits.md`, `docs/partial-resources.md`, `docs/list-query-store.md`, `docs/fetch-scheduling.md`.
+Check more on docs: `docs/batch-fetching.md`, `docs/hooks.md`.
 
 ## Cache limits
 
@@ -119,7 +115,7 @@ Docs: `docs/batch-fetching.md`, `docs/cache-limits.md`, `docs/partial-resources.
 
 Mounted hooks, in-flight fetches, and in-flight mutations are protected from eviction. List Query may evict whole inactive queries under item pressure to avoid leaving cached queries partially loaded. Use `onStateCleanup` to release app resources after cache-limit eviction.
 
-Docs: `docs/cache-limits.md`.
+Check more on docs: `docs/cache-limits.md`.
 
 ## Mutations
 
@@ -157,7 +153,7 @@ if (result.ok) {
 - Lifecycle events: `store.storeEvents.on('mutationStart' | 'mutationEnd', ...)`.
 - Items created offline: `store.storeEvents.on('tempEntityReconciled', ({ payload: { tempId, finalPayload } }) => ...)` fires in every tab when the item is saved; `store.resolveTempItemPayload(payload)` returns the final payload later (Collection, List Query).
 
-Docs: `docs/mutations.md`.
+Check more on docs: `docs/mutations.md`.
 
 ## Invalidation
 
@@ -171,7 +167,7 @@ Same-or-higher pending invalidations swallow lower ones. Hooks with `disableRefe
 
 Utilities: use `GET_ALL` as the all-payload predicate and `{ all: true }` to invalidate every List Query query and item.
 
-Docs: `docs/invalidation.md`.
+Check more on docs: `docs/invalidation.md`.
 
 ## Persistent storage
 
@@ -203,13 +199,13 @@ const schema: ConvertedPersistentStorageDataSchema<User, StoredUser> = {
 
 Loaded data must pass `storageSchema`, then `convertFromStorage(...)`, then `storeSchema`; fetched data runs through `convertToStorage(...)` before saving.
 
-Changing a store's `adapter` starts it with an empty cache; nothing is migrated. Moving from `'local-sync'` to an async adapter auto-removes the store's old `localStorage` entries, except while it still has queued offline work there (kept and reported through `onPersistentStorageError`, replayed only under `'local-sync'`).
+Changing a store's `adapter` starts it with an empty cache and migrates nothing, including queued offline work: let the queue drain first. See `docs/persistent-storage.md#changing-a-stores-adapter`.
 
-Deleting a store leaves its data behind: list it in `createStoreManager({ removedStores: [{ id, adapter }] })` and TSDF removes its data once, in every session, including unsent offline work (reported through `onPersistentStorageError`). A listed id cannot be used by an attached store. Custom async adapters need a driver `storageId` to be listed.
+Deleting a store leaves its data behind: list it in `createStoreManager({ removedStores: [{ id, adapter }] })` so TSDF removes it. See `docs/persistent-storage.md#deleting-a-store`.
 
 Utilities: `clearSessionStorage(sessionKey, adapter)`, `clearAllSessionStorage(sessionKey)`.
 
-Docs: `docs/persistent-storage.md`.
+Check more on docs: `docs/persistent-storage.md`.
 
 ## Offline
 
@@ -227,31 +223,31 @@ type UserOps = DefineListQueryOfflineOperations<
 >;
 ```
 
-Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`, `getEntityRefs`, `execute`, and optionally `onSuccessExecute`. Use the `offline` option on `performMutation(...)` to route a mutation through the queue (returns `OfflineMutationResult<T>` with `kind: 'online' | 'queued'`).
+Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`, `getEntityRefs`, `execute`, and optionally `onSuccessExecute`. Use the `offline` option on `performMutation(...)` to route a mutation through the queue (returns `OfflineMutationResult<T>` with `kind: 'online' | 'queued'`). Optional per-operation behavior: `dependsOn`, `cancelledWith` (entities of other stores this work follows), `supersedes`, `accumulation`, `conflictHandling`, `shouldSkipSync`, `getServerSnapshot`, `dependsOnUploads`; see `docs/offline.md#operation-definitions`.
 
 Offline creates: `tempEntity` / `tempEntities` (Collection and List Query) insert a pending entity under a temp payload and reconcile it to the server payload after replay. In List Query stores, `addToQueries` puts the pending entity in the lists that should show it (no manual `addItemToState`), and `loadedFields` declares its loaded fields when partial resources are enabled.
 
 Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation, creationAttempted }`, re-rendering only when that item's state changes.
 
-Deleting something created offline: give the delete operation `supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true }`. A creation never sent (`isUnsentCreation && !creationAttempted`) is cancelled locally with its queued edits, its `dependsOn` dependents and the work of other stores declaring it in `cancelledWith`; an attempted creation is kept and the delete replays after it with the server id (treat not-found as success in `execute`). Once any `kind: 'delete'` succeeds (online or replayed), the queued work of other stores declaring a deleted entity in `cancelledWith` is dropped too (stores attached in that tab only). See `docs/offline.md`.
+Deleting something created offline: give the delete operation `supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true }` and treat not-found as success in its `execute`. A creation never sent (`isUnsentCreation && !creationAttempted`) is cancelled locally with the work queued on it; an attempted one is kept and the delete replays after it. See `docs/offline.md#deleting-entities-created-offline`.
 
 Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.
 
-Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied). Mutations for an entity whose offline creation (temp entity or client-generated id) waits for a resolution are never sent before it, nor the work of other stores declaring it in `cancelledWith` (stores attached in the tab only): they become blocked resolutions that are retried or discarded with the creation.
+Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied). See `docs/offline.md#conflict-resolution`.
 
-Recovery: while offline, `onTransportReconnect()` and focus revalidations only re-check connectivity; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities (or the ones they `dependsOn`) are still pending.
+Recovery: each attached store revalidates by itself once the session is back online and its queued mutations replayed — no manual invalidation needed on reconnect. See `docs/offline.md#revalidation-after-recovering`.
 
-Health check: `offlineSession.healthCheck: { check: ({ sessionKey, signal }) => 'up' | 'outage' | 'unreachable', timeoutMs?, reuseUpForFailuresMs? }` is one function used for both failure classification (`'unreachable'` → network mode, `'outage'` → outage mode, `'up'` → the session stays online and the failure is handled by its request: own error, or replay retry budget then a `retry-exhausted` resolution) and recovery checks (`'up'` ends offline mode; makes `outage.recoveryCheck` optional). Concurrent callers share one in-flight call; answers are not cached, except that `reuseUpForFailuresMs` (off by default) lets later failures reuse a failure's `'up'` answer (never read by recovery, cleared on entering offline mode); a throw/timeout changes nothing. `classifyFailure` answers win — it returns `'unknown'` to defer to the health check — and a mode's own `recoveryCheck` wins for that mode.
+Health check: `offlineSession.healthCheck: { check: ({ sessionKey, signal }) => 'up' | 'outage' | 'unreachable', timeoutMs?, reuseUpForFailuresMs? }` both classifies failed requests and checks recovery (making `outage.recoveryCheck` optional): `'unreachable'` enters network mode, `'outage'` enters outage mode, and `'up'` keeps the session online (or ends offline mode), leaving a failed request to its own error handling. Session `classifyFailure` / `classifyRetryableFailure` hooks refine per-error classification. See `docs/offline.md#health-check`.
 
-Session gate: `offlineSession.enabled: () => boolean` turns the whole offline layer on/off at runtime (feature flag, per-workspace setting). While it returns `false` — or `getSessionKey()` returns `false` — the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations (`{ kind: 'online', data }`, normal errors). Already-queued work is kept and replayed after the gate reopens. Read lazily on the next fetch/mutation; call `storeManager.setOfflineRuntimeConfig({})` to apply a flip immediately.
+Session gate: `offlineSession.enabled: () => boolean` turns the whole offline layer on/off at runtime (feature flag, per-workspace setting). While it returns `false` — or `getSessionKey()` returns `false` — the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations (`{ kind: 'online', data }`, normal errors). Already-queued work is kept and replayed after the gate reopens. See `docs/offline.md#session-gate`.
 
-Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. The upload ref type is inferred from the `upload` transport (do not annotate the manager as plain `StoreManager`); pass `StoreManagerUploadRef<typeof storeManager>` as the last type argument of `Define*OfflineOperations` to type `ctx.uploads.resolvedRefsById` in `execute`. Optional `uploads.resolvedRefSchema` validates refs restored from storage / other tabs (invalid ones are re-uploaded). A staged upload is deleted automatically once the last queued mutation or resolution that declares it (`dependsOnUploads`) leaves the queue (replayed, discarded, superseded, cancelled); uploads no queued mutation used stay until `deleteOfflineUpload` or expiry. `storeManager.useOfflineUploadFile(id)` returns `{ status, url, file, error }` for rendering a staged file by upload id: `url` is a shared, TSDF-managed object URL (never revoke it), a falsy id disables the hook, and `status: 'missing'` means the upload is no longer staged. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter. A failing `upload` transport during replay goes through `classifyFailure` / `classifyRetryableFailure` with `ctx.uploadId` set (`'network'` / `'outage'` / retryable keep the upload `pending` and the operation queued; an unclassified error is permanent and moves the operation to a `retry-exhausted` resolution); `resolveOfflineUpload(s)` just returns the error. See `docs/offline.md` ("Upload failure handling").
+Uploads: configure `offlineSession.uploads` (`adapter`, e.g. the shipped `opfsOfflineUploadAdapter`, and an `upload` transport). Manager helpers: `saveOfflineUpload({ id, file, metadata? })`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects), `useOfflineUploads()`, and `useOfflineUploadFile(id)` to render a staged file. Operations declare their files with `dependsOnUploads({ input })` and read refs from `execute({ uploads })`. A staged upload is deleted automatically once the last queued mutation or resolution that declares it leaves the queue; uploads no queued mutation used stay until `deleteOfflineUpload` or expiry. Details: `docs/offline.md#upload-refs` (typing with `StoreManagerUploadRef`, `resolvedRefSchema`), `docs/offline.md#upload-metadata`, `docs/offline.md#rendering-staged-files`, `docs/offline.md#upload-failure-handling`.
 
-Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them.
+Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them. See `docs/offline.md#multiple-tabs`.
 
-Testing: `await storeManager.setForcedOfflineMode(true | false)` forces the session offline without cutting the connection (persisted per session key, survives reloads, shared across tabs, reported as `getOfflineStatus().isForcedOffline`; requires `offlineSession.network`). `createOfflineNetworkMock()` from `tsdf/testing` mocks the network status in unit tests.
+Testing: `await storeManager.setForcedOfflineMode(true | false)` forces the session offline without cutting the connection (survives reloads, shared across tabs, reported as `getOfflineStatus().isForcedOffline`; requires `offlineSession.network`). `createOfflineNetworkMock()` from `tsdf/testing` mocks the network status in unit tests. See `docs/offline.md#forced-offline-mode`, `docs/offline.md#testing`.
 
-Docs: `docs/offline.md`.
+Check more on docs: `docs/offline.md`.
 
 ## Real-time updates
 
@@ -275,13 +271,13 @@ storeManager.onTransportReconnect(); // notify attached realtime stores after re
 
 `usesRealTimeUpdates: true` auto-disables `revalidateOnWindowFocus` and defaults hooks to `disableRefetchOnMount: true`.
 
-Docs: `docs/real-time-updates.md`.
+Check more on docs: `docs/real-time-updates.md`.
 
 ## List Query specific features
 
-- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`). Docs: `docs/optimistic-list-updates.md`.
-- **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Docs: `docs/partial-resources.md`.
-- **Offset pagination** (set `TOffsetPagination = true`) — real offset/limit pagination instead of size-mode re-fetches. `fetchListFn` receives `{ offset, limit }`; `offsetPagination: { maxInvalidationLimit, maxParallel }`. Docs: `docs/offset-pagination.md`.
+- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`). Check more on docs: `docs/optimistic-list-updates.md`.
+- **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Check more on docs: `docs/partial-resources.md`.
+- **Offset pagination** (set `TOffsetPagination = true`) — real offset/limit pagination instead of size-mode re-fetches. `fetchListFn` receives `{ offset, limit }`; `offsetPagination: { maxInvalidationLimit, maxParallel }`. Check more on docs: `docs/offset-pagination.md`.
 - **`derivedQueries`** — hook results computed locally from already-materialized items when `isComplete(...)` returns `true`; results expose `isDerived: true` and `hasMore: false`, and never materialize a query entry.
 - **`addItemToState(payload, data, { addItemToQueries: { queries, appendTo } })`** — insert a new item into specific queries with `'start' | 'end' | (payloads) => index` placement.
 
@@ -289,7 +285,7 @@ Docs: `docs/real-time-updates.md`.
 
 Automatic when all tabs share the same store `id`, `getSessionKey()`, and (when configured) `getAppVersion()`. Tabs deduplicate `fetch-start`/`fetch-success` activity and apply confirmed snapshots in version order over `BroadcastChannel`. Background tabs get an extended coalescing window so duplicate background work is dropped. Use a build-specific `getAppVersion` in deployed apps to isolate incompatible bundles.
 
-Docs: `docs/browser-tabs-sync.md`.
+Check more on docs: `docs/browser-tabs-sync.md`.
 
 ## Shared types and utilities
 
