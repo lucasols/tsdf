@@ -1,8 +1,9 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { rc_object, rc_parse } from 'runcheck';
+import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import {
   emitTSDFDebugLog,
@@ -18,13 +19,19 @@ import type { ValidPayload } from '../../utils/storeShared';
 import { parseCompactLocalStorageEntry } from '../compactLocalStorageEntry';
 import { registerOfflineUploadAdapterForSession } from '../offlineUploadRegistry';
 import {
+  applyRestoredUploadRef,
   createStoredUploadRecord,
+  idleUploadFile,
+  loadingUploadFile,
+  missingUploadFile,
+  parseRestoredUploadRef,
   stripStoredUploadFile,
 } from '../offlineUploadsShared';
 import type {
   OfflineSessionUploadsConfig,
   OfflineStoredUploadRecord,
   OfflineUpload,
+  OfflineUploadFile,
   OfflineUploadProgress,
   OfflineUploadState,
 } from '../offlineUploadTypes';
@@ -54,6 +61,8 @@ import type {
   ItemOfflineState,
   OfflineFailureClassification,
   OfflineFailureContext,
+  OfflineHealthCheckConfig,
+  OfflineHealthCheckResult,
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineOutageModeConfig,
@@ -158,8 +167,25 @@ type SessionWorkDiscardedMessage = BrowserTabsMessageMeta & {
   kind: 'offline-work-discarded';
   storeName: string;
   discardedWork: DiscardedOfflineWork[];
-  /** Temp entities the discard removed: there is nothing to refetch. */
+  /**
+   * Entities the discard removed (temp entities and items of discarded
+   * creations): there is nothing to refetch. The field keeps its old name so
+   * tabs running another version of the app still read it.
+   */
   removedTempEntityKeys: string[];
+};
+
+/**
+ * A tab deleted stored uploads. Each tab keeps its own in-memory copy of the
+ * upload records, so the others drop theirs: a stale copy would stay listed,
+ * be saved back to storage by the retention stamp, or be uploaded again.
+ * `releasedRefs` carries the server refs of uploads deleted after they were
+ * sent, so ids still held by app data resolve in every open tab.
+ */
+type SessionUploadsRemovedMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-uploads-removed';
+  ids: string[];
+  releasedRefs: Array<[id: string, ref: ValidPayload]>;
 };
 
 type OfflineSessionMessage =
@@ -168,7 +194,18 @@ type OfflineSessionMessage =
   | SessionResolutionMessage
   | SessionTempReconciledMessage
   | SessionWorkDiscardedMessage
+  | SessionUploadsRemovedMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
+
+type UploadFileEntry = {
+  /** Change listeners of the hooks currently consuming this upload id. */
+  listeners: Set<() => void>;
+  value: OfflineUploadFile;
+  /** Pending release, scheduled while no hook consumes the entry. */
+  releaseTimer: ReturnType<typeof setTimeout> | undefined;
+};
+
+function noop(): void {}
 
 type SessionReplayHead = {
   storeName: string;
@@ -200,13 +237,16 @@ type SessionRegistration = {
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
   /**
-   * Called when another store of the session cancelled or discarded temp
-   * entities (serialized temp payloads) that will never exist on the server.
+   * Called when another store of the session cancelled or discarded entities
+   * created offline that will never exist on the server. `cancelledEntityKeys`
+   * holds their keys in the source store, and `getEntityKey` keys an entity
+   * payload of that store the same way.
    * Only registered by stores with `cancelledWith` operations.
    */
   onTempEntitiesCancelled?: (
     sourceStoreName: string,
-    serializedTempIds: ReadonlySet<string>,
+    cancelledEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
   ) => Promise<void>;
   /** Another tab saved or removed (`null`) a queue entry of the store. */
   onRemoteQueueEntryChange?: (
@@ -227,7 +267,7 @@ type SessionRegistration = {
   /** Another tab discarded queued work of the store. */
   onRemoteWorkDiscarded?: (
     discardedWork: DiscardedOfflineWork[],
-    removedTempEntityKeys: string[],
+    removedEntityKeys: string[],
   ) => void;
 };
 
@@ -254,7 +294,9 @@ const DEFAULT_NETWORK_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
   backoffMultiplier: 2,
   jitterRatio: 0.2,
 };
+const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 10_000;
 const defaultGetIsOffline = () => !navigator.onLine;
+const INACTIVE_MODE = { enabled: false, active: false } as const;
 
 const defaultStatusBySession = new Map<string, GlobalOfflineStatus>();
 const registry = new Map<string, SessionOfflineCoordinator>();
@@ -365,6 +407,7 @@ export function recheckIsSessionInOfflineMode(
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
+const UPLOAD_FILE_RELEASE_DELAY_MS = 1_000;
 
 export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
@@ -554,11 +597,15 @@ type SessionRecoveryMode = 'network' | 'outage';
 
 type SessionRecoveryTarget = {
   mode: SessionRecoveryMode;
-  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+  /** Probe of the mode itself. Without one the session health check is used. */
+  recoveryCheck:
+    | ((ctx: { sessionKey: string }) => Promise<boolean> | boolean)
+    | undefined;
   recoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
 
 type SessionCanonicalConfig = {
+  isSessionEnabled?: OfflineSessionConfig['enabled'];
   hasNetworkConfig: boolean;
   networkEnabledByDefault: boolean;
   networkListenToBrowserEvents: boolean;
@@ -573,6 +620,8 @@ type SessionCanonicalConfig = {
   };
   classifyFailure?: OfflineSessionConfig['classifyFailure'];
   classifyRetriableFailure?: OfflineSessionConfig['classifyRetryableFailure'];
+  healthCheck?: OfflineHealthCheckConfig['check'];
+  healthCheckTimeoutMs: number;
   outageRecoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
   outageRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
@@ -581,6 +630,7 @@ function toCanonicalConfig(
   config: OfflineSessionConfig | undefined,
 ): SessionCanonicalConfig {
   return {
+    isSessionEnabled: config?.enabled,
     hasNetworkConfig: config?.network !== undefined,
     networkEnabledByDefault: config?.network?.enabled ?? false,
     networkListenToBrowserEvents:
@@ -599,6 +649,9 @@ function toCanonicalConfig(
     },
     classifyFailure: config?.classifyFailure,
     classifyRetriableFailure: config?.classifyRetryableFailure,
+    healthCheck: config?.healthCheck?.check,
+    healthCheckTimeoutMs:
+      config?.healthCheck?.timeoutMs ?? DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
     outageRecoveryCheck: config?.outage?.recoveryCheck,
     outageRecoveryProbe: normalizeRecoveryProbe(
       config?.outage?.recoveryProbe,
@@ -638,6 +691,7 @@ function sameCanonicalConfig(
   right: SessionCanonicalConfig,
 ): boolean {
   return (
+    left.isSessionEnabled === right.isSessionEnabled &&
     left.hasNetworkConfig === right.hasNetworkConfig &&
     left.networkEnabledByDefault === right.networkEnabledByDefault &&
     left.networkListenToBrowserEvents === right.networkListenToBrowserEvents &&
@@ -652,6 +706,8 @@ function sameCanonicalConfig(
       right.mutationQueueingByDefault.outage &&
     left.classifyFailure === right.classifyFailure &&
     left.classifyRetriableFailure === right.classifyRetriableFailure &&
+    left.healthCheck === right.healthCheck &&
+    left.healthCheckTimeoutMs === right.healthCheckTimeoutMs &&
     left.outageRecoveryCheck === right.outageRecoveryCheck &&
     sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
   );
@@ -664,38 +720,21 @@ function sameUploadsConfig(
   return (
     left?.adapter === right?.adapter &&
     left?.upload === right?.upload &&
+    left?.resolvedRefSchema === right?.resolvedRefSchema &&
     (left?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY) ===
       (right?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY)
   );
 }
 
-function eraseOfflineSession<TUploadRef extends ValidPayload>(
-  session: OfflineSession<TUploadRef>,
-): OfflineSession {
-  // WORKAROUND: Offline sessions are runtime-identical regardless of the
-  // upload-ref generic, but the coordinator registry stores them behind a
-  // single shared map keyed by session identity.
-  return __LEGIT_CAST__<OfflineSession, OfflineSession<TUploadRef>>(session);
-}
-
-function eraseUploadsConfig<TUploadRef extends ValidPayload>(
-  uploads: OfflineSessionUploadsConfig<TUploadRef> | undefined,
-): OfflineSessionUploadsConfig | undefined {
-  // WORKAROUND: The coordinator keeps one upload-config slot per session and
-  // treats the upload-ref generic as compile-time only, so this boundary erases
-  // the specific ref type when crossing into the shared runtime registry.
-  return __LEGIT_CAST__<
-    OfflineSessionUploadsConfig | undefined,
-    OfflineSessionUploadsConfig<TUploadRef> | undefined
-  >(uploads);
-}
-
 function castUploads<TUploadRef extends ValidPayload>(
   uploads: readonly OfflineUpload[],
 ): readonly OfflineUpload<TUploadRef>[] {
-  // WORKAROUND: The coordinator stores uploads in one shared runtime shape, and
-  // the session API rebinds that same data back to the caller's compile-time
-  // upload-ref generic.
+  // WORKAROUND: The coordinator is shared per session key, so it stores refs
+  // as ValidPayload and the session API rebinds them to the caller's upload-ref
+  // generic. Refs returned by the session transport have that type by
+  // construction; refs restored from storage or received from other tabs are
+  // parsed with `uploads.resolvedRefSchema` when they enter the coordinator,
+  // and are only as trustworthy as the stored data when no schema is set.
   return __LEGIT_CAST__<
     readonly OfflineUpload<TUploadRef>[],
     readonly OfflineUpload[]
@@ -705,18 +744,14 @@ function castUploads<TUploadRef extends ValidPayload>(
 function castResolvedUploadRef<TUploadRef extends ValidPayload>(
   resolvedRef: ValidPayload,
 ): TUploadRef {
-  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
-  // boundary, and the session API rebinds that same known-safe value back to
-  // the caller's compile-time upload-ref generic.
+  // WORKAROUND: Same rebind as `castUploads`, for a single resolved ref.
   return __LEGIT_CAST__<TUploadRef, ValidPayload>(resolvedRef);
 }
 
 function castResolvedUploadRefs<TUploadRef extends ValidPayload>(
   resolvedRefsById: Record<string, ValidPayload>,
 ): Record<string, TUploadRef> {
-  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
-  // boundary, and the session API rebinds that same known-safe map back to the
-  // caller's compile-time upload-ref generic.
+  // WORKAROUND: Same rebind as `castUploads`, for a map of resolved refs.
   return __LEGIT_CAST__<
     Record<string, TUploadRef>,
     Record<string, ValidPayload>
@@ -807,14 +842,48 @@ class SessionOfflineCoordinator {
   #onPersistentStorageError: ((error: unknown) => void) | undefined;
   #uploadsConfig: OfflineSessionUploadsConfig | undefined;
   #uploads = new Map<string, OfflineStoredUploadRecord>();
+  #storedUploadsRestore: Promise<void> | null = null;
+  /**
+   * Ids other tabs deleted while this tab's stored uploads were being listed,
+   * so the list result can't bring them back. `null` outside the listing.
+   */
+  #uploadsRemovedWhileListing: Set<string> | null = null;
   #referencedUploadIds = new Set<string>();
   #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
   #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
+  /**
+   * Validation outcome of the refs in the latest remote snapshot, so a ref
+   * repeated across snapshots is parsed once per record version.
+   */
+  #remoteUploadRefValidations = new Map<
+    string,
+    { updatedAt: number; parsedRef: ValidPayload | undefined }
+  >();
+  /**
+   * Uploads released by work that left the queue but not deleted yet: a store
+   * had not reported its references, or the upload was still being sent.
+   */
+  #pendingUploadReleases = new Set<string>();
+  /**
+   * Files attached to a mutation that is still being queued: saved before the
+   * queue entry that references them, so unused-mutation-upload cleanup must
+   * skip them until a store reports that reference.
+   */
+  #stagedMutationUploadIds = new Set<string>();
+  /**
+   * Refs of uploads that were uploaded and then released, so data still
+   * holding their ids (optimistic or draft state) resolves to the same ref
+   * for the rest of the session instead of failing.
+   */
+  #releasedUploadRefs = new Map<string, ValidPayload>();
+  /** Adapter removals in flight, awaited before the same id is read or saved. */
+  #uploadRemovals = new Map<string, Promise<void>>();
   #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   #uploadOnlineSessionStartedAt: number | null = null;
   #uploadOnlineSessionStabilizationTimer: ReturnType<typeof setTimeout> | null =
     null;
   #uploadRetentionToken = 0;
+  readonly #uploadFiles = new Map<string, UploadFileEntry>();
   #cleanupNetworkListeners: (() => void) | null = null;
   #canonicalConfig: SessionCanonicalConfig;
   #hasCanonicalConfig: boolean;
@@ -826,7 +895,16 @@ class SessionOfflineCoordinator {
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
+  /** Health check in flight, shared by every caller asking meanwhile. */
+  #healthCheckInFlight: Promise<OfflineHealthCheckResult | null> | null = null;
   #classifiedNetworkActive = false;
+  /** Last value of the session gate applied to the status. */
+  #appliedSessionEnabled = true;
+  /**
+   * The gate reopened and no green cycle ran since: mutations queued before
+   * it closed are waiting for one to be replayed.
+   */
+  #gateReopenedWithoutReplay = false;
   /** Tabs of this session that sent anything on the session channel. */
   #otherTabIds = new Set<string>();
   #networkEnabledOverride: boolean | undefined;
@@ -989,6 +1067,10 @@ class SessionOfflineCoordinator {
               );
             return;
           }
+          if (message.kind === 'offline-uploads-removed') {
+            this.#applyRemoteUploadsRemoved(message.ids, message.releasedRefs);
+            return;
+          }
           this.#applyRemoteSnapshot(message);
         },
         undefined,
@@ -1085,21 +1167,10 @@ class SessionOfflineCoordinator {
     this.#protectedKeys = [...protectedKeys].sort();
     setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
     if (this.#uploadsConfig) {
-      try {
-        const uploads = await this.#uploadsConfig.adapter.list(this.sessionKey);
-        if (hydrationToken === this.#hydrationToken) {
-          // Records saved or loaded while the list ran are already persisted
-          // and at least as recent as the listed ones, so they win.
-          this.#uploads = new Map([
-            ...uploads.map((upload) => [upload.id, upload] as const),
-            ...this.#uploads,
-          ]);
-          this.#syncUploadsState();
-          this.#scheduleUploadOnlineSessionStabilization();
-          void this.#refreshUploadRetention();
-        }
-      } catch (error) {
-        this.#onPersistentStorageError?.(error);
+      await this.#restoreStoredUploads();
+      if (hydrationToken === this.#hydrationToken) {
+        this.#scheduleUploadOnlineSessionStabilization();
+        void this.#refreshUploadRetention();
       }
     }
     void this.#persistSessionSnapshot();
@@ -1252,12 +1323,13 @@ class SessionOfflineCoordinator {
 
   /**
    * Lets the other stores of the session drop the queued work they declared
-   * as `cancelledWith` temp entities of `sourceStoreName` that will never
-   * exist on the server.
+   * as `cancelledWith` entities of `sourceStoreName` that will never exist on
+   * the server.
    */
   async notifyTempEntitiesCancelled(
     sourceStoreName: string,
-    serializedTempIds: ReadonlySet<string>,
+    cancelledEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
   ): Promise<void> {
     const pendingCleanups: Promise<void>[] = [];
 
@@ -1272,12 +1344,19 @@ class SessionOfflineCoordinator {
       pendingCleanups.push(
         registration.onTempEntitiesCancelled(
           sourceStoreName,
-          serializedTempIds,
+          cancelledEntityKeys,
+          getEntityKey,
         ),
       );
     }
 
-    await Promise.all(pendingCleanups);
+    // The source store already applied the cancellation: a store that fails
+    // to clean up its work is reported without failing it.
+    for (const result of await Promise.allSettled(pendingCleanups)) {
+      if (result.status === 'rejected') {
+        this.#onPersistentStorageError?.(result.reason);
+      }
+    }
   }
 
   /** Tells the other tabs that this tab saved or removed (`null`) a queue entry. */
@@ -1334,7 +1413,7 @@ class SessionOfflineCoordinator {
   publishWorkDiscarded(
     storeName: string,
     discardedWork: DiscardedOfflineWork[],
-    removedTempEntityKeys: string[],
+    removedEntityKeys: string[],
   ): void {
     if (this.#disposed) return;
 
@@ -1342,7 +1421,7 @@ class SessionOfflineCoordinator {
       kind: 'offline-work-discarded',
       storeName,
       discardedWork,
-      removedTempEntityKeys,
+      removedTempEntityKeys: removedEntityKeys,
     });
   }
 
@@ -1442,6 +1521,12 @@ class SessionOfflineCoordinator {
       );
     }
 
+    await this.#restoreStoredUploads();
+    // Saving while the previous file of this id is being removed could let
+    // the removal delete the new file. Waited here, before the check below,
+    // so nothing yields between the check and publishing the new record.
+    await this.#waitForUploadRemoval(args.id);
+
     // The queued or running transport marks the record as uploaded when it
     // finishes, so swapping the file under it would pair the new file with
     // the old ref.
@@ -1450,6 +1535,11 @@ class SessionOfflineCoordinator {
         `Cannot change upload "${args.id}" while it is queued or uploading`,
       );
     }
+
+    // A file staged again under a released id is a new upload.
+    this.#pendingUploadReleases.delete(args.id);
+    this.#releasedUploadRefs.delete(args.id);
+    if (args.source === 'mutation') this.#stagedMutationUploadIds.add(args.id);
 
     const existing = this.#uploads.get(args.id);
 
@@ -1476,8 +1566,10 @@ class SessionOfflineCoordinator {
     file: Blob | File;
     metadata?: ValidPayload;
   }): Promise<void> {
-    // Read through storage: right after a restart the stored uploads may not
-    // be listed yet, and the replacement must keep the persisted metadata.
+    // Read through storage (waits for the stored uploads to be restored):
+    // right after a restart the replacement must keep the persisted metadata.
+    // Changing an upload that is queued or uploading is rejected by
+    // `saveUpload`.
     const existing = await this.#getUploadRecord(args.id);
 
     await this.saveUpload({
@@ -1494,7 +1586,36 @@ class SessionOfflineCoordinator {
     return record?.file ?? null;
   }
 
+  /**
+   * Latest staged file state for `id`. The first read (while rendering) starts
+   * tracking the id, so a file the session already holds is returned right
+   * away instead of going through a `loading` render.
+   */
+  getUploadFile(id: string): OfflineUploadFile {
+    return this.#getUploadFileEntry(id).value;
+  }
+
+  /**
+   * Registers a consumer of the staged file for `id`. Consumers of the same id
+   * share one entry, so the file is read and its object URL is created once.
+   */
+  subscribeUploadFile(id: string, onChange: () => void): () => void {
+    const entry = this.#getUploadFileEntry(id);
+    const listener = (): void => onChange();
+
+    clearTimeout(entry.releaseTimer);
+    entry.listeners.add(listener);
+
+    return () => {
+      entry.listeners.delete(listener);
+      if (entry.listeners.size === 0) {
+        this.#scheduleUploadFileRelease(id, entry);
+      }
+    };
+  }
+
   async deleteUpload(id: string): Promise<void> {
+    await this.#restoreStoredUploads();
     if (this.#referencedUploadIds.has(id)) {
       throw new Error(
         `Cannot delete upload "${id}" while it is still referenced`,
@@ -1503,12 +1624,88 @@ class SessionOfflineCoordinator {
     if (this.#uploadPromisesById.has(id)) {
       throw new Error(`Cannot delete upload "${id}" while it is uploading`);
     }
-    if (!this.#uploadsConfig) return;
+    this.#stagedMutationUploadIds.delete(id);
+    this.#releasedUploadRefs.delete(id);
+    await this.#removeUploads([id]);
+  }
 
-    this.#uploads.delete(id);
-    await this.#uploadsConfig.adapter.remove(this.sessionKey, id);
-    this.#syncUploadsState();
-    void this.#refreshUploadRetention();
+  /**
+   * Deletes the given staged uploads unless queued work still needs them.
+   *
+   * Store controllers call this after a queue entry or resolution record left
+   * the queue for good (replayed, discarded, superseded, cancelled), passing
+   * the uploads that work depended on. It must run after the store synced its
+   * remaining references: they are aggregated session-wide, so an upload is
+   * kept while a queue entry or resolution record of any store references it.
+   *
+   * Uploads no queued work referenced are never passed here: the app stages a
+   * file before it queues the mutation, so being unreferenced alone must not
+   * delete an upload. Those are left to `deleteUpload` and to the retention
+   * window.
+   */
+  async deleteUnreferencedUploads(uploadIds: readonly string[]): Promise<void> {
+    if (this.#disposed) return;
+
+    for (const id of uploadIds) this.#pendingUploadReleases.add(id);
+    await this.#releasePendingUploads();
+  }
+
+  /**
+   * Deletes the released uploads nothing references anymore. Runs again when
+   * the last store reports its references and when a released upload that was
+   * still being sent settles.
+   */
+  async #releasePendingUploads(): Promise<void> {
+    if (this.#pendingUploadReleases.size === 0) return;
+
+    // A released upload not restored from storage yet would be skipped below
+    // and then listed back with nothing left to delete it.
+    await this.#restoreStoredUploads();
+
+    const cannotRelease = (): boolean =>
+      this.#disposed ||
+      this.#pendingUploadReleases.size === 0 ||
+      // A store that has not reported its queue yet may reference the uploads.
+      this.#storeContributions.size !== this.#registrations.size;
+    if (cannotRelease()) return;
+
+    // Uploads another tab staged after this tab listed the stored ones are
+    // only in storage, e.g. when this tab discards work that tab queued.
+    const missingIds = [...this.#pendingUploadReleases].filter(
+      (id) => !this.#uploads.has(id) && !this.#uploadPromisesById.has(id),
+    );
+    if (missingIds.length > 0) {
+      try {
+        await Promise.all(missingIds.map((id) => this.#getUploadRecord(id)));
+      } catch (error) {
+        this.#onPersistentStorageError?.(error);
+      }
+      if (cannotRelease()) return;
+    }
+
+    const removableIds: string[] = [];
+    for (const id of this.#pendingUploadReleases) {
+      if (this.#uploadPromisesById.has(id)) continue;
+
+      this.#pendingUploadReleases.delete(id);
+      // An upload queued work references again is released again when that
+      // work leaves the queue.
+      const upload = this.#uploads.get(id);
+      if (upload && !this.#referencedUploadIds.has(id)) {
+        if (upload.state === 'uploaded' && upload.resolvedRef !== undefined) {
+          this.#releasedUploadRefs.set(id, upload.resolvedRef);
+        }
+        removableIds.push(id);
+      }
+    }
+
+    try {
+      await this.#removeUploads(removableIds);
+    } catch (error) {
+      // The work that needed these uploads is already gone, so a failed
+      // removal only leaves them to the retention window.
+      this.#onPersistentStorageError?.(error);
+    }
   }
 
   async resolveUploadIds(
@@ -1524,11 +1721,81 @@ class SessionOfflineCoordinator {
     return Object.fromEntries(entries);
   }
 
+  /**
+   * Resolves the dependency uploads of a replaying operation. A failure is
+   * returned with the id of the upload that caused it instead of thrown, and
+   * leaves that upload `pending`: replay classifies the failure first and
+   * calls `markUploadFailed` only when it gives up on the operation.
+   */
+  async resolveReplayUploadIds(
+    uploadIds: readonly string[],
+  ): Promise<
+    | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
+    | { failedUploadId: string; error: unknown }
+  > {
+    const failures: { failedUploadId: string; error: unknown }[] = [];
+
+    // Rethrowing settles `Promise.all` on the first failure, so it is reported
+    // without waiting for the uploads that are still running.
+    const entries = await Promise.all(
+      uploadIds.map(async (id) => {
+        try {
+          return [id, await this.#ensureUploadResolved(id, true)] as const;
+        } catch (error) {
+          failures.push({ failedUploadId: id, error });
+          throw error;
+        }
+      }),
+    ).catch(() => null);
+
+    return failures[0] ?? { refs: Object.fromEntries(entries ?? []) };
+  }
+
+  /**
+   * Marks the dependency uploads of an operation as `failed` after replay
+   * moved it to manual resolution. Uploads still being sent are marked if
+   * they fail too. Uploads that are not waiting on a failure (restarted or
+   * uploaded meanwhile) are left untouched.
+   *
+   * Never rejects: the state only drives the upload UI, so a storage error is
+   * reported instead of interrupting the replay.
+   */
+  async markUploadsFailed(ids: readonly string[]): Promise<void> {
+    const reportError = (error: unknown) =>
+      this.#onPersistentStorageError?.(error);
+
+    const settledIds: string[] = [];
+    for (const id of ids) {
+      const inFlight = this.#uploadPromisesById.get(id);
+      if (!inFlight) {
+        settledIds.push(id);
+        continue;
+      }
+
+      void inFlight.catch(() => this.#markUploadFailed(id)).catch(reportError);
+    }
+
+    await Promise.all(
+      settledIds.map((id) => this.#markUploadFailed(id).catch(reportError)),
+    );
+  }
+
+  async #markUploadFailed(id: string): Promise<void> {
+    const record = this.#uploads.get(id);
+    if (record?.state !== 'pending' || !record.lastError) return;
+
+    await this.#updateUploadState({ id, state: 'failed' });
+  }
+
   isLeader(): boolean {
     return this.#browserTabs.priority.getPriorityRank() <= 1;
   }
 
   isReplayBlocked(): boolean {
+    // Queued mutations wait for the session gate to reopen. A closing noticed
+    // here (e.g. between two replayed entries) is applied, so the reopen is
+    // seen as one and resumes the replay
+    if (!this.#syncSessionGate()) return true;
     if (this.store.state.status.isOfflineMode) return true;
 
     const { network, outage } = this.store.state.status;
@@ -1583,11 +1850,20 @@ class SessionOfflineCoordinator {
     return !isWindowAvailable() || navigator.onLine !== false;
   }
 
+  /**
+   * Reads the session gate (`offlineSession.enabled`): while it is closed the
+   * session behaves as if no offline session existed.
+   */
+  #isSessionEnabled(): boolean {
+    return this.#canonicalConfig.isSessionEnabled?.() ?? true;
+  }
+
   #isNetworkEnabled(): boolean {
     return (
       this.#canonicalConfig.hasNetworkConfig &&
       (this.#networkEnabledOverride ??
-        this.#canonicalConfig.networkEnabledByDefault)
+        this.#canonicalConfig.networkEnabledByDefault) &&
+      this.#isSessionEnabled()
     );
   }
 
@@ -1595,8 +1871,41 @@ class SessionOfflineCoordinator {
     return (
       this.#canonicalConfig.hasOutageConfig &&
       (this.#outageEnabledOverride ??
-        this.#canonicalConfig.outageEnabledByDefault)
+        this.#canonicalConfig.outageEnabledByDefault) &&
+      this.#isSessionEnabled()
     );
+  }
+
+  /**
+   * Applies a flip of the session gate to the status: closing it leaves
+   * offline mode, whatever the cause. Returns whether the gate is open.
+   *
+   * Every status write runs it first, so the flip is applied whichever path
+   * notices it (a fetch, a recovery check, another tab's snapshot...).
+   */
+  #syncSessionGate(): boolean {
+    const enabled = this.#isSessionEnabled();
+    if (enabled === this.#appliedSessionEnabled) return enabled;
+
+    this.#appliedSessionEnabled = enabled;
+    if (enabled) this.#gateReopenedWithoutReplay = true;
+
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
+    this.#updateStatus((current) => ({
+      ...current,
+      network: {
+        enabled: this.#isNetworkEnabled(),
+        active: current.network.active,
+      },
+      outage: {
+        enabled: this.#isOutageEnabled(),
+        active: current.outage.active,
+      },
+    }));
+    this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    this.#handleConnectivityChange(wasEffectivelyOffline, false);
+
+    return enabled;
   }
 
   #assertModeIsConfigured(mode: 'network' | 'outage'): void {
@@ -1744,7 +2053,8 @@ class SessionOfflineCoordinator {
     if (
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#canonicalConfig.networkRecoveryCheck
+      (this.#canonicalConfig.networkRecoveryCheck ||
+        this.#canonicalConfig.healthCheck)
     ) {
       this.#syncRecoveryProbe();
       return true;
@@ -1769,17 +2079,31 @@ class SessionOfflineCoordinator {
   }
 
   async refreshNetworkState(): Promise<boolean> {
+    const sessionEnabled = this.#syncSessionGate();
     const token = ++this.#networkStateToken;
-    const detectedOffline = this.#getCurrentOfflineState();
 
-    if (typeof detectedOffline === 'boolean') {
-      return Promise.resolve(
-        this.#applyRefreshedNetworkState(token, detectedOffline),
-      );
+    // A closed session gate ignores network detection
+    if (!sessionEnabled) return false;
+
+    const detectedOffline = this.#getCurrentOfflineState();
+    const isOffline = this.#applyRefreshedNetworkState(
+      token,
+      typeof detectedOffline === 'boolean'
+        ? detectedOffline
+        : await detectedOffline,
+    );
+
+    // The gate has reopened: once the network detection confirms the session
+    // is online, mutations queued before it closed can be replayed
+    if (
+      this.#gateReopenedWithoutReplay &&
+      !isOffline &&
+      !this.isReplayBlocked()
+    ) {
+      this.#notifyGreenCycle();
     }
 
-    const resolvedDetectedOffline = await Promise.resolve(detectedOffline);
-    return this.#applyRefreshedNetworkState(token, resolvedDetectedOffline);
+    return isOffline;
   }
 
   setNetworkActive(
@@ -1790,6 +2114,9 @@ class SessionOfflineCoordinator {
       recoveryCheckAt?: number;
     } = {},
   ): void {
+    // Applied before the classification below is set: applying a flip
+    // re-derives it from the status
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isNetworkEnabled();
@@ -1831,6 +2158,8 @@ class SessionOfflineCoordinator {
     active: boolean,
     options: { recoveryCheckAt?: number } = {},
   ): void {
+    // Applied before the previous state is read below
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isOutageEnabled();
@@ -1850,13 +2179,42 @@ class SessionOfflineCoordinator {
     error: unknown,
     ctx: OfflineFailureContext,
   ): Promise<OfflineFailureClassification> {
-    if (!this.#canonicalConfig.classifyFailure) return 'ignore';
+    if (!this.#canClassifyFailures()) return 'ignore';
 
-    const token = this.getClassificationToken();
-    const result = await this.#canonicalConfig.classifyFailure(error, ctx);
+    const { classifyFailure, healthCheck } = this.#canonicalConfig;
+    let result: OfflineFailureClassification | 'unknown' = 'unknown';
 
-    if (!this.isCurrentClassificationToken(token)) {
-      return 'ignore';
+    if (classifyFailure) {
+      const token = this.getClassificationToken();
+      result = await classifyFailure(error, ctx);
+
+      // The gate may have closed while the classifier ran
+      if (!this.#canClassifyFailures()) return 'ignore';
+
+      // An explicit answer overtaken by a newer classification is dropped.
+      // An `unknown` one decides nothing by itself: it goes on to the health
+      // check, whose answer is shared by every failure waiting for it
+      if (result !== 'unknown' && !this.isCurrentClassificationToken(token)) {
+        return 'ignore';
+      }
+    }
+
+    if (result === 'unknown') {
+      if (!healthCheck) return 'ignore';
+
+      // Already offline: the active mode explains the failure, and asking
+      // "are we back?" is the job of the recovery checks
+      if (this.store.state.status.outage.active) return 'outage';
+      if (this.store.state.status.network.active) return 'network';
+
+      const health = await this.#checkHealth(healthCheck);
+      if (health === null || health === 'up') return 'ignore';
+
+      result = health === 'outage' ? 'outage' : 'network';
+
+      // Every failure that shared the check gets here; the first one has
+      // already activated the mode
+      if (this.store.state.status[result].active) return result;
     }
 
     if (result === 'outage') {
@@ -1879,6 +2237,65 @@ class SessionOfflineCoordinator {
     }
 
     return 'ignore';
+  }
+
+  /**
+   * Runs `offlineSession.healthCheck`. While a check is in flight every
+   * caller (failing requests, a recovery tick) gets that same call instead of
+   * starting its own. A finished answer is not kept: an `up` reused for a
+   * later failure could hide an outage that started right after it.
+   *
+   * Resolves with `null` when the check gave no answer (it threw or timed
+   * out), which callers treat as "nothing learned".
+   */
+  #checkHealth(
+    check: OfflineHealthCheckConfig['check'],
+  ): Promise<OfflineHealthCheckResult | null> {
+    this.#healthCheckInFlight ??= this.#requestHealth(check).finally(() => {
+      this.#healthCheckInFlight = null;
+    });
+
+    return this.#healthCheckInFlight;
+  }
+
+  async #requestHealth(
+    check: OfflineHealthCheckConfig['check'],
+  ): Promise<OfflineHealthCheckResult | null> {
+    const abortController = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      return await Promise.race([
+        check({ sessionKey: this.sessionKey, signal: abortController.signal }),
+        new Promise<null>((resolve) => {
+          timeout = setTimeout(() => {
+            abortController.abort();
+            resolve(null);
+          }, this.#canonicalConfig.healthCheckTimeoutMs);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Whether classifying a failure can change anything: the session gate has
+   * to be open, with a mode enabled or still active (waiting to recover).
+   */
+  #canClassifyFailures(): boolean {
+    if (!this.#isSessionEnabled()) return false;
+
+    const { network, outage } = this.store.state.status;
+
+    return (
+      network.active ||
+      outage.active ||
+      this.#isNetworkEnabled() ||
+      this.#isOutageEnabled()
+    );
   }
 
   async classifyRetriableFailure(
@@ -1904,6 +2321,7 @@ class SessionOfflineCoordinator {
     if (this.store.state.status.isOfflineMode || !this.isLeader()) {
       return;
     }
+    this.#gateReopenedWithoutReplay = false;
     void this.#refreshUploadRetention();
     for (const registration of this.#registrations.values()) {
       registration.onGreenCycle?.();
@@ -1965,6 +2383,49 @@ class SessionOfflineCoordinator {
     }
   }
 
+  /**
+   * Lists the stored uploads into memory, once per coordinator. Every upload
+   * operation that reads or changes a record waits for it first: the in-memory
+   * map is only authoritative after the stored records are in it, and a list
+   * result applied over newer changes would drop saved uploads and bring
+   * deleted ones back.
+   */
+  #restoreStoredUploads(): Promise<void> | undefined {
+    if (!this.#uploadsConfig) return undefined;
+
+    return (this.#storedUploadsRestore ??= this.#listStoredUploads(
+      this.#uploadsConfig,
+    ));
+  }
+
+  async #listStoredUploads(
+    uploadsConfig: OfflineSessionUploadsConfig,
+  ): Promise<void> {
+    const removedWhileListing = new Set<string>();
+    this.#uploadsRemovedWhileListing = removedWhileListing;
+    try {
+      const uploads = await uploadsConfig.adapter.list(this.sessionKey);
+      // Upload operations wait for this list, so nothing should have changed
+      // the map meanwhile; if a record got in anyway, it was persisted after
+      // the listed one and wins. Records another tab deleted during the list
+      // were read before the removal and must not come back.
+      this.#uploads = new Map([
+        ...uploads
+          .filter((upload) => !removedWhileListing.has(upload.id))
+          .map(
+            (upload) =>
+              [upload.id, this.#validateRestoredUpload(upload)] as const,
+          ),
+        ...this.#uploads,
+      ]);
+      this.#syncUploadsState();
+    } catch (error) {
+      this.#onPersistentStorageError?.(error);
+    } finally {
+      this.#uploadsRemovedWhileListing = null;
+    }
+  }
+
   async #getUploadRecord(
     id: string,
   ): Promise<OfflineStoredUploadRecord | null> {
@@ -1972,16 +2433,165 @@ class SessionOfflineCoordinator {
     if (existing) return existing;
     if (!this.#uploadsConfig) return null;
 
+    await this.#restoreStoredUploads();
+    const restored = this.#uploads.get(id);
+    if (restored) return restored;
+
+    // A removal in flight could still let the load find the removed record.
+    await this.#waitForUploadRemoval(id);
     const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
     // A save during the load already persisted a newer record; keep it.
     const current = this.#uploads.get(id);
     if (current) return current;
-    if (loaded) {
-      this.#uploads.set(id, loaded);
-      this.#syncUploadsState();
+    if (!loaded) return null;
+
+    const validated = this.#validateRestoredUpload(loaded);
+    this.#uploads.set(id, validated);
+    this.#syncUploadsState();
+
+    return validated;
+  }
+
+  /**
+   * Checks the ref of an upload record restored from the adapter against the
+   * configured `resolvedRefSchema`. Records enter `#uploads` once, so each
+   * stored ref is parsed once.
+   */
+  #validateRestoredUpload(
+    upload: OfflineStoredUploadRecord,
+  ): OfflineStoredUploadRecord {
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    if (schema === undefined || upload.resolvedRef === undefined) return upload;
+
+    return applyRestoredUploadRef(
+      upload,
+      parseRestoredUploadRef(schema, upload.resolvedRef),
+    );
+  }
+
+  /** Checks the refs published by another tab against `resolvedRefSchema`. */
+  #validateRemoteUploads(uploads: OfflineUpload[]): OfflineUpload[] {
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    if (schema === undefined) return uploads;
+
+    const previousValidations = this.#remoteUploadRefValidations;
+    this.#remoteUploadRefValidations = new Map();
+
+    return uploads.map((upload) => {
+      if (upload.resolvedRef === undefined) return upload;
+
+      const previous = previousValidations.get(upload.id);
+      const validation =
+        previous?.updatedAt === upload.updatedAt
+          ? previous
+          : {
+              updatedAt: upload.updatedAt,
+              parsedRef: parseRestoredUploadRef(schema, upload.resolvedRef),
+            };
+      this.#remoteUploadRefValidations.set(upload.id, validation);
+
+      return applyRestoredUploadRef(upload, validation.parsedRef);
+    });
+  }
+
+  #getUploadFileEntry(id: string): UploadFileEntry {
+    const existingEntry = this.#uploadFiles.get(id);
+    if (existingEntry) return existingEntry;
+
+    const entry: UploadFileEntry = {
+      listeners: new Set(),
+      value: loadingUploadFile,
+      releaseTimer: undefined,
+    };
+    this.#uploadFiles.set(id, entry);
+    if (!this.#syncUploadFile(id, entry)) {
+      void this.#loadUploadFile(id, entry);
+    }
+    // Entries are created while rendering, so the ones whose render never
+    // commits (and therefore never subscribes) have to be released as well.
+    this.#scheduleUploadFileRelease(id, entry);
+
+    return entry;
+  }
+
+  /**
+   * Drops the file and revokes its object URL once no hook has consumed the
+   * entry for a moment. The delay keeps the URL stable across StrictMode's
+   * effect replay and components that remount right away.
+   */
+  #scheduleUploadFileRelease(id: string, entry: UploadFileEntry): void {
+    entry.releaseTimer = setTimeout(() => {
+      this.#uploadFiles.delete(id);
+      this.#setUploadFile(entry, loadingUploadFile);
+    }, UPLOAD_FILE_RELEASE_DELAY_MS);
+  }
+
+  #setUploadFile(entry: UploadFileEntry, value: OfflineUploadFile): void {
+    const previousUrl = entry.value.url;
+    entry.value = value;
+    if (previousUrl !== null) URL.revokeObjectURL(previousUrl);
+
+    for (const listener of entry.listeners) listener();
+  }
+
+  /**
+   * Aligns a consumed upload file with the in-memory upload records. Returns
+   * `false` when the session holds no record for the id.
+   */
+  #syncUploadFile(id: string, entry: UploadFileEntry): boolean {
+    const file = this.#uploads.get(id)?.file;
+
+    if (!file) {
+      // The upload left the session: deleted, expired or consumed.
+      if (entry.value.file) this.#setUploadFile(entry, missingUploadFile);
+      return false;
     }
 
-    return loaded;
+    if (entry.value.file !== file) {
+      this.#setUploadFile(entry, {
+        status: 'success',
+        url: URL.createObjectURL(file),
+        file,
+        error: null,
+      });
+    }
+    return true;
+  }
+
+  async #loadUploadFile(id: string, entry: UploadFileEntry): Promise<void> {
+    let failure: Error | undefined;
+
+    try {
+      // Waits for the stored uploads list before reading the file on its own,
+      // so a file staged before a reload is read once and never reported as
+      // missing too early.
+      await this.#getUploadRecord(id);
+    } catch (error) {
+      failure = unknownToError(error);
+    }
+
+    if (
+      this.#uploadFiles.get(id) !== entry ||
+      this.#syncUploadFile(id, entry) ||
+      entry.value.status !== 'loading'
+    ) {
+      return;
+    }
+
+    this.#setUploadFile(
+      entry,
+      failure
+        ? { status: 'error', url: null, file: null, error: failure }
+        : missingUploadFile,
+    );
+  }
+
+  async #waitForUploadRemoval(id: string): Promise<void> {
+    let removal = this.#uploadRemovals.get(id);
+    while (removal) {
+      await removal;
+      removal = this.#uploadRemovals.get(id);
+    }
   }
 
   async #saveUploadRecord(record: OfflineStoredUploadRecord): Promise<void> {
@@ -1991,6 +2601,12 @@ class SessionOfflineCoordinator {
       );
     }
 
+    // Saving while the previous file of this id is being removed could let
+    // the removal delete the new file. Only yields when a removal is in
+    // flight, so callers that checked the upload state just before still
+    // publish the record before anything else runs.
+    const removal = this.#uploadRemovals.get(record.id);
+    if (removal) await removal;
     this.#uploads.set(record.id, record);
     await this.#uploadsConfig.adapter.save(this.sessionKey, record.id, record);
     this.#syncUploadsState();
@@ -2124,11 +2740,13 @@ class SessionOfflineCoordinator {
       for (const id of expiredIdSet) {
         this.#uploads.delete(id);
       }
-      await Promise.all(
-        expiredIds.map((id) =>
-          uploadsConfig.adapter.remove(this.sessionKey, id),
-        ),
-      );
+      try {
+        await Promise.all(
+          expiredIds.map((id) => this.#removeStoredUpload(uploadsConfig, id)),
+        );
+      } finally {
+        this.#publishUploadsRemoved(expiredIds);
+      }
       didChange = true;
     }
 
@@ -2173,6 +2791,10 @@ class SessionOfflineCoordinator {
       { action: 'offline-session-uploads' },
     );
     this.#publishSnapshot();
+
+    for (const [id, entry] of this.#uploadFiles) {
+      this.#syncUploadFile(id, entry);
+    }
   }
 
   #buildNextUploadRecord(
@@ -2184,7 +2806,7 @@ class SessionOfflineCoordinator {
       lastError?: { message: string };
     },
   ): OfflineStoredUploadRecord {
-    return {
+    const nextRecord: OfflineStoredUploadRecord = {
       ...current,
       state: args.state,
       updatedAt: Date.now(),
@@ -2194,6 +2816,11 @@ class SessionOfflineCoordinator {
       ...(args.progress !== undefined ? { progress: args.progress } : {}),
       ...(args.lastError !== undefined ? { lastError: args.lastError } : {}),
     };
+
+    // A successful upload no longer reports the failure of earlier attempts.
+    if (args.state === 'uploaded') delete nextRecord.lastError;
+
+    return nextRecord;
   }
 
   async #updateUploadState(args: {
@@ -2219,9 +2846,18 @@ class SessionOfflineCoordinator {
     return nextRecord;
   }
 
-  async #ensureUploadResolved(id: string): Promise<ValidPayload> {
+  async #ensureUploadResolved(
+    id: string,
+    /**
+     * Replay decides what a transport failure means after classifying it, so
+     * the upload keeps waiting (`pending`) instead of becoming `failed` here.
+     */
+    forReplay = false,
+  ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
+      const releasedRef = this.#releasedUploadRefs.get(id);
+      if (releasedRef !== undefined) return releasedRef;
       throw new Error(`Unknown offline upload "${id}"`);
     }
     if (
@@ -2244,6 +2880,8 @@ class SessionOfflineCoordinator {
       .resultifyAdd(async () => {
         const queuedRecord = await this.#getUploadRecord(id);
         if (!queuedRecord) {
+          const releasedRef = this.#releasedUploadRefs.get(id);
+          if (releasedRef !== undefined) return releasedRef;
           throw new Error(`Unknown offline upload "${id}"`);
         }
         if (
@@ -2295,7 +2933,7 @@ class SessionOfflineCoordinator {
         } catch (error) {
           await this.#updateUploadState({
             id,
-            state: 'failed',
+            state: forReplay ? 'pending' : 'failed',
             lastError: {
               message: error instanceof Error ? error.message : 'Upload failed',
             },
@@ -2309,6 +2947,9 @@ class SessionOfflineCoordinator {
       })
       .finally(() => {
         this.#uploadPromisesById.delete(id);
+        if (this.#pendingUploadReleases.has(id)) {
+          void this.#releasePendingUploads();
+        }
       });
 
     this.#uploadPromisesById.set(id, uploadPromise);
@@ -2316,43 +2957,129 @@ class SessionOfflineCoordinator {
   }
 
   async #cleanupUnusedMutationUploads(): Promise<void> {
-    const uploadsConfig = this.#uploadsConfig;
-    if (!uploadsConfig) return;
-
-    // Only files of stores created in this tab: the queue of a store that isn't
-    // created yet (code-split screens, the app started on another screen) is
-    // not loaded, so its files look unused.
-    const removableIds = [...this.#uploads.values()]
-      .filter(
-        (upload) =>
-          upload.source === 'mutation' &&
-          (upload.storeName !== undefined
-            ? this.#registrations.has(upload.storeName)
-            : // Records persisted before `storeName` existed: mutation upload
-              // ids start with the id of the queue entry, `${storeName}:…`.
-              [...this.#registrations.keys()].some((storeName) =>
-                upload.id.startsWith(`${storeName}:`),
-              )),
-      )
-      .map((upload) => upload.id)
-      .filter(
-        (id) =>
-          !this.#referencedUploadIds.has(id) &&
-          !this.#uploadPromisesById.has(id),
-      );
-
-    if (removableIds.length === 0) return;
-
-    for (const id of removableIds) {
-      this.#uploads.delete(id);
-    }
-    await Promise.all(
-      removableIds.map((id) =>
-        uploadsConfig.adapter.remove(this.sessionKey, id),
-      ),
+    await this.#removeUploads(
+      [...this.#uploads.values()]
+        // Only files of stores created in this tab: the queue of a store that
+        // isn't created yet (code-split screens, the app started on another
+        // screen) is not loaded, so its files look unused.
+        .filter(
+          (upload) =>
+            upload.source === 'mutation' &&
+            (upload.storeName !== undefined
+              ? this.#registrations.has(upload.storeName)
+              : // Records persisted before `storeName` existed: mutation upload
+                // ids start with the id of the queue entry, `${storeName}:…`.
+                [...this.#registrations.keys()].some((storeName) =>
+                  upload.id.startsWith(`${storeName}:`),
+                )),
+        )
+        .map((upload) => upload.id)
+        .filter(
+          (id) =>
+            !this.#referencedUploadIds.has(id) &&
+            !this.#uploadPromisesById.has(id) &&
+            !this.#stagedMutationUploadIds.has(id),
+        ),
     );
-    this.#syncUploadsState();
+  }
+
+  async #removeUploads(ids: string[]): Promise<void> {
+    const uploadsConfig = this.#uploadsConfig;
+    if (!uploadsConfig || ids.length === 0) return;
+
+    try {
+      await Promise.all(
+        ids.map((id) => {
+          this.#uploads.delete(id);
+          return this.#removeStoredUpload(uploadsConfig, id);
+        }),
+      );
+    } finally {
+      // The ids already left `#uploads`, so publish that even when a storage
+      // removal failed.
+      this.#syncUploadsState();
+      this.#publishUploadsRemoved(ids);
+    }
     void this.#refreshUploadRetention();
+  }
+
+  /** Tells the other tabs that this tab deleted these stored uploads. */
+  #publishUploadsRemoved(ids: readonly string[]): void {
+    // A tab opened later lists the stored uploads, so it has nothing to drop.
+    if (this.#disposed || ids.length === 0 || !this.hasOtherTabs()) return;
+
+    const releasedRefs: Array<[string, ValidPayload]> = [];
+    for (const id of ids) {
+      const ref = this.#releasedUploadRefs.get(id);
+      if (ref !== undefined) releasedRefs.push([id, ref]);
+    }
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-uploads-removed',
+      ids: [...ids],
+      releasedRefs,
+    });
+  }
+
+  #applyRemoteUploadsRemoved(
+    ids: readonly string[],
+    releasedRefs: ReadonlyArray<readonly [string, ValidPayload]>,
+  ): void {
+    const removedIds = new Set(ids);
+    for (const id of removedIds) {
+      // An explicitly deleted upload carries no ref, so the id stops
+      // resolving here too.
+      this.#releasedUploadRefs.delete(id);
+      this.#pendingUploadReleases.delete(id);
+      this.#uploads.delete(id);
+      this.#uploadsRemovedWhileListing?.add(id);
+    }
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    for (const [id, ref] of releasedRefs) {
+      // A ref failing the schema can't be uploaded again, since its file is
+      // deleted, so the id stays unknown here.
+      const parsedRef =
+        schema === undefined ? ref : parseRestoredUploadRef(schema, ref);
+      if (parsedRef !== undefined) this.#releasedUploadRefs.set(id, parsedRef);
+    }
+
+    // The sender already published its uploads list. Rebuilding it from this
+    // tab's records and publishing it would replace that list everywhere with
+    // upload states this tab never received.
+    const { uploads } = this.store.state;
+    if (uploads.some((upload) => removedIds.has(upload.id))) {
+      this.store.setPartialState(
+        { uploads: uploads.filter((upload) => !removedIds.has(upload.id)) },
+        { action: 'offline-session-uploads' },
+      );
+    }
+
+    // Rendered files of the removed uploads become `missing` in this tab too.
+    for (const id of removedIds) {
+      const entry = this.#uploadFiles.get(id);
+      if (entry) this.#syncUploadFile(id, entry);
+    }
+  }
+
+  /**
+   * Removes an upload from the adapter, tracking the removal so a save or
+   * load of the same id waits for it.
+   */
+  #removeStoredUpload(
+    uploadsConfig: OfflineSessionUploadsConfig,
+    id: string,
+  ): Promise<void> {
+    const removal = uploadsConfig.adapter.remove(this.sessionKey, id);
+    const settled = removal.then(
+      () => {},
+      () => {},
+    );
+    this.#uploadRemovals.set(id, settled);
+    void settled.then(() => {
+      if (this.#uploadRemovals.get(id) === settled) {
+        this.#uploadRemovals.delete(id);
+      }
+    });
+    return removal;
   }
 
   /**
@@ -2519,6 +3246,9 @@ class SessionOfflineCoordinator {
     }
     if (publish) this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
     this.#referencedUploadIds = referencedUploadIds;
+    for (const id of this.#stagedMutationUploadIds) {
+      if (referencedUploadIds.has(id)) this.#stagedMutationUploadIds.delete(id);
+    }
 
     if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
       this.#protectedKeys = nextProtectedKeys;
@@ -2537,10 +3267,12 @@ class SessionOfflineCoordinator {
     if (
       publish &&
       this.#uploadsConfig &&
-      this.#uploads.size > 0 &&
       this.#storeContributions.size === this.#registrations.size
     ) {
-      void this.#cleanupUnusedMutationUploads();
+      if (this.#uploads.size > 0) void this.#cleanupUnusedMutationUploads();
+      // Released uploads may only be in storage (staged by another tab), so
+      // this doesn't depend on the in-memory records.
+      void this.#releasePendingUploads();
     }
   }
 
@@ -2549,14 +3281,23 @@ class SessionOfflineCoordinator {
   }
 
   #deriveLocalStatus(status: GlobalOfflineStatus): GlobalOfflineStatus {
-    const isOfflineMode = getIsOfflineModeFromStatus(status);
+    // A closed session gate drops every offline cause, wherever it comes from
+    // (detection, classification, another tab or the persisted snapshot)
+    const gatedStatus = this.#isSessionEnabled()
+      ? status
+      : { ...status, network: INACTIVE_MODE, outage: INACTIVE_MODE };
+    const isOfflineMode = getIsOfflineModeFromStatus(gatedStatus);
 
-    return this.#stampLocalStatus({ ...status, isOfflineMode });
+    return this.#stampLocalStatus({ ...gatedStatus, isOfflineMode });
   }
 
   #updateStatus(
     updater: (status: GlobalOfflineStatus) => GlobalOfflineStatus,
   ): void {
+    // The status is derived with the current gate: a flip nothing applied
+    // yet has to be applied first, or it would be absorbed without its side
+    // effects (the replay owed on reopen, the recovery probe stopped on close)
+    this.#syncSessionGate();
     const derived = this.#deriveLocalStatus(updater(this.store.state.status));
 
     this.store.setPartialState(
@@ -2632,6 +3373,8 @@ class SessionOfflineCoordinator {
       return;
     }
     this.#lastRemoteSnapshotAt = message.sentAt;
+    // The snapshot is derived with the current gate, like a local write
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
 
@@ -2664,7 +3407,7 @@ class SessionOfflineCoordinator {
         // snapshot may have been taken before it saw this tab's latest one.
         // The snapshot only fills in stores this tab has not loaded.
         ...this.#buildItemLists(),
-        uploads: message.uploads,
+        uploads: this.#validateRemoteUploads(message.uploads),
       },
       { action: 'offline-session-remote' },
     );
@@ -2753,19 +3496,22 @@ class SessionOfflineCoordinator {
   }
 
   #getDesiredRecoveryTarget(): SessionRecoveryTarget | null {
-    if (!this.isLeader() || this.#registrations.size === 0) {
+    if (this.#disposed || !this.isLeader() || this.#registrations.size === 0) {
       return null;
     }
+
+    const { networkRecoveryCheck, outageRecoveryCheck, healthCheck } =
+      this.#canonicalConfig;
 
     if (
       this.store.state.status.network.active &&
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#canonicalConfig.networkRecoveryCheck
+      (networkRecoveryCheck || healthCheck)
     ) {
       return {
         mode: 'network',
-        recoveryCheck: this.#canonicalConfig.networkRecoveryCheck,
+        recoveryCheck: networkRecoveryCheck,
         recoveryProbe: this.#canonicalConfig.networkRecoveryProbe,
       };
     }
@@ -2773,11 +3519,11 @@ class SessionOfflineCoordinator {
     if (
       this.store.state.status.outage.active &&
       !this.store.state.status.network.active &&
-      this.#canonicalConfig.outageRecoveryCheck
+      (outageRecoveryCheck || healthCheck)
     ) {
       return {
         mode: 'outage',
-        recoveryCheck: this.#canonicalConfig.outageRecoveryCheck,
+        recoveryCheck: outageRecoveryCheck,
         recoveryProbe: this.#canonicalConfig.outageRecoveryProbe,
       };
     }
@@ -2786,6 +3532,12 @@ class SessionOfflineCoordinator {
   }
 
   #scheduleRecoveryProbe(target: SessionRecoveryTarget): void {
+    // A probe may already be armed: the status can change while a recovery
+    // check is in flight, which re-arms the probe before that check settles
+    // and gets here too. Only one timer may survive, or each would keep its
+    // own probe loop running
+    if (this.#recoveryTimer !== null) clearTimeout(this.#recoveryTimer);
+
     this.#scheduledRecoveryMode = target.mode;
     this.#recoveryTimer = setTimeout(() => {
       this.#recoveryTimer = null;
@@ -2795,20 +3547,36 @@ class SessionOfflineCoordinator {
   }
 
   async #runRecoveryProbe(target: SessionRecoveryTarget): Promise<void> {
+    // A gate closed since the probe was armed leaves offline mode, which
+    // stops the probe before it calls the check
+    this.#syncSessionGate();
     const nextTarget = this.#getDesiredRecoveryTarget();
     if (nextTarget === null || nextTarget.mode !== target.mode) {
       return;
     }
 
+    const { healthCheck, outageRecoveryCheck } = this.#canonicalConfig;
     let recovered = false;
+    // Answer of the session health check, when the mode has no probe of its
+    // own
+    let health: OfflineHealthCheckResult | null = null;
 
-    try {
-      recovered = await nextTarget.recoveryCheck({
-        sessionKey: this.sessionKey,
-      });
-    } catch {
-      recovered = false;
+    if (nextTarget.recoveryCheck) {
+      try {
+        recovered = await nextTarget.recoveryCheck({
+          sessionKey: this.sessionKey,
+        });
+      } catch {
+        recovered = false;
+      }
+    } else if (healthCheck) {
+      health = await this.#checkHealth(healthCheck);
+      recovered = health === 'up';
     }
+
+    // Disposed while the check was in flight: its answer must not touch the
+    // status, wake up the stores or re-arm the probe timer
+    if (this.#disposed) return;
 
     const recoveryCheckAt = Date.now();
 
@@ -2816,10 +3584,47 @@ class SessionOfflineCoordinator {
       this.#recoveryAttempt = 0;
       if (target.mode === 'network') {
         this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+
+        // A healthy backend also ends an outage that waits for the same
+        // health check, without spending a second check on it
+        if (
+          health === 'up' &&
+          !outageRecoveryCheck &&
+          this.store.state.status.outage.active &&
+          !this.store.state.status.network.active
+        ) {
+          this.setOutageActive(false, { recoveryCheckAt });
+        }
         return;
       }
 
       this.setOutageActive(false, { recoveryCheckAt });
+      return;
+    }
+
+    if (target.mode === 'network' && health === 'outage') {
+      // The backend is reachable again but down: the network cause is over.
+      // Outage mode takes over first (when it can be entered), so the
+      // session is not seen as online in between
+      if (!this.store.state.status.outage.active && this.#isOutageEnabled()) {
+        this.setOutageActive(true, { recoveryCheckAt });
+      }
+      this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+      return;
+    }
+
+    if (
+      target.mode === 'outage' &&
+      health === 'unreachable' &&
+      this.#isNetworkEnabled()
+    ) {
+      // Nothing can be said about the outage while the backend cannot be
+      // reached: it is kept, and network mode leads the recovery from here
+      this.setNetworkActive(true, {
+        classified: true,
+        recordFailureAt: true,
+        recoveryCheckAt,
+      });
       return;
     }
 
@@ -2969,16 +3774,10 @@ export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
   defaultStatusBySession.clear();
 }
 
-export function getOfflineSessionUploadsConfig<TUploadRef extends ValidPayload>(
-  session: OfflineSession<TUploadRef>,
-): OfflineSessionUploadsConfig<TUploadRef> | undefined {
-  // WORKAROUND: Reading from the shared weak map loses the compile-time upload
-  // ref generic, so the session API rebinds the stored config to the caller's
-  // known upload-ref type.
-  return __LEGIT_CAST__<
-    OfflineSessionUploadsConfig<TUploadRef> | undefined,
-    unknown
-  >(uploadsConfigByOfflineSession.get(eraseOfflineSession(session)));
+export function getOfflineSessionUploadsConfig(
+  session: OfflineSession,
+): OfflineSessionUploadsConfig | undefined {
+  return uploadsConfigByOfflineSession.get(session);
 }
 
 export function getOfflineSessionAppVersion(
@@ -3020,7 +3819,7 @@ export function createOfflineSession<
         ? { appVersion: args.appVersion }
         : undefined),
       ...(import.meta.env.DEV ? { debugLogger: args.debugLogger } : undefined),
-      uploads: eraseUploadsConfig(uploads),
+      uploads,
       bootstrapStatusFromLocalStorage,
     });
   }
@@ -3032,7 +3831,7 @@ export function createOfflineSession<
         ? resolveOfflineSessionScope(false, inactiveScope)
         : activeSessionKey,
       activeSessionKey === false ? undefined : config,
-      eraseUploadsConfig(activeSessionKey === false ? undefined : uploads),
+      activeSessionKey === false ? undefined : uploads,
       activeSessionKey !== false,
       import.meta.env.DEV ? args.debugLogger : undefined,
       args.appVersion,
@@ -3178,13 +3977,26 @@ export function createOfflineSession<
         }),
       );
     },
+    useOfflineUploadFile: (id) => {
+      const coordinator = useSessionCoordinator();
+      const subscribe = useCallback(
+        (onChange: () => void) =>
+          id ? coordinator.subscribeUploadFile(id, onChange) : noop,
+        [coordinator, id],
+      );
+      const getSnapshot = useCallback(
+        () => (id ? coordinator.getUploadFile(id) : idleUploadFile),
+        [coordinator, id],
+      );
+
+      return useSyncExternalStore(subscribe, getSnapshot);
+    },
   };
 
-  uploadsConfigByOfflineSession.set(
-    eraseOfflineSession(session),
-    eraseUploadsConfig(uploads),
-  );
-  appVersionByOfflineSession.set(eraseOfflineSession(session), args.appVersion);
+  // The upload ref type is only produced by a session and its uploads config,
+  // never consumed, so typed ones are stored as their default-typed form.
+  uploadsConfigByOfflineSession.set(session, uploads);
+  appVersionByOfflineSession.set(session, args.appVersion);
 
   return session;
 }

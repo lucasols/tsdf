@@ -365,20 +365,26 @@ Behavior:
 - `syncState` - `'pending'` (waiting to be sent), `'syncing'` (being sent),
   `'needs-confirmation'` (a send failed and it is not known whether it reached
   the server, so it is re-checked or retried) or `'resolution-required'`. With
-  several mutations queued for the item this is the state of the newest one:
-  the item stays `'pending'` while its older mutations are sent
+  several mutations queued for the item this is the most urgent state among
+  them (`'needs-confirmation'` > `'syncing'` > `'pending'`): the item is
+  `'syncing'` while any of its mutations is being sent
 - `pendingMutations` - Number of queued mutations of the item still waiting to
   sync
 - `requiresResolution` - `true` while the item waits for a manual resolution
   (see [Offline - Conflict Resolution](./offline.md#conflict-resolution))
 - `isUnsentCreation` - `true` while the item was created offline (a
   `tempEntity` / `tempEntities` operation) and the server has not confirmed it
-  yet, so it is only known locally under its temporary payload
+  yet, so it is still tracked under its temporary payload. Creations queued
+  without a temp entity (e.g. with a client-generated id) report `false`
 - `creationAttempted` - Only `true` for an unsent creation whose create
   request is being sent, failed without telling whether the server got it, or
   waits for a manual resolution: the server may already have the item. While
-  it is `false` the creation is still waiting in the queue and the server
-  never saw the item
+  it is `false` the creation is still waiting in the queue, and deleting the
+  item only discards local work. The server never saw the item, except when the
+  creation was queued after its direct online request failed, or sent again
+  with `requeue` after a conflict: an earlier request may have created a
+  server item, which the temporary payload can't target, so the delete leaves
+  it as is
 
 ### Items created offline
 
@@ -404,7 +410,9 @@ function onDeleteClick(itemPayload: UserPayload) {
 
 `isUnsentCreation` stays `true` while the creation itself is being sent, until
 the server result is reconciled; `creationAttempted` is `true` during that
-time. See
+time. The check only covers temp-entity creations: an item created with a
+client-generated id reports `isUnsentCreation: false` even when its delete only
+discards local work, so the app can't tell it apart from a server item. See
 [Offline - Deleting entities created offline](./offline.md#deleting-entities-created-offline)
 for what a delete does in each case.
 
@@ -528,3 +536,29 @@ const { isLoading, isDeleted, data } = collectionStore.useListItem(
   },
 );
 ```
+
+## useOfflineUploadFile
+
+**Source**: [Store Manager](./store-manager.md#upload-apis)
+
+Reads the file of an upload staged with `saveOfflineUpload` / `performMutation({ upload })`, to render local files (e.g. thumbnails of optimistic entities) by upload id.
+
+```tsx
+const { status, url, file, error } = storeManager.useOfflineUploadFile(
+  isLocalFile && uploadId,
+);
+```
+
+- Does not fetch from the server: it reads the session's staged uploads
+- Components using the same id share one read and one object URL
+- `url` is managed by TSDF: do not revoke it or keep it outside of render
+- A falsy id disables the hook (`status: 'idle'`)
+
+### Return value
+
+- `status` - `'idle'` | `'loading'` | `'success'` | `'missing'` | `'error'`
+- `url` - Object URL of the staged file, or `null` unless `status` is `'success'`
+- `file` - The staged `File`, or `null` unless `status` is `'success'`
+- `error` - The read failure, or `null` unless `status` is `'error'`
+
+`'missing'` means no upload with this id is staged in the active session: it was never staged, or it was deleted, expired or already consumed by its mutation. See [Offline: Rendering staged files](./offline.md#rendering-staged-files) for the URL lifetime and the pattern for switching to the uploaded file.

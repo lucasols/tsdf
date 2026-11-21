@@ -190,6 +190,7 @@ derivedQueries: {
 Behavior:
 
 - Online: exact query cache wins; otherwise TSDF can derive when `isComplete(...)` returns `true`
+- `isComplete(...)` only receives the group's queries that have loaded at least once, so a list still on its first fetch never makes the group look complete
 - Offline: derivation is attempted before the exact cached query result
 - `deriveQuery(...)` receives `{ fields, isOfflineMode, deriveSource }`
 - `fields` lets derivation opt out of partial-resource queries when local data is insufficient

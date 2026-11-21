@@ -11,7 +11,6 @@ import {
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
 } from '../persistentStorage/offline/mutationRuntime';
-import { OfflineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import type { OfflineMutationInput } from '../persistentStorage/offline/types';
 import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
@@ -44,6 +43,7 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type ItemLoadedFields,
+  type ListQueryAddItemToQueries,
   type PartialResourcesConfig,
   type TSDFItemQuery,
   type TSFDListQuery,
@@ -1589,11 +1589,9 @@ export function createMutationApi<
     itemPayload: ItemPayload,
     data: ItemState,
     options: {
-      addItemToQueries?: {
-        queries: QueryPayload[] | FilterQuery | QueryPayload;
-        appendTo: 'start' | 'end' | ((itemsPayload: ItemPayload[]) => number);
-      };
+      addItemToQueries?: ListQueryAddItemToQueries<QueryPayload, ItemPayload>;
     } = {},
+    loadedFields?: ItemLoadedFields,
   ) {
     const itemKey = getItemKey(itemPayload);
 
@@ -1601,6 +1599,9 @@ export function createMutationApi<
       store.produceState(
         (draftState) => {
           draftState.items[itemKey] = data;
+          if (loadedFields !== undefined) {
+            draftState.itemLoadedFields[itemKey] = loadedFields;
+          }
           draftState.itemQueries[itemKey] = {
             status: 'success',
             wasLoaded: true,
@@ -1814,15 +1815,6 @@ export function createMutationApi<
   > {
     const payloadToUse: MutationPayloadToUse = payload === null ? [] : payload;
 
-    if (offline && offlineController && !offlineController.canQueueMutation()) {
-      return Result.err(
-        toStoreMutationError(
-          new OfflineSessionUnavailableError(),
-          errorNormalizer,
-        ),
-      );
-    }
-
     const affectedItemEntries = optimisticUpdate
       ? getItemsKeyArray(payloadToUse)
       : undefined;
@@ -1847,6 +1839,10 @@ export function createMutationApi<
 
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
+    const runOnlineMutation = async () => ({
+      kind: 'online' as const,
+      data: await directMutation(),
+    });
 
     // Whether the server accepted the mutation, even if `onSuccess` threw
     let accepted = false;
@@ -1864,16 +1860,17 @@ export function createMutationApi<
       },
       offline
         ? () =>
-            runHybridOfflineMutation(
-              offlineController,
-              offline,
-              upload,
-              directMutation,
-            )
-        : async () => ({
-            kind: 'online' as const,
-            data: await directMutation(),
-          }),
+            // Without an active offline session (no session key, or the
+            // session gate is closed) it runs as a plain online mutation
+            offlineController?.canQueueMutation()
+              ? runHybridOfflineMutation(
+                  offlineController,
+                  offline,
+                  upload,
+                  directMutation,
+                )
+              : runOnlineMutation()
+        : runOnlineMutation,
       (exception, rollbacks) => {
         const error = toStoreMutationError(exception, errorNormalizer);
 

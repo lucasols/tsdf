@@ -549,3 +549,66 @@ for (const adapterCase of [
     });
   });
 }
+
+test.describe('persistent storage — indexedDb connection recovery', () => {
+  test('another tab can delete the database, and the next save recreates it', async ({
+    browser,
+    fixtureScopeId,
+  }) => {
+    const context = await browser.newContext();
+    const page = await openScenario(
+      context,
+      'persist-document',
+      'page-a',
+      fixtureScopeId,
+      { storeId: 'doc-indexedDb-deleted-elsewhere', adapterKey: 'indexedDb' },
+    );
+
+    await expect(page.getByTestId('persist-doc-status')).toHaveText('success');
+    await waitForDebounce(page);
+
+    // Another tab of the same app deletes every IndexedDB database. The
+    // delete only finishes if the first tab releases its open connection.
+    const otherTab = await openScenario(
+      context,
+      'persist-document',
+      'page-b',
+      fixtureScopeId,
+      { storeId: 'doc-indexedDb-other-tab', adapterKey: 'localStorage' },
+    );
+    const deleteOutcome = await otherTab.evaluate(async () => {
+      const databases = await indexedDB.databases();
+
+      return Promise.race([
+        Promise.all(
+          databases.map(
+            ({ name }) =>
+              new Promise<void>((resolve, reject) => {
+                const request = indexedDB.deleteDatabase(name ?? '');
+                request.onsuccess = () => resolve();
+                request.onerror = () =>
+                  reject(request.error ?? new Error('delete failed'));
+              }),
+          ),
+        ).then(() => `deleted ${databases.length}`),
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve('blocked by the first tab'), 5000);
+        }),
+      ]);
+    });
+    expect(deleteOutcome).toBe('deleted 1');
+
+    // The first tab keeps working: its next save recreates the database.
+    await page.getByTestId('persist-doc-mutate').click();
+    await expect(page.getByTestId('persist-doc-value')).toHaveText('1');
+    await waitForDebounce(page);
+
+    // Reload without refetching, so the value can only come from disk.
+    await disableRefetchOnNextReload(page);
+    await page.reload();
+
+    await expect(page.getByTestId('persist-doc-value')).toHaveText('1');
+
+    await context.close();
+  });
+});

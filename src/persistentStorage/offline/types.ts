@@ -11,12 +11,17 @@ import {
   rc_unknown,
 } from 'runcheck';
 import type { Result as ResultType } from 't-result';
+import type {
+  ItemLoadedFields,
+  ListQueryAddItemToQueries,
+} from '../../listQueryStore/types';
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type {
   OfflineAttachedUploadIds,
   OfflineOperationUploadsContext,
   OfflineSessionUploadsConfig,
   OfflineUpload,
+  OfflineUploadFile,
   ReplaceOfflineUploadArgs,
   SaveOfflineUploadArgs,
 } from '../offlineUploadTypes';
@@ -29,6 +34,15 @@ export type OfflineStoreType = 'document' | 'collection' | 'listQuery';
 export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync';
 /** High-level classification used by outage detection. */
 export type OfflineFailureClassification = 'outage' | 'network' | 'ignore';
+/**
+ * Answer of `offlineSession.healthCheck.check`:
+ *
+ * - `'up'` - the backend answered and is healthy. A request that failed
+ *   anyway failed for a reason of its own
+ * - `'outage'` - the backend was reached but is down
+ * - `'unreachable'` - the backend could not be reached from this device
+ */
+export type OfflineHealthCheckResult = 'up' | 'outage' | 'unreachable';
 /** Kinds of entities participating in offline conflict/sync tracking. */
 export type OfflineEntityKind = 'document' | 'item' | 'query';
 /** Lifecycle declared per offline operation definition. */
@@ -157,6 +171,16 @@ export type OfflineFailureContext = {
   operationName?: string;
   /** Session key used by browser tab and persistence scoping. */
   sessionKey: string;
+  /**
+   * Set when replaying `operationName` (`phase: 'sync'`) failed while
+   * resolving one of its `dependsOnUploads` uploads: the id of that upload.
+   * The operation's `execute` was not called. The error is usually the one
+   * thrown by the session `upload` transport, but it can also be a storage
+   * error reading or updating the staged upload, or the error for an upload
+   * that no longer exists. `undefined` for every failure that did not come
+   * from a dependency upload.
+   */
+  uploadId?: string;
 };
 
 /** Re-check strategy for recovery probing. Omitted fields use built-in defaults (which differ between network and outage modes). */
@@ -200,20 +224,93 @@ export type OfflineNetworkModeConfig = {
   /**
    * Probe whether classified network recovery has completed.
    * Return `true` when the session should leave network offline mode.
+   *
+   * When omitted, `healthCheck` is used if the session has one. Without
+   * either, a classified network failure only lasts until the next fetch or
+   * mutation re-reads the browser connectivity.
    */
   recoveryCheck?: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
   /** Optional probe config to tune classified network recovery behavior. */
   recoveryProbe?: OfflineRecoveryProbeConfig;
 };
 
-/** Server outage detection and recovery configuration. */
-export type OfflineOutageModeConfig = {
+type OfflineOutageModeBaseConfig = {
   /** Enable outage mode logic and confirmation retry flow. */
   enabled: boolean;
-  /** Probe the remote service to confirm outage recovery. */
-  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
   /** Optional probe config to tune recovery behavior. */
   recoveryProbe?: OfflineRecoveryProbeConfig;
+};
+
+/** Server outage detection and recovery configuration. */
+export type OfflineOutageModeConfig = OfflineOutageModeBaseConfig & {
+  /** Probe the remote service to confirm outage recovery. */
+  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+};
+
+/**
+ * Server outage detection and recovery configuration of a session with a
+ * `healthCheck`, which is the default outage recovery check.
+ */
+type OfflineHealthCheckedOutageModeConfig = OfflineOutageModeBaseConfig & {
+  /**
+   * Optional outage-specific recovery probe. When provided it is used
+   * instead of `healthCheck` to confirm outage recovery.
+   */
+  recoveryCheck?: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+};
+
+/** Context passed to `offlineSession.healthCheck.check`. */
+export type OfflineHealthCheckContext = {
+  /** Session key the check is running for. */
+  sessionKey: string;
+  /**
+   * Aborted when the session stops waiting for this check (`timeoutMs`
+   * elapsed). Pass it to the health request so it is cancelled too.
+   */
+  signal: AbortSignal;
+};
+
+/**
+ * Single health check used by the offline session for both failure
+ * classification and recovery checks.
+ */
+export type OfflineHealthCheckConfig = {
+  /**
+   * Asks the backend how it is doing, usually by calling a health endpoint:
+   *
+   * - `'up'` - the backend answered and is healthy
+   * - `'outage'` - the backend was reached but is down
+   * - `'unreachable'` - the backend could not be reached from this device
+   *
+   * `'up'` for a failed request means the failure is specific to that
+   * request, even when the endpoint it called is down (for example an upload
+   * endpoint answering 503 while the API health check passes). The session
+   * stays online and the request's own failure handling applies: a fetch or
+   * direct mutation fails with its error, and a replayed mutation goes
+   * through `classifyRetryableFailure` and the `replayRetry` budget, ending
+   * in a `retry-exhausted` resolution. To pause the session for such a
+   * service instead, make this check cover it or return `'outage'` for its
+   * failures from `classifyFailure`.
+   *
+   * Calls are deduplicated: while a check is in flight every failure and
+   * recovery tick that needs an answer waits for that same call, so a burst of
+   * failing requests costs a single health request. A finished answer is never
+   * reused: the next failure or recovery tick starts a new check.
+   *
+   * A check that throws, rejects or takes longer than `timeoutMs` gives no
+   * answer and changes nothing: a failure being classified is treated as
+   * specific to its request, and a recovery check as "not recovered yet".
+   */
+  check: (
+    ctx: OfflineHealthCheckContext,
+  ) => Promise<OfflineHealthCheckResult> | OfflineHealthCheckResult;
+  /**
+   * How long the session waits for `check`, in milliseconds, before giving up
+   * on it and aborting `ctx.signal`. Must be a finite number below
+   * `2_147_483_647` (the `setTimeout` limit); there is no "no timeout" value.
+   * @default 10_000
+   */
+  timeoutMs?: number;
 };
 
 /** Fixed replay retry policy for healthy online replay failures. Omitted fields use built-in defaults. */
@@ -230,50 +327,132 @@ export type OfflineReplayRetryConfig = {
   intervalMs?: number;
 };
 
+type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
+  {
+    /**
+     * Gate for the whole offline session, e.g. a feature flag or a
+     * per-workspace setting. While it returns `false` the session behaves as if
+     * no offline session existed: it never enters offline mode (network
+     * detection and `classifyFailure` are skipped), fetches always go to the
+     * network and mutations with an `offline` descriptor run as plain online
+     * mutations instead of being queued.
+     *
+     * Mutations already queued when the gate closes are kept in persistent
+     * storage untouched (and stay visible through the offline entities /
+     * resolutions) and are replayed after the gate reopens while online.
+     *
+     * It is read before every fetch and every mutation with an `offline`
+     * descriptor, on browser online/offline events, before each recovery
+     * check and before replaying queued mutations, so it must be synchronous
+     * and cheap. A flip is picked up by the next of those; call
+     * `storeManager.setOfflineRuntimeConfig({})` to apply it right away.
+     *
+     * The tabs of a session key share its offline status and replay, so it
+     * must return the same value in every tab of that session key (to gate
+     * per workspace, include the workspace in the session key).
+     * @default () => true
+     */
+    enabled?: () => boolean;
+    /**
+     * Classify a remote failure as `outage`, `network`, or `ignore`.
+     * `outage` activates outage recovery behavior.
+     * `network` activates network offline handling for future operations only
+     * when `network.enabled` is true. Existing offline recovery may keep using
+     * classifications until already-active work finishes recovering.
+     *
+     * Return `'unknown'` when the error alone does not tell: the session then
+     * asks `healthCheck` (and ignores the failure when there is none). Any
+     * other answer is final, including `'ignore'`, and `healthCheck` is not
+     * called for that failure.
+     *
+     * Not called while no classification could change anything: the session
+     * gate is closed, or both modes are disabled and neither is still active.
+     *
+     * Failures of the `uploads.upload` transport during replay are classified
+     * here too, with `ctx.uploadId` set: `outage` / `network` keep the upload
+     * `pending` and the dependent operation queued until the session recovers.
+     */
+    classifyFailure?: (
+      error: unknown,
+      ctx: OfflineFailureContext,
+    ) =>
+      | Promise<OfflineFailureClassification | 'unknown'>
+      | OfflineFailureClassification
+      | 'unknown';
+    /**
+     * Optional replay-only classifier for ambiguous sync failures that stayed
+     * online (`classifyFailure(...) === 'ignore'`, or `healthCheck` answered
+     * `'up'`).
+     *
+     * Return `true` only when automatically re-sending the replayed mutation is
+     * known to be safe. Return `false` to avoid auto-replay retries; in that
+     * case the entry still enters `needs-confirmation` so `shouldSkipSync` /
+     * conflict checks can run before the mutation is promoted to manual
+     * resolution.
+     *
+     * When `ctx.uploadId` is set the failure came from a dependency upload and
+     * the mutation was not sent: return `true` to run the upload again on the
+     * `replayRetry` cadence, or `false` for a permanent failure (file rejected),
+     * which moves the operation to manual resolution right away.
+     */
+    classifyRetryableFailure?: (
+      error: unknown,
+      ctx: OfflineFailureContext,
+    ) => Promise<boolean> | boolean;
+    /** Network detection strategy and browser integration. */
+    network?: OfflineNetworkModeConfig;
+    /** Fixed retry policy for healthy online replay failures. */
+    replayRetry?: OfflineReplayRetryConfig;
+    /**
+     * Root policy controlling whether offline-enabled mutations may enter the
+     * durable offline queue for each active offline cause.
+     * @default undefined
+     */
+    mutationQueueing?: OfflineMutationQueueingConfig;
+    /** Optional upload transport/storage config shared by the whole session. */
+    uploads?: OfflineSessionUploadsConfig<TUploadRef>;
+  };
+
 /** Shared offline/session policy reused by every store in the same session. */
 export type OfflineSessionConfig<
   TUploadRef extends ValidPayload = ValidPayload,
-> = {
-  /**
-   * Classify a remote failure as `outage`, `network`, or `ignore`.
-   * `outage` activates outage recovery behavior.
-   * `network` activates network offline handling for future operations only
-   * when `network.enabled` is true. Existing offline recovery may keep using
-   * classifications until already-active work finishes recovering.
-   */
-  classifyFailure?: (
-    error: unknown,
-    ctx: OfflineFailureContext,
-  ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
-  /**
-   * Optional replay-only classifier for ambiguous sync failures that stayed
-   * online (`classifyFailure(...) === 'ignore'`).
-   *
-   * Return `true` only when automatically re-sending the replayed mutation is
-   * known to be safe. Return `false` to avoid auto-replay retries; in that
-   * case the entry still enters `needs-confirmation` so `shouldSkipSync` /
-   * conflict checks can run before the mutation is promoted to manual
-   * resolution.
-   */
-  classifyRetryableFailure?: (
-    error: unknown,
-    ctx: OfflineFailureContext,
-  ) => Promise<boolean> | boolean;
-  /** Network detection strategy and browser integration. */
-  network?: OfflineNetworkModeConfig;
-  /** Outage detection and recovery strategy for remote failures. */
-  outage?: OfflineOutageModeConfig;
-  /** Fixed retry policy for healthy online replay failures. */
-  replayRetry?: OfflineReplayRetryConfig;
-  /**
-   * Root policy controlling whether offline-enabled mutations may enter the
-   * durable offline queue for each active offline cause.
-   * @default undefined
-   */
-  mutationQueueing?: OfflineMutationQueueingConfig;
-  /** Optional upload transport/storage config shared by the whole session. */
-  uploads?: OfflineSessionUploadsConfig<TUploadRef>;
-};
+> = OfflineSessionBaseConfig<TUploadRef> &
+  (
+    | {
+        healthCheck?: undefined;
+        /** Outage detection and recovery strategy for remote failures. */
+        outage?: OfflineOutageModeConfig;
+      }
+    | {
+        /**
+         * Single health check answering both "this request failed: is it the
+         * network, an outage, or just this request?" and "are we back?".
+         *
+         * - Failure classification: a failed fetch, mutation or queued
+         *   mutation replay that `classifyFailure` did not settle (it is not
+         *   configured, or returned `'unknown'`) runs the check, unless the
+         *   session is already in offline mode. `'unreachable'` activates
+         *   network mode, `'outage'` activates outage mode (each only when
+         *   that mode is enabled) and `'up'` leaves the failure to its
+         *   request: the session stays online and the request's own failure
+         *   handling applies.
+         * - Recovery: while a mode is active because of a failure, its
+         *   recovery probe runs the check on the mode's `recoveryProbe`
+         *   cadence, unless the mode has its own `recoveryCheck`. `'up'` ends
+         *   the offline mode, `'outage'` and `'unreachable'` keep it or
+         *   switch to the matching mode.
+         *
+         * Never called on the success path, while the session gate is closed,
+         * or while both modes are disabled and neither is still active.
+         */
+        healthCheck: OfflineHealthCheckConfig;
+        /**
+         * Outage detection and recovery strategy for remote failures.
+         * `recoveryCheck` is optional here: `healthCheck` is the default.
+         */
+        outage?: OfflineHealthCheckedOutageModeConfig;
+      }
+  );
 
 /** Per-session offline status snapshot shared across tabs. */
 export type GlobalOfflineStatus = {
@@ -321,9 +500,10 @@ export type ItemOfflineState = {
    *   reached the server, so the mutation is re-checked or retried
    * - `resolution-required`: waiting for a manual resolution
    *
-   * With several mutations queued for the item this is the state of the
-   * newest one: the item stays `pending` while its older mutations are sent
-   * (`pendingMutations` drops as each one finishes).
+   * With several mutations queued for the item this is the most urgent state
+   * among them (`needs-confirmation` > `syncing` > `pending`): the item is
+   * `syncing` while any of its mutations is being sent (`pendingMutations`
+   * drops as each one finishes).
    */
   syncState: OfflineSyncState | 'resolution-required';
   /** Number of queued mutations of the item still waiting to sync. */
@@ -331,9 +511,13 @@ export type ItemOfflineState = {
   /** Whether the item is waiting for a manual resolution. */
   requiresResolution: boolean;
   /**
-   * Whether the item was created offline and the server has not confirmed it
-   * yet, so it only exists locally under its temporary payload. It stays
-   * `true` while the creation itself is being sent. Once the server entity is
+   * Whether the item was created offline through a `tempEntity` /
+   * `tempEntities` operation and the server has not confirmed it yet, so it is
+   * still tracked under its temporary payload. Creations queued without a temp
+   * entity (e.g. with a client-generated id) report `false`. It stays `true`
+   * while the creation itself is being sent, so the server may already have
+   * it while `syncState` is `syncing` or `needs-confirmation`; only with
+   * `syncState: 'pending'` has it not been sent yet. Once the server entity is
    * reconciled, the temporary payload has no state anymore and the final
    * payload reports any mutation still queued with `isUnsentCreation: false`.
    */
@@ -341,11 +525,19 @@ export type ItemOfflineState = {
   /**
    * Whether the creation of an unsent creation left the "never sent" state:
    * it is being sent, failed with an unknown outcome, or waits for a manual
-   * resolution, so the server may have the item. While `isUnsentCreation` is
+   * resolution, so the server may have the item. A creation only held behind
+   * the creation of another entity that waits for a resolution was never
+   * sent, so it stays `false`. While `isUnsentCreation` is
    * `true` and this is `false`, the item only exists locally: deleting it
    * with an operation that cancels pending creations (see
    * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}) sends
-   * nothing. Always `false` for items that are not unsent creations.
+   * nothing, unless one operation created it together with other entities
+   * (see that option). A creation queued after its direct online request
+   * failed, or sent again with `requeue` after a conflict, also reports
+   * `false`: an earlier request may have created a server item, but the
+   * temporary payload can't target it, so the delete still only discards
+   * local work and that server item is left as is. Always `false` for items
+   * that are not unsent creations.
    */
   creationAttempted: boolean;
 };
@@ -368,7 +560,12 @@ export type GlobalOfflineEntity = {
   kind: OfflineEntityMutationKind;
   /** Number of pending mutations waiting for sync. */
   pendingMutations: number;
-  /** Current sync state for the entity. */
+  /**
+   * Current sync state for the entity. With several mutations queued for it
+   * this is the most urgent state among them (`needs-confirmation` >
+   * `syncing` > `pending`): the entity is `syncing` while any of its mutations
+   * is being sent.
+   */
   syncState: OfflineSyncState | 'resolution-required';
   /** Whether the entity currently requires manual resolution. */
   requiresResolution: boolean;
@@ -497,7 +694,10 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   enqueuedAt: number;
   /** Entity references involved in the resolution. */
   entityRefs: OfflineEntityRef[];
-  /** Last replay error snapshot captured before exhaustion. */
+  /**
+   * Last replay error snapshot captured before exhaustion. When a dependency
+   * upload failed permanently, this is the error of the `upload` transport.
+   */
   lastReplayError: { message: string };
   /** Resolution creation timestamp. */
   createdAt: number;
@@ -551,19 +751,34 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns the latest session-scoped offline uploads for the session. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
-  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  /**
+   * Resolves a staged upload id to its latest final ref, uploading first if
+   * needed. Rejects with the error thrown by the `upload` transport, leaving
+   * the upload `failed`; the session failure classifiers are not consulted.
+   */
   resolveOfflineUpload: (id: string) => Promise<TUploadRef>;
-  /** Resolves multiple staged upload ids to their latest final refs. */
+  /**
+   * Resolves multiple staged upload ids to their latest final refs. Rejects
+   * with the first transport error, like `resolveOfflineUpload`.
+   */
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<Record<string, TUploadRef>>;
-  /** Saves a session-scoped upload locally for later dependency resolution or ref usage. */
+  /**
+   * Saves a session-scoped upload locally for later dependency resolution or
+   * ref usage. It is deleted automatically once the queued work that depends
+   * on it leaves the queue.
+   */
   saveOfflineUpload: (args: SaveOfflineUploadArgs) => Promise<void>;
   /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
   replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) => Promise<void>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<File | null>;
-  /** Deletes a stored upload when it is no longer referenced. */
+  /**
+   * Deletes a stored upload that no queued work references. Only needed for
+   * uploads no queued mutation used: the others are deleted with the work that
+   * depends on them.
+   */
   deleteOfflineUpload: (id: string) => Promise<void>;
   /** React hook subscribing to the session's global offline status. */
   useOfflineStatus: () => GlobalOfflineStatus;
@@ -573,6 +788,10 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** React hook subscribing to the session's upload list. */
   useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /** React hook reading the file of a staged upload while it is staged. */
+  useOfflineUploadFile: (
+    id: string | false | null | undefined,
+  ) => OfflineUploadFile;
 };
 
 /** @internal */
@@ -692,6 +911,10 @@ export type OfflineRetryExhaustedResolutionAction =
       /**
        * Controls whether retrying a resolution should also requeue retryable
        * descendants from the same temp-lifecycle dependency chain.
+       *
+       * With `'self'`, the descendants stay as resolutions to decide one by
+       * one: they no longer count as work held behind the creation, so later
+       * mutations of their entities don't merge into or cancel them.
        * @default 'self-and-descendants'
        */
       scope?: 'self' | 'self-and-descendants';
@@ -873,9 +1096,10 @@ export type OfflineSupersedeConfig = {
    * operation. Meant for delete operations: deleting something that was
    * created offline and never sent should not send anything.
    *
-   * When the pruned entries include the creation of the entity (a
-   * `tempEntity` / `tempEntities` operation that was never sent), the whole
-   * temp-entity lifecycle is cancelled and no request is made:
+   * When the pruned entries include the creation of the entity, never sent
+   * (a `tempEntity` / `tempEntities` operation, or a `create` of an item
+   * whose id the app generated on the client), its whole lifecycle is
+   * cancelled and no request is made:
    *
    * - the creation, the queued operations targeting the entity and this
    *   operation itself are dropped
@@ -883,12 +1107,20 @@ export type OfflineSupersedeConfig = {
    *   everything queued under them: the ones of this store that declare it in
    *   `dependsOn`, and the ones of other stores that declare it in
    *   `cancelledWith`
-   * - the temp entities of the dropped creations are removed from the store
+   * - the temp entities and the client-id items of the dropped creations are
+   *   removed from the store
+   *
+   * A creation held behind the creation of another entity that waits for a
+   * manual resolution was never sent either, and is cancelled the same way.
    *
    * A creation that was already sent is not cancelled, since the server may
-   * have the entity: this operation is queued behind it and replays with the
-   * final entity ref once the creation is confirmed. Its `execute` should
-   * treat a not-found answer as success (catch the error and return).
+   * have the entity (this includes a `create` of a client-generated id queued
+   * after its direct online request failed, or sent again with `requeue`
+   * after a conflict): this operation is queued behind it and replays with
+   * the final entity ref once the creation is confirmed. Its `execute` should
+   * treat a not-found answer as success (catch the error and return). The
+   * same applies to a `tempEntities` creation of several entities, which is
+   * never cancelled: the other entities still need it.
    */
   dropSelfIfTempLifecycleCancelled?: boolean;
 };
@@ -906,7 +1138,8 @@ export type OfflineExternalEntityRef<
   storeName: string;
   /**
    * Payload of the entity in that store. For an entity created offline this
-   * is the temporary payload its create operation returns in `getEntityRefs`.
+   * is the temporary payload, or the client-generated one, its create
+   * operation returns in `getEntityRefs`.
    */
   entityRef: TEntityRef;
 };
@@ -1074,19 +1307,48 @@ export type OfflineTempEntitiesReconciliation<
 };
 
 /**
+ * Resolves to `T` for list-query stores and to `never` for stores without
+ * queries, where `TQueryPayload` is left as `never`.
+ */
+type ListQueryOnly<TQueryPayload extends ValidPayload, T> = [
+  TQueryPayload,
+] extends [never]
+  ? never
+  : T;
+
+/**
  * Pending temp-entity returned by `tempEntities.buildPendingEntities(...)`.
  *
  * @typeParam TTempId - Temporary payload used to track the optimistic entity.
  * @typeParam TPendingEntity - Pending entity snapshot to insert locally.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store. Left as `never` for stores without queries.
  */
 export type OfflineTempEntityPendingEntry<
   TTempId extends ValidPayload = ValidPayload,
   TPendingEntity = unknown,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /** Temporary payload that identifies the optimistic entity. */
   tempId: TTempId;
   /** Pending entity snapshot inserted while the mutation is queued. */
   pendingEntity: TPendingEntity;
+  /**
+   * List-query stores only: queries that show this pending entity while the
+   * mutation is queued, and where it is inserted in them.
+   *
+   * Same behavior as `tempEntity.addToQueries`.
+   */
+  addToQueries?: ListQueryOnly<
+    TQueryPayload,
+    ListQueryAddItemToQueries<TQueryPayload, TTempId>
+  >;
+  /**
+   * List-query stores with partial resources only: fields this pending entity
+   * already holds, or `'*'` when it is complete.
+   *
+   * Same behavior as `tempEntity.loadedFields`.
+   */
+  loadedFields?: ListQueryOnly<TQueryPayload, ItemLoadedFields>;
 };
 
 /**
@@ -1095,6 +1357,7 @@ export type OfflineTempEntityPendingEntry<
  * @typeParam TInput - Input type used to derive the temporary entity and identifier.
  * @typeParam TTempResult - Result returned by `execute`, used only by `tempEntity.reconcileServerEntity(...)`.
  * @typeParam TTempId - Temporary payload used to track optimistic entities before reconciliation.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store. Left as `never` for stores without queries.
  */
 export type OfflineTempEntityConfig<
   TInput,
@@ -1103,6 +1366,7 @@ export type OfflineTempEntityConfig<
   TPendingEntity = unknown,
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /**
    * Builds the optimistic entity inserted into local state while the mutation
@@ -1112,6 +1376,51 @@ export type OfflineTempEntityConfig<
    * until replay succeeds and the final server entity can replace it.
    */
   buildPendingEntity: (input: TInput, tempId: TTempId) => TPendingEntity;
+  /**
+   * List-query stores only: queries that show the pending entity while the
+   * mutation is queued, and where it is inserted in them. Same shape as the
+   * `addItemToQueries` option of `addItemToState(...)`, or a function of the
+   * mutation input that returns it (return `undefined` to add to no query).
+   *
+   * The entity is added when the mutation is queued, so the mutation does not
+   * need to insert the temp row by hand in `optimisticUpdate`. It keeps its
+   * position when it is reconciled to the final server entity, and leaves the
+   * queries when the queued mutation is discarded. A mutation that runs
+   * online right away is never queued, so it creates no pending entity.
+   *
+   * Queries that are only in persistent storage (after a restart, before a
+   * screen reads them) are loaded first, so the entity also reaches them. A
+   * filter only matches the queries the app session already knows, so
+   * prefer query payloads. The function form also runs again when the
+   * mutation is replayed, to load the queries the final entity is placed in;
+   * it should only depend on its arguments.
+   *
+   * Without this option the pending entity is only added to the queries
+   * matched by `optimisticListUpdates`.
+   */
+  addToQueries?: ListQueryOnly<
+    TQueryPayload,
+    | ListQueryAddItemToQueries<TQueryPayload, TTempId>
+    | ((
+        input: TInput,
+        tempId: TTempId,
+      ) => ListQueryAddItemToQueries<TQueryPayload, TTempId> | undefined)
+  >;
+  /**
+   * List-query stores with partial resources only: fields the pending entity
+   * already holds, or `'*'` when it is complete.
+   *
+   * The pending entity does not exist on the server yet, so its missing
+   * fields cannot be fetched: declare `'*'` when hooks that read every field
+   * (`fields: '*'`) should show it. The same loaded fields are kept when the
+   * entity is reconciled to its final server payload, so a `finalData`
+   * returned by `reconcileServerEntity` must hold at least these fields (omit
+   * `finalData` to keep the pending entity's data).
+   *
+   * Without this option only `partialResources.inferFields` can vouch for the
+   * fields of the pending entity.
+   */
+  loadedFields?: ListQueryOnly<TQueryPayload, ItemLoadedFields>;
   /**
    * Reconciles the optimistic temp entity with the successful replay result.
    */
@@ -1127,6 +1436,7 @@ export type OfflineTempEntityConfig<
  * @typeParam TInput - Input type used to derive the temporary entities and identifiers.
  * @typeParam TTempResult - Result returned by `execute`, used only by `tempEntities.reconcileServerEntities(...)`.
  * @typeParam TTempId - Temporary payload used to track optimistic entities before reconciliation.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store. Left as `never` for stores without queries.
  */
 export type OfflineTempEntitiesConfig<
   TInput,
@@ -1135,6 +1445,7 @@ export type OfflineTempEntitiesConfig<
   TPendingEntity = unknown,
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /**
    * Builds the optimistic entities inserted into local state while the mutation
@@ -1142,11 +1453,21 @@ export type OfflineTempEntitiesConfig<
    *
    * `tempIds` are the temporary payloads derived from the operation entity refs
    * and used until replay succeeds and the final server entities can replace them.
+   *
+   * In list-query stores each returned entry can also declare `addToQueries`
+   * and `loadedFields`, with the same behavior as the `tempEntity` options.
+   * This builder never runs again at replay, so a declared query that is only
+   * in persistent storage when the mutation is replayed gets the final
+   * entities on its next fetch.
    */
   buildPendingEntities: (
     input: TInput,
     tempIds: readonly TTempId[],
-  ) => readonly OfflineTempEntityPendingEntry<TTempId, TPendingEntity>[];
+  ) => readonly OfflineTempEntityPendingEntry<
+    TTempId,
+    TPendingEntity,
+    TQueryPayload
+  >[];
   /**
    * Reconciles the optimistic temp entities with the successful replay result.
    */
@@ -1169,6 +1490,7 @@ type ConfiguredTempEntityFields<
   TPendingEntity = unknown,
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
+  TQueryPayload extends ValidPayload = never,
 > =
   | {
       tempEntity: OfflineTempEntityConfig<
@@ -1177,7 +1499,8 @@ type ConfiguredTempEntityFields<
         TTempId,
         TPendingEntity,
         TFinalPayload,
-        TFinalData
+        TFinalData,
+        TQueryPayload
       >;
       tempEntities?: never;
     }
@@ -1189,7 +1512,8 @@ type ConfiguredTempEntityFields<
         TTempId,
         TPendingEntity,
         TFinalPayload,
-        TFinalData
+        TFinalData,
+        TQueryPayload
       >;
     };
 
@@ -1199,6 +1523,7 @@ type ConfiguredTempEntityFields<
  * @typeParam TInput - The persisted input payload for the queued offline operation.
  * @typeParam TConflict - The conflict payload produced by pre-execution conflict detection.
  * @typeParam TTempResult - Result returned by `execute`, used only when `tempEntity` or `tempEntities` needs to reconcile the final server entity. Defaults to `void`.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store, which enables the temp-entity query options. Left as `never` for stores without queries.
  */
 export type OfflineOperationDefinition<
   TInput,
@@ -1210,10 +1535,21 @@ export type OfflineOperationDefinition<
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
   TUploadRef extends ValidPayload = ValidPayload,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
-  /** Lifecycle classification for the queued operation. */
+  /**
+   * Lifecycle classification for the queued operation. TSDF derives the
+   * lifecycle of each entity the operation references (`getEntityRefs`) from
+   * it.
+   *
+   * Every item a `create` references is treated as created by it: discarding
+   * a `create` without temp entity removes all of them locally, without
+   * refetching them. Return only the
+   * created items, change existing items in a separate `update` operation, and
+   * reference the items the creation needs with `dependsOn`.
+   */
   kind: OfflineOperationKind;
   /**
    * Optional queue pruning for newer operations that supersede older queued work.
@@ -1271,7 +1607,8 @@ export type OfflineOperationDefinition<
         TTempId,
         TPendingEntity,
         TFinalPayload,
-        TFinalData
+        TFinalData,
+        TQueryPayload
       >)
   );
 
@@ -1290,6 +1627,17 @@ type OperationEntityRefsContext<TInput> = {
   input: TInput;
 };
 
+/**
+ * Temp-entity list-query options as seen by the non-store-specific alias.
+ *
+ * Spelled out structurally: the store-specific configs disable these options
+ * with a `never` query payload, which is not comparable with a widened one.
+ */
+type AnyTempEntityListQueryOptions = {
+  addToQueries?: ListQueryAddItemToQueries<__LEGIT_ANY__, __LEGIT_ANY__>;
+  loadedFields?: ItemLoadedFields;
+};
+
 /** Non-store-specific offline operation definition alias. */
 export type AnyOfflineOperationDefinition<
   TUploadRef extends ValidPayload = ValidPayload,
@@ -1302,16 +1650,31 @@ export type AnyOfflineOperationDefinition<
   };
   accumulation?: OfflineAccumulationConfig<__LEGIT_ANY__>;
   supersedes?: OfflineSupersedeConfig;
-  tempEntity?: OfflineTempEntityConfig<
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >;
-  tempEntities?: OfflineTempEntitiesConfig<
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >;
+  tempEntity?: Omit<
+    OfflineTempEntityConfig<__LEGIT_ANY__, __LEGIT_ANY__, __LEGIT_ANY__>,
+    keyof AnyTempEntityListQueryOptions
+  > &
+    Omit<AnyTempEntityListQueryOptions, 'addToQueries'> & {
+      addToQueries?:
+        | AnyTempEntityListQueryOptions['addToQueries']
+        | ((
+            input: __LEGIT_ANY__,
+            tempId: __LEGIT_ANY__,
+          ) => AnyTempEntityListQueryOptions['addToQueries']);
+    };
+  tempEntities?: Omit<
+    OfflineTempEntitiesConfig<__LEGIT_ANY__, __LEGIT_ANY__, __LEGIT_ANY__>,
+    'buildPendingEntities'
+  > & {
+    buildPendingEntities: (
+      input: __LEGIT_ANY__,
+      tempIds: readonly __LEGIT_ANY__[],
+    ) => readonly (Omit<
+      OfflineTempEntityPendingEntry<__LEGIT_ANY__>,
+      keyof AnyTempEntityListQueryOptions
+    > &
+      AnyTempEntityListQueryOptions)[];
+  };
   getServerSnapshot?: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
   execute: (ctx: OperationExecuteContext<__LEGIT_ANY__, TUploadRef>) => unknown;
   onSuccessExecute?: OfflineOperationExecuteSuccessHandler<
@@ -1399,6 +1762,7 @@ type DocumentOperationServerSnapshot<TOptions extends DefineOfflineOperation> =
  *
  * @typeParam State - Document state type for the owning store.
  * @typeParam TOptions - Operation typing options, usually created with {@link DefineOfflineOperation}.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts
@@ -1429,7 +1793,11 @@ export type DocumentOfflineOperationDefinition<
     TUploadRef
   >
 > & {
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (
     ctx: OperationEntityRefsContext<DocumentOperationInput<TOptions>>,
   ) => string[];
@@ -1445,6 +1813,7 @@ export type DocumentOfflineOperationDefinition<
  *
  * @typeParam State - Document state type for the owning store.
  * @typeParam TOperations - Operation map where each key declares its input, replay result, and optional conflict payload.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts
@@ -1519,6 +1888,7 @@ export type CollectionOfflineEntityRef<ItemPayload extends ValidPayload> =
  * When `tempEntity` or `tempEntities` is provided, the pending builders must
  * return `ItemState`, and the reconciliation hooks must return an
  * `ItemPayload` plus optional `ItemState` replacement data.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  */
 export type CollectionOfflineOperationDefinition<
   ItemState extends ValidStoreState,
@@ -1555,7 +1925,11 @@ export type CollectionOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => CollectionOfflineEntityRef<ItemPayloadUnused>[];
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
   /**
    * Declares the entities of OTHER stores this operation belongs to (for
@@ -1591,6 +1965,7 @@ export type CollectionOfflineOperationDefinition<
  * @typeParam ItemState - Collection item state type for the owning store.
  * @typeParam ItemPayload - Collection payload type for the owning store.
  * @typeParam TOperations - Operation map where each key declares its input, optional conflict payload, and optional temp-result type.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts
@@ -1649,7 +2024,10 @@ export type ListQueryOfflineEntityRef<ItemPayload extends ValidPayload> =
  * @typeParam TTempResult - Result returned by `execute`.
  * When `tempEntity` or `tempEntities` is provided, the pending builders must
  * return `ItemState`, and the reconciliation hooks must return an
- * `ItemPayload` plus optional `ItemState` replacement data.
+ * `ItemPayload` plus optional `ItemState` replacement data. The pending
+ * entities can declare `addToQueries` to show up in list queries while the
+ * mutation is queued, and `loadedFields` when partial resources are enabled.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  */
 export type ListQueryOfflineOperationDefinition<
   ItemState extends ValidStoreState,
@@ -1669,7 +2047,8 @@ export type ListQueryOfflineOperationDefinition<
   ItemState,
   ItemPayloadUnused,
   ItemState,
-  TUploadRef
+  TUploadRef,
+  QueryPayload
 > & {
   /**
    * Declares which list-query entities are affected by this queued mutation.
@@ -1687,7 +2066,11 @@ export type ListQueryOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => ListQueryOfflineEntityRef<ItemPayloadUnused>[];
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
   /**
    * Declares the entities of OTHER stores this operation belongs to (for
@@ -1726,6 +2109,7 @@ export type ListQueryOfflineOperationDefinition<
  * @typeParam QueryPayload - Query payload type used by the list store.
  * @typeParam ItemPayload - Item payload type used by the list store.
  * @typeParam TOperations - Operation map where each key declares its input, optional conflict payload, and optional temp-result type.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts

@@ -122,6 +122,7 @@ import {
   type FieldsInput,
   type FieldsOption,
   type ItemLoadedFields,
+  type ListQueryAddItemToQueries,
   type ListQueryOfflineOverlay,
   type ListQueryStoreInitialData,
   type ListQueryUseMultipleItemsQuery,
@@ -729,13 +730,8 @@ type ListQueryAddItemToStateApi<
   itemPayload: ItemPayload,
   data: ItemState,
   options?: {
-    addItemToQueries?: {
-      queries:
-        | QueryPayload[]
-        | ListQueryFilterQuery<QueryPayload>
-        | QueryPayload;
-      appendTo: 'start' | 'end' | ((itemsPayload: ItemPayload[]) => number);
-    };
+    /** Queries that receive the item, and where it is inserted in them. */
+    addItemToQueries?: ListQueryAddItemToQueries<QueryPayload, ItemPayload>;
   },
 ) => void;
 
@@ -1663,9 +1659,7 @@ export function createListQueryStore<
       (offlineController?.shouldTreatFetchAsOffline() ?? false) ||
       resolvedOfflineConfig?.session.getOfflineStatus().isOfflineMode ===
         true ||
-      isOfflineNetworkModeActiveSync(
-        resolvedOfflineConfig?.session.getConfig().network,
-      )
+      isOfflineNetworkModeActiveSync(resolvedOfflineConfig?.session.getConfig())
     );
   }
 
@@ -2228,7 +2222,10 @@ export function createListQueryStore<
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
-    offlineController = createOfflineStoreController<ResolvedOfflineOperations>(
+    offlineController = createOfflineStoreController<
+      ResolvedOfflineOperations,
+      QueryPayload
+    >(
       id,
       'listQuery',
       getSessionKeyForRuntime,
@@ -2267,13 +2264,21 @@ export function createListQueryStore<
             ),
           );
         },
-        applyPendingEntity: ({ tempId, pendingEntity }) => {
+        applyPendingEntity: ({
+          tempId,
+          pendingEntity,
+          addToQueries,
+          loadedFields,
+        }) => {
           if (!pendingEntity || typeof pendingEntity !== 'object') return;
           addItemToState(
             // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
             __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
             // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
             __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
+            addToQueries && { addItemToQueries: addToQueries },
+            // Loaded fields are only tracked with partial resources
+            partialResources ? loadedFields : undefined,
           );
         },
         rollbackPendingEntity: ({ tempId }) => {
@@ -2289,6 +2294,12 @@ export function createListQueryStore<
             reconciliation.finalData,
           );
         },
+        loadTempEntities: (tempIds, addToQueries) =>
+          loadOfflineTempEntities(
+            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when loading queued temp entities.
+            __LEGIT_CAST__<ItemPayload[], ValidPayload[]>(tempIds),
+            addToQueries,
+          ),
         applyTempReconciliationFromAnotherTab: (
           tempId,
           finalPayload,
@@ -2574,6 +2585,40 @@ export function createListQueryStore<
   }
 
   /**
+   * Loads offline temp items, and the queries they are declared into, that are
+   * only in persistent storage: the queries then receive the pending items,
+   * and reconciliation reads the items' data and loaded fields from memory.
+   * Returns `undefined` when there is nothing to load.
+   */
+  function loadOfflineTempEntities(
+    tempPayloads: ItemPayload[],
+    addToQueries: ListQueryAddItemToQueries<QueryPayload, ValidPayload>[],
+  ): Promise<unknown> | undefined {
+    if (!persistence) return undefined;
+    const unloadedItemKeys = filterAndMap(tempPayloads, (tempPayload) => {
+      const itemKey = getItemKey(tempPayload);
+      return store.state.items[itemKey] === undefined ? itemKey : false;
+    });
+    const unloadedQueries = new Map<string, QueryPayload>();
+    for (const { queries } of addToQueries) {
+      for (const { key, payload } of getQueriesKeyArray(queries)) {
+        if (store.state.queries[key] === undefined) {
+          unloadedQueries.set(key, payload);
+        }
+      }
+    }
+    if (unloadedItemKeys.length === 0 && unloadedQueries.size === 0) {
+      return undefined;
+    }
+
+    return Promise.all([
+      unloadedItemKeys.length > 0 && persistence.preloadItems(unloadedItemKeys),
+      unloadedQueries.size > 0 &&
+        preloadQueryFromPersistentStorage([...unloadedQueries.values()]),
+    ]);
+  }
+
+  /**
    * Replaces an offline temp item with its final one, in place in every query
    * that lists it. Returns `false` when there is no data for the final item.
    */
@@ -2604,9 +2649,12 @@ export function createListQueryStore<
         index: query.items.indexOf(tempItemKey),
       }))
       .filter(({ index }) => index !== -1);
+    // The final entity replaces the temp one, so it is as loaded as the temp
+    // entity was declared to be
+    const tempLoadedFields = store.state.itemLoadedFields[tempItemKey];
 
     deleteItemState(tempPayload);
-    addItemToState(finalPayload, finalData);
+    addItemToState(finalPayload, finalData, undefined, tempLoadedFields);
     emitTempItemReconciled(tempId, finalPayloadValue);
 
     if (queryMemberships.length === 0) return true;
@@ -3202,9 +3250,7 @@ export function createListQueryStore<
 
     return (
       isSessionOfflineMode ||
-      isOfflineNetworkModeActiveSync(
-        resolvedOfflineConfig?.session.getConfig().network,
-      )
+      isOfflineNetworkModeActiveSync(resolvedOfflineConfig?.session.getConfig())
     );
   }
 
@@ -3832,8 +3878,9 @@ export function createListQueryStore<
     itemPayload: Parameters<typeof addItemToStateBase>[0],
     data: Parameters<typeof addItemToStateBase>[1],
     options?: Parameters<typeof addItemToStateBase>[2],
+    loadedFields?: Parameters<typeof addItemToStateBase>[3],
   ): void {
-    addItemToStateBase(itemPayload, data, options);
+    addItemToStateBase(itemPayload, data, options, loadedFields);
     touchUpdatedItemEntries([
       { itemKey: getItemKey(itemPayload), payload: itemPayload },
     ]);

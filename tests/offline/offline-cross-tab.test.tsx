@@ -1,4 +1,5 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type {
@@ -188,6 +189,25 @@ type AddToValueOperations = {
 };
 
 /**
+ * Sets the document value with a file the user staged with
+ * `saveOfflineUpload`, like a form whose file input uploads on its own.
+ */
+type UpdateWithAttachmentOperations = {
+  updateWithAttachment: DocumentOfflineOperationDefinition<
+    { value: number },
+    {
+      input: { value: number; attachmentId: string };
+      conflict: { reason: string };
+    }
+  >;
+};
+
+const updateWithAttachmentInputSchema = rc_object({
+  value: rc_number,
+  attachmentId: rc_string,
+});
+
+/**
  * Opens a simulated browser tab: a fresh module graph, so the offline session
  * coordinator and every store registry belong to this tab only, like in a real
  * browser. Tabs share `localStorage`, `BroadcastChannel`, the network, and the
@@ -235,7 +255,10 @@ async function openTab(
         ? {
             uploads: {
               adapter: opfsOfflineUploadAdapter,
-              upload: ({ id }) => Promise.resolve(`server:${id}`),
+              upload: ({ id }) => {
+                serverCalls.push(`tab ${name} uploaded ${id}`);
+                return Promise.resolve(`server:${id}`);
+              },
             },
           }
         : {}),
@@ -245,7 +268,9 @@ async function openTab(
   function createDocEnv(storeId: string) {
     const env = createDocumentStoreTestEnv<
       number,
-      UpdateValueConflictOperations & AddToValueOperations
+      UpdateValueConflictOperations &
+        AddToValueOperations &
+        UpdateWithAttachmentOperations
     >(1, {
       id: storeId,
       getSessionKey: () => sessionKey,
@@ -266,6 +291,26 @@ async function openTab(
                 );
                 await env.serverMock.delayedSetData(input.value);
                 return input;
+              },
+              conflictHandling: {
+                schema: docConflictSchema,
+                // Negative values simulate an edit the server rejects.
+                detectConflict: ({ input }) =>
+                  input.value < 0 ? { reason: 'server-changed' } : null,
+              },
+            },
+            updateWithAttachment: {
+              inputSchema: updateWithAttachmentInputSchema,
+              kind: 'update',
+              dependsOnUploads: ({ input }) => [input.attachmentId],
+              execute: async ({ input, uploads }) => {
+                serverCalls.push(
+                  `tab ${name} sent ${storeId} = ${input.value} with ${JSON.stringify(
+                    uploads.resolvedRefsById[input.attachmentId],
+                  )}`,
+                );
+                await env.serverMock.delayedSetData(input.value);
+                return { value: input.value };
               },
               conflictHandling: {
                 schema: docConflictSchema,
@@ -358,6 +403,33 @@ async function openTab(
       await advanceTime(100);
       await mutation;
     },
+    /** Stages a file with `saveOfflineUpload`, like a file input that uploads on its own. */
+    async stageFile(uploadId: string) {
+      const saved = storeManager.saveOfflineUpload({
+        id: uploadId,
+        file: new File(['photo'], 'photo.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+      });
+      // Saving the file to OPFS takes a few timer ticks
+      await advanceTime(100);
+      (await saved).unwrap();
+    },
+    /** Queues an offline edit that uses a file staged with `stageFile`. */
+    async queueEditWithStagedFile(value: number, attachmentId: string) {
+      await getEnv().apiStore.performMutation({
+        mutation: async () => {
+          await getEnv().serverMock.delayedSetData(value);
+          return value;
+        },
+        offline: {
+          operation: 'updateWithAttachment',
+          input: { value, attachmentId },
+        },
+      });
+      await advanceTime(10);
+    },
     close() {
       for (const env of envs.values()) env.apiStore.dispose();
       sessionModule.__resetSessionOfflineCoordinatorRegistryForTests();
@@ -390,30 +462,56 @@ async function closeTabAndFocusRemaining(closing: Tab) {
 
 type UpdateValueV2Operations = {
   updateValueV2: UpdateValueOperations['updateValue'];
+  updateWithAttachmentV2: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { value: number; attachmentId: string } }
+  >;
 };
 
 /**
  * Opens a tab running a newer deploy of the app, where the document store's
- * offline operation was renamed to `updateValueV2`. The app does not set
+ * offline operations were renamed to `updateValueV2` and
+ * `updateWithAttachmentV2`. The app does not set
  * `getAppVersion`, so this tab shares the offline session with older tabs.
+ *
+ * With `uploads: true` the tab stores offline file uploads in OPFS, like
+ * `openTab`.
  */
-async function openNewVersionTab(name: string) {
+async function openNewVersionTab(
+  name: string,
+  options: { uploads?: boolean } = {},
+) {
   setDocumentHidden(true);
   vi.resetModules();
   const [
     { createStoreManager },
     { createDocumentStoreTestEnv },
     sessionModule,
+    { opfsOfflineUploadAdapter },
   ] = await Promise.all([
     import('../../src/storeManager'),
     import('../mocks/documentStoreTestEnv'),
     import('../../src/persistentStorage/offline/sessionCoordinator'),
+    import('../../src/persistentStorage/opfsOfflineUploadAdapter'),
   ]);
 
   const storeManager = createStoreManager({
     errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
-    offlineSession: { network: network.config },
+    offlineSession: {
+      network: network.config,
+      ...(options.uploads
+        ? {
+            uploads: {
+              adapter: opfsOfflineUploadAdapter,
+              upload: ({ id }) => {
+                serverCalls.push(`tab ${name} uploaded ${id}`);
+                return Promise.resolve(`server:${id}`);
+              },
+            },
+          }
+        : {}),
+    },
   });
   const env = createDocumentStoreTestEnv<number, UpdateValueV2Operations>(1, {
     id: 'doc',
@@ -435,6 +533,20 @@ async function openNewVersionTab(name: string) {
               return input;
             },
           },
+          updateWithAttachmentV2: {
+            inputSchema: updateWithAttachmentInputSchema,
+            kind: 'update',
+            dependsOnUploads: ({ input }) => [input.attachmentId],
+            execute: async ({ input, uploads }) => {
+              serverCalls.push(
+                `tab ${name} sent doc = ${input.value} with ${JSON.stringify(
+                  uploads.resolvedRefsById[input.attachmentId],
+                )} (v2)`,
+              );
+              await env.serverMock.delayedSetData(input.value);
+              return { value: input.value };
+            },
+          },
         },
       },
     },
@@ -450,6 +562,20 @@ async function openNewVersionTab(name: string) {
           return value;
         },
         offline: { operation: 'updateValueV2', input: { value } },
+      });
+      await advanceTime(10);
+    },
+    /** Queues an offline edit that uses a file staged in any tab. */
+    async queueEditWithStagedFile(value: number, attachmentId: string) {
+      await env.apiStore.performMutation({
+        mutation: async () => {
+          await env.serverMock.delayedSetData(value);
+          return value;
+        },
+        offline: {
+          operation: 'updateWithAttachmentV2',
+          input: { value, attachmentId },
+        },
       });
       await advanceTime(10);
     },
@@ -485,6 +611,19 @@ type RenameUserOperations = {
   >;
 };
 
+/**
+ * Creates a user under an id the app generates on the client (no temp
+ * entity). The server rejects every such creation with a conflict.
+ */
+type CreateUserWithIdOperations = {
+  createUserWithId: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { id: string; name: string },
+    { reason: string }
+  >;
+};
+
 async function openUsersTab(
   name: string,
   options: {
@@ -512,7 +651,7 @@ async function openUsersTab(
   });
   const env = createCollectionStoreTestEnv<
     { name: string },
-    CreateUserOperations & RenameUserOperations
+    CreateUserOperations & RenameUserOperations & CreateUserWithIdOperations
   >(
     Object.fromEntries(
       (options.loadedUsers ?? []).map((payload) => [
@@ -575,6 +714,27 @@ async function openUsersTab(
                 });
               },
             },
+            createUserWithId: {
+              inputSchema: renameUserInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [input.id],
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: () => ({ reason: 'server-changed' }),
+              },
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent create ${input.name}`);
+                await env.serverTable.delayedSetItem(input.id, {
+                  name: input.name,
+                });
+                return { value: { name: input.name } };
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.addItemToState(input.id, {
+                  value: { name: input.name },
+                });
+              },
+            },
           },
         },
       },
@@ -634,6 +794,26 @@ async function openUsersTab(
           return result;
         },
         offline: { operation: 'createUser', input: { name: userName } },
+      });
+      await advanceTime(10);
+    },
+    /**
+     * Creates a user offline under an id generated in this tab, showing it
+     * right away.
+     */
+    async queueCreateWithId(payload: string, userName: string) {
+      await env.apiStore.performMutation(payload, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(payload, { value: { name: userName } });
+        },
+        mutation: async () => {
+          await env.serverTable.delayedSetItem(payload, { name: userName });
+          return { value: { name: userName } };
+        },
+        offline: {
+          operation: 'createUserWithId',
+          input: { id: payload, name: userName },
+        },
       });
       await advanceTime(10);
     },
@@ -1046,6 +1226,47 @@ test('an older tab does not delete edits queued for an operation only a newer de
   `);
 });
 
+test('an older tab keeps a file that an edit only a newer deploy can send still needs', async () => {
+  const opfs = createMockBrowserOpfs();
+  network.setOffline();
+  const oldTab = await openTab('A', { focused: true, uploads: true });
+  const newTab = await openNewVersionTab('B', { uploads: true });
+  await blurWindow();
+
+  // Offline, the user picks a photo in the tab still running the old deploy
+  // and saves an edit with it. Later, in the tab running the new deploy, they
+  // save another edit with the same photo, through an operation the old
+  // deploy doesn't define. Both tabs were already open, so the old tab learns
+  // about the new edit from the new tab's message, not from storage.
+  await oldTab.stageFile('photo');
+  await oldTab.queueEditWithStagedFile(3, 'photo');
+  await newTab.queueEditWithStagedFile(5, 'photo');
+
+  // On reconnect the old tab leads: it sends its own edit and keeps the new
+  // deploy's edit, which it can't send. That edit still needs the photo, so
+  // the old tab must not delete it once its own edit no longer uses it.
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A uploaded photo', 'tab A sent doc = 3 with "server:photo"']`,
+  );
+  expect(getOpfsDirTree(opfs)).toContain('binary.blob');
+
+  // The user closes the old tab; the new tab leads and sends its edit with
+  // the photo after the next network recovery.
+  await closeTabAndFocusRemaining(oldTab);
+  network.goOffline();
+  await advanceTime(100);
+  network.goOnline();
+  await advanceTime(3_000);
+
+  expect(serverCalls).toMatchInlineSnapshot(`
+    - 'tab A uploaded photo'
+    - 'tab A sent doc = 3 with "server:photo"'
+    - 'tab B sent doc = 5 with "server:photo" (v2)'
+  `);
+});
+
 test('disposing a store does not bring back offline items another tab reported earlier', async () => {
   network.setOffline();
   const tabA = await openTab('A', { focused: true });
@@ -1106,6 +1327,186 @@ test('the file attached to an edit queued in another tab is kept when the edit e
   // Tab B, which saved the file, must not delete it while it applies tab A's
   // changes one at a time: retrying the conflict needs the file.
   expect(getOpfsDirTree(opfs)).toContain('binary.blob');
+});
+
+test('a file another tab uploaded and deleted is neither uploaded again nor written back to storage', async () => {
+  const opfs = createMockBrowserOpfs();
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+
+  // While offline the user picks a photo in tab B and saves an edit that uses
+  // it, then switches to tab A, which leads.
+  await tabB.stageFile('photo');
+  await tabB.queueEditWithStagedFile(2, 'photo');
+  setDocumentHidden(false);
+
+  // On reconnect tab A uploads the photo, sends the edit, and deletes the
+  // photo from storage: no queued work uses it anymore.
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A uploaded photo', 'tab A sent doc = 2 with "server:photo"']`,
+  );
+  expect(getOpfsDirTree(opfs)).not.toContain('binary.blob');
+
+  // The user closes tab A and edits again in tab B, whose form still holds
+  // the photo's upload id (the server ref has not reached it yet).
+  await closeTabAndFocusRemaining(tabA);
+  network.goOffline();
+  await advanceTime(100);
+  await tabB.queueEditWithStagedFile(3, 'photo');
+  network.goOnline();
+  // Past the online stabilization after which unused uploads are stamped for
+  // retention
+  await advanceTime(10_000);
+
+  // Tab B learned the photo's server ref from tab A: the second edit reuses it
+  // instead of uploading the photo again.
+  expect(serverCalls).toMatchInlineSnapshot(`
+    - 'tab A uploaded photo'
+    - 'tab A sent doc = 2 with "server:photo"'
+    - 'tab B sent doc = 3 with "server:photo"'
+  `);
+  // Tab B no longer lists the photo, nor writes its stale copy back to storage.
+  expect(
+    tabB.storeManager.getOfflineUploads().map((upload) => upload.id),
+  ).toMatchInlineSnapshot(`[]`);
+  expect(getOpfsDirTree(opfs)).not.toContain('binary.blob');
+});
+
+test('a staged file rendered in one tab is cleared there once another tab sends its edit and deletes it', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+
+  // Offline, the user picks a photo in tab B, which renders its preview, and
+  // saves an edit that uses it.
+  await tabB.stageFile('photo');
+  const preview = renderHook(() =>
+    tabB.storeManager.useOfflineUploadFile('photo'),
+  );
+  await advanceTime(100);
+  await tabB.queueEditWithStagedFile(2, 'photo');
+  const previewUrl = preview.result.current.url;
+  expect(preview.result.current.status).toBe('success');
+
+  // The user switches to tab A, which uploads the photo on reconnect, sends
+  // the edit and deletes the photo: no queued work uses it anymore.
+  const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL');
+  setDocumentHidden(false);
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A uploaded photo', 'tab A sent doc = 2 with "server:photo"']`,
+  );
+
+  // Tab B's preview no longer exposes the deleted file, and its object URL is
+  // revoked instead of leaking.
+  const { status, url } = preview.result.current;
+  expect({ status, url }).toMatchInlineSnapshot(`
+    status: 'missing'
+    url: null
+  `);
+  expect(revokeObjectURL).toHaveBeenCalledWith(previewUrl);
+
+  preview.unmount();
+});
+
+test('deleting a sent file in one tab makes its id unknown in every open tab', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+
+  // Offline, the user picks a photo in tab B and saves an edit with it, then
+  // switches to tab A, which sends both on reconnect and deletes the photo.
+  await tabB.stageFile('photo');
+  await tabB.queueEditWithStagedFile(2, 'photo');
+  setDocumentHidden(false);
+  network.goOnline();
+  await advanceTime(3_000);
+
+  // Both tabs still resolve the photo's id to the server ref, for app data
+  // that holds it.
+  const resolveInBothTabs = async () => {
+    const results = Promise.all(
+      [tabA, tabB].map((tab) => tab.storeManager.resolveOfflineUpload('photo')),
+    );
+    // Reading the upload records takes a few timer ticks
+    await advanceTime(100);
+    return (await results).map((result) =>
+      result.ok ? result.value : result.error.message,
+    );
+  };
+  expect(await resolveInBothTabs()).toMatchInlineSnapshot(
+    `['server:photo', 'server:photo']`,
+  );
+
+  // The app forgets the photo from tab A, e.g. after the form was cleared.
+  const deleted = tabA.storeManager.deleteOfflineUpload('photo');
+  await advanceTime(100);
+  expect((await deleted).ok).toBe(true);
+
+  // Tab B forgets it too instead of still resolving the deleted id.
+  expect(await resolveInBothTabs()).toMatchInlineSnapshot(
+    `['Unknown offline upload "photo"', 'Unknown offline upload "photo"']`,
+  );
+});
+
+test('discarding a conflict in one tab deletes the file another tab staged for it', async () => {
+  const opfs = createMockBrowserOpfs();
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+
+  // Both tabs are open when the user, offline, picks a photo in tab B and
+  // saves an edit with it that the server will reject. Tab A never read the
+  // photo: it was staged after tab A listed the stored uploads.
+  await tabB.stageFile('photo');
+  await tabB.queueEditWithStagedFile(-1, 'photo');
+  setDocumentHidden(false);
+
+  // On reconnect tab A replays the edit and the server rejects it with a
+  // conflict, which keeps the photo for the user to retry.
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(describeTabs(tabA)).toMatchInlineSnapshot(`
+    tab A:
+      entities: ['doc: resolution-required']
+      leader: '✅'
+      resolutions: ['doc: conflict']
+  `);
+  expect(getOpfsDirTree(opfs)).toContain('binary.blob');
+
+  // The user discards the conflict from tab A's offline panel.
+  const [conflict] = tabA.storeManager.getOfflineResolutions();
+  const discarded = tabA.storeManager.resolveOfflineResolution(
+    conflict?.id ?? 'missing',
+    'discard',
+  );
+  // Reading and deleting the photo in OPFS takes a few timer ticks
+  await advanceTime(100);
+  expect((await discarded).ok).toBe(true);
+
+  // Nothing uses the photo anymore, so it is deleted from storage and neither
+  // tab lists it.
+  expect(getOpfsDirTree(opfs)).not.toContain('binary.blob');
+  expect(
+    [tabA, tabB].map((tab) =>
+      tab.storeManager.getOfflineUploads().map((upload) => upload.id),
+    ),
+  ).toMatchInlineSnapshot(`
+    - []
+    - []
+  `);
+  // The conflict was detected before execute, so nothing was uploaded or sent.
+  expect(serverCalls).toMatchInlineSnapshot(`[]`);
 });
 
 test('the leading tab keeps its queued edits while its own connectivity check still fails', async () => {
@@ -1517,6 +1918,76 @@ test('discarding a conflict in one tab refetches the user in the tab that made t
     ⋅ bobMarkedForRefetch: ❌
     └─
     "
+  `);
+});
+
+test('discarding a user created offline with a client-generated id removes it from every tab', async () => {
+  network.setOffline();
+  const tabA = await openUsersTab('A', { focused: true });
+  const tabB = await openUsersTab('B', { focused: false });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+
+  // The user creates Linus in tab B while offline, under an id the app
+  // generated. On reconnect tab A replays the creation and the server rejects
+  // it with a conflict.
+  await tabB.queueCreateWithId('users||Linus', 'Linus');
+  network.goOnline();
+  await advanceTime(10_000);
+
+  const users = createLoggerStore();
+  function logTabs(label: string) {
+    users.add({
+      label,
+      tabA: tabA.getUserName('users||Linus'),
+      tabAMarkedForRefetch: tabA.isMarkedForRefetch('users||Linus'),
+      tabB: tabB.getUserName('users||Linus'),
+      tabBMarkedForRefetch: tabB.isMarkedForRefetch('users||Linus'),
+    });
+  }
+  logTabs('creation rejected');
+
+  // The user discards the creation from tab A's offline panel
+  const [createConflict] = tabA.storeManager.getOfflineResolutions();
+  await tabA.storeManager.resolveOfflineResolution(
+    createConflict?.id ?? 'missing',
+    'discard',
+  );
+  await advanceTime(3_000);
+  logTabs('creation discarded in tab A');
+
+  // Linus never reached the server: both tabs drop him instead of keeping the
+  // unsaved user or marking him for a refetch the server would answer with
+  // "not found".
+  expect(users.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ label: creation rejected
+    ⋅ tabA: Linus
+    ⋅ tabAMarkedForRefetch: ❌
+    ⋅ tabB: Linus
+    ⋅ tabBMarkedForRefetch: ❌
+    └─
+    ┌─
+    ⋅ label: creation discarded in tab A
+    ⋅ tabA: null
+    ⋅ tabAMarkedForRefetch: ❌
+    ⋅ tabB: null
+    ⋅ tabBMarkedForRefetch: ❌
+    └─
+    "
+  `);
+  expect(serverCalls).toMatchInlineSnapshot(`[]`);
+  expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: []
+      leader: '✅'
+      resolutions: []
+
+    tab B:
+      entities: []
+      leader: '❌'
+      resolutions: []
   `);
 });
 

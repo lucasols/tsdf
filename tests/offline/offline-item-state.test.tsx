@@ -250,9 +250,10 @@ describe('list-query rows', () => {
     //   single time (on mount), even though the store's offline entities
     //   changed on every step of the other rows' queueing and replay.
     // - Grace goes pending -> syncing -> synced (null).
-    // - With several mutations queued for a row, `syncState` is the state of
-    //   the newest one: Ada stays `pending` while her first rename is sent
-    //   (only the count drops), and is `syncing` while the second one is.
+    // - With several mutations queued for a row, `syncState` is the most
+    //   urgent one among them: Ada is `syncing` while her first rename is
+    //   sent, `pending` again once only the second one is left waiting, then
+    //   `syncing` while it is sent.
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
       -> row: users||1 ⋅ offlineState: null
@@ -270,6 +271,7 @@ describe('list-query rows', () => {
 
       >>> back online: the three renames replay in order
 
+      -> row: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:2, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||1 ⋅ offlineState: null
@@ -419,10 +421,10 @@ describe('list-query rows', () => {
     });
     await flushAllTimers();
 
-    // - While the creation is sent, the temp row keeps reporting its newest
-    //   queued mutation (the rename, still `pending`). It renders once, to
-    //   report that the creation was attempted: from here on a delete handler
-    //   cannot assume that the server never saw the row.
+    // - While the creation is sent, the temp row reports `syncing`, still as
+    //   an unsent creation with the rename queued behind it, and as attempted:
+    //   from here on a delete handler cannot assume that the server never saw
+    //   the row.
     // - Once the server assigns `users||4`, the list swaps the temp row for the
     //   final one. It mounts before the queued rename is moved to the new id
     //   (first `null`), then reports that rename until it is synced, no longer
@@ -445,7 +447,7 @@ describe('list-query rows', () => {
 
       >>> back online: the creation replays, then the renames
 
-      -> row: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
+      -> row: temp:Margaret ⋅ offlineState: {syncState:syncing, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
       -> row: users||4 ⋅ offlineState: null
       -> row: users||4 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||4 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
@@ -747,9 +749,9 @@ describe('collection items', () => {
     });
     await flushAllTimers();
 
-    // As soon as the creation starts being sent, the temp item reports it as
-    // attempted: the server may know the item from here on.
-    //
+    // - While the creation is sent, the temp item reports `syncing`, still as
+    //   an unsent creation with the rename queued behind it, and as attempted:
+    //   the server may know the item from here on.
     // Once the server assigns `users||4`:
     // - the queued rename moves to the final payload, which reports it until
     //   it is synced, no longer as an unsent creation
@@ -767,7 +769,7 @@ describe('collection items', () => {
 
       >>> back online: the creation replays, then the rename
 
-      -> item: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
+      -> item: temp:Margaret ⋅ offlineState: {syncState:syncing, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
       -> item: users||4 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> item: temp:Margaret ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
       -> item: temp:Margaret ⋅ offlineState: null

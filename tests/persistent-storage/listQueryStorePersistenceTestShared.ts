@@ -5,13 +5,16 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import { createStoreManager } from '../../src/storeManager';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import { normalizeError } from '../mocks/testEnvUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
@@ -112,6 +115,8 @@ export function createEnv(options: {
   partialResources?: PartialResourcesConfig<Row>;
   offsetPagination?: OffsetPaginationConfig;
   defaultQuerySize?: number;
+  /** Makes the store offline-capable, tracking this network state. */
+  offlineNetwork?: OfflineNetworkModeConfig;
   usesRealTimeUpdates?: boolean;
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
@@ -123,9 +128,18 @@ export function createEnv(options: {
     onWindowBlur: (handler: () => void) => () => void;
   };
 }) {
+  const getSessionKey = () => options.sessionKey ?? 'session1';
+
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
-    getSessionKey: () => options.sessionKey ?? 'session1',
+    getSessionKey,
+    storeManager: options.offlineNetwork
+      ? createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey,
+          offlineSession: { network: options.offlineNetwork },
+        })
+      : undefined,
     partialResources: options.partialResources,
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
@@ -145,6 +159,7 @@ export function createEnv(options: {
       pinnedQueries: options.pinnedQueries,
       ignoreItems: options.ignoreItems,
       onPersistentStorageError: options.onPersistentStorageError,
+      offline: options.offlineNetwork ? { operations: {} } : undefined,
     },
   });
 }

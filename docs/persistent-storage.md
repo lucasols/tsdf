@@ -167,6 +167,21 @@ persistentStorage: {
 
 Use `createIndexedDbPersistentStorage({ databaseName })` from `tsdf/indexed-db-storage` when an app needs an isolated IndexedDB database.
 
+#### Connection recovery
+
+Browsers can take an IndexedDB connection away from a page that keeps running: the storage process restarts, a backgrounded mobile tab comes back with a dead connection, or another tab upgrades or deletes the database. The adapter recovers without a page reload:
+
+- A failed open is not remembered. The next operation opens the database again.
+- When the browser closes the connection (`close`), or another tab needs it released (`versionchange`), the adapter closes and forgets it, so the other tab is not blocked. The next operation opens a new connection.
+- When an operation fails with a connection error (`InvalidStateError`, `AbortError`, or `UnknownError`, e.g. WebKit's "Connection to Indexed Database server lost"), the adapter drops the connection, opens a new one, and runs the operation once more. Every adapter operation is a self-contained transaction that writes whole values, so repeating it never applies a batch twice or leaves half of it behind. Quota, data, and version errors are not retried.
+- When IndexedDB stops answering — an open or a transaction delivers no event at all — the operation is treated like a lost connection after two consecutive checks, 15 seconds apart, during which no event of the same database reached the page while the tab was visible (30 to 45 seconds). Progress is what is measured, not total duration: a large batch on a slow device is never cut short in the tab running it. Only events reaching this page count, so an operation of another tab that waits more than 30 seconds behind that batch can still be given up and retried. A check interval during which the tab was hidden at any point, or the page was not running at all (frozen tab, sleeping device), does not count, so an operation is never given up the moment a page resumes.
+
+If the second attempt also fails, the error is reported through `onPersistentStorageError`. Recovery depends on the browser accepting a new connection; some Safari versions refuse one until the page is reloaded, in which case each failing operation is reported instead of staying pending.
+
+#### When a write fails
+
+A persistence write that still fails after the recovery above is reported through `onPersistentStorageError` and dropped. In-memory store state is not affected and the app keeps working; the entry keeps its previous persisted value (or stays absent) until the store saves it again. See [Offline](./offline.md#queuing-mutations) for what this means for queued mutations.
+
 ### Custom async adapters
 
 Use `createAsyncStorageAdapter(driver)` only when the built-in OPFS and IndexedDB adapters are not a fit. It wraps an `AsyncStorageDriver`, which is the low-level async backend contract used by TSDF persistence internals.
@@ -290,6 +305,7 @@ const settingsStore = createDocumentStore<Settings>({
   - `local-sync`: ~1 week old entries
   - `opfsPersistentStorage`: ~2 weeks old entries
   - `indexedDbPersistentStorage`: ~2 weeks old entries
+- Queued offline mutations and unresolved offline resolutions never expire, in any adapter.
 - Entries referenced by queued offline mutations are protected from expiry until that queued work is replayed or discarded.
 - Expiry runs for an adapter only while at least one store uses it, and then covers every entry in that adapter, including ones left by stores that moved elsewhere. See [Changing a store's adapter](#changing-a-stores-adapter).
 
@@ -331,6 +347,20 @@ When the selected adapter does not support async preload, preload methods report
 - `ignoreItems` removes/blocks entries from being persisted or hydrated.
   - Can be an explicit list or predicate.
   - Takes precedence over pinned lists.
+
+### Cached list queries that lost rows
+
+Items and queries are stored and evicted separately, so a cached list query can outlive some of its rows: `maxItemBytes` evicts the least recently read item entries while the query entry stays, and an item entry that fails `schema` (or is now covered by `ignoreItems`) is discarded when it is read.
+
+A cached query is restored as a loaded query (`status: 'success'`, shown immediately and revalidated in the background) when every row it was saved with can be restored, or when only its last rows are missing: like a list cut by `maxQuerySize`, the rows that are left are restored as a loaded list with `hasMore: true`. This is what happens to a list larger than `maxItemBytes`: the budget evicts its last rows right after it is saved.
+
+Eviction follows read recency, not the order of the rows in a list. A list larger than `maxItemBytes` is restored as loaded on the first start after its last rows were cut, but once an online refetch saves it again, the rows that were rewritten look more recent than the unchanged ones, so the budget can evict earlier rows instead. The next start then restores it as a list with a gap (see below). To keep such a list restorable, raise `maxItemBytes` or lower `maxQuerySize`.
+
+When a row before one of the rows that are left is missing, or no row is left, the rows that are left are still restored, but the query is not restored as loaded (`wasLoaded: false`), so the list with a gap — or an empty list — is never presented as the complete one:
+
+- Online, hooks report `status: 'loading'` and fetch the query right away, as for a query that was never cached. The remaining rows are available in `items` meanwhile (stores using [Partial Resources](./partial-resources.md) hide items while loading, as usual).
+- Offline, the fetch fails with the offline error: hooks report `status: 'error'` with `error.id === 'offline'` and the remaining rows in `items`, so a screen can show what is left of the list together with a notice that it is incomplete. `awaitListQueryFetch` returns the offline error instead of the incomplete list. A loaded list doesn't load more rows from such a cached list while offline (`loadMore` is skipped and `hasMore` is `false`), since its next rows may come after a missing one.
+- The stored query is left as it is until the list is fetched again, so the next start sees the same state. With `local-sync`, the query entry rewritten after an eviction lists only the rows that are left, and is flagged (`"m": true`) as incomplete unless only its last rows were evicted (then it is saved with `"h": true`).
 
 ## Clearing stored data
 
