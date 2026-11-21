@@ -460,6 +460,22 @@ function formatPayloadForError(value: ValidPayload): string {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
+/**
+ * Runs store code that calls the app's listeners after the server already
+ * applied a replayed mutation. A listener that throws must not fail the replay
+ * (the mutation would be sent again), so its error is thrown later, out of the
+ * replay, where the app's error reporting still sees it.
+ */
+function runWithoutFailingReplay(run: () => void): void {
+  try {
+    run();
+  } catch (error) {
+    setTimeout(() => {
+      throw error;
+    }, 0);
+  }
+}
+
 function compareQueueEntries(
   left: OfflineQueueEntry,
   right: OfflineQueueEntry,
@@ -2493,7 +2509,8 @@ export function createOfflineStoreController<
     const tempEntity = operation.tempEntity;
     const tempEntities = operation.tempEntities;
     if (!tempEntity && !tempEntities) return;
-    if (!storeAdapter.reconcileTempEntity) return;
+    const reconcileTempEntity = storeAdapter.reconcileTempEntity;
+    if (!reconcileTempEntity) return;
 
     // The server already applied the mutation, so a failed storage read, or a
     // throwing `addToQueries` filter, must not fail the replay: the temp items
@@ -2530,12 +2547,14 @@ export function createOfflineStoreController<
       if (isActiveSessionState(args.current)) {
         rememberResolvedEntityRef(tempId, reconciliation.finalPayload);
       }
-      storeAdapter.reconcileTempEntity({
-        operationName: args.operationName,
-        input: args.input,
-        tempId,
-        result: args.result,
-        reconciliation,
+      runWithoutFailingReplay(() => {
+        reconcileTempEntity({
+          operationName: args.operationName,
+          input: args.input,
+          tempId,
+          result: args.result,
+          reconciliation,
+        });
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
@@ -2577,12 +2596,14 @@ export function createOfflineStoreController<
           reconciliation.finalPayload,
         );
       }
-      storeAdapter.reconcileTempEntity({
-        operationName: args.operationName,
-        input: args.input,
-        tempId: reconciliation.tempId,
-        result: args.result,
-        reconciliation,
+      runWithoutFailingReplay(() => {
+        reconcileTempEntity({
+          operationName: args.operationName,
+          input: args.input,
+          tempId: reconciliation.tempId,
+          result: args.result,
+          reconciliation,
+        });
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
