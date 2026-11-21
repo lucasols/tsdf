@@ -606,6 +606,56 @@ test('forced offline mode only takes effect while network mode is enabled', asyn
   `);
 });
 
+test('forced offline mode is ignored while the session gate is closed and applies once it reopens', async () => {
+  const sessionKey = 'forced-offline-session-gate-session';
+
+  // Offline support behind a feature flag, read by the session gate.
+  let isOfflineFeatureEnabled = false;
+
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => isOfflineFeatureEnabled,
+      network: network.config,
+    },
+  });
+
+  // A closed gate means "no offline session": the simulated network loss is
+  // recorded, but cannot take the session offline.
+  (await storeManager.setForcedOfflineMode(true)).unwrap();
+
+  expect(getStatusSummary(storeManager)).toMatchInlineSnapshot(`
+    isForcedOffline: '✅'
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+  `);
+
+  // The feature flag is turned on. A runtime config update re-reads the gate
+  // right away: the recorded forced flag becomes effective.
+  isOfflineFeatureEnabled = true;
+  storeManager.setOfflineRuntimeConfig({}).unwrap();
+  await flushAllTimers();
+
+  expect(getStatusSummary(storeManager)).toMatchInlineSnapshot(`
+    isForcedOffline: '✅'
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+  `);
+
+  // Closing the gate again leaves offline mode even though it is still
+  // forced, and keeps the flag for the next time the gate opens.
+  isOfflineFeatureEnabled = false;
+  storeManager.setOfflineRuntimeConfig({}).unwrap();
+  await flushAllTimers();
+
+  expect(getStatusSummary(storeManager)).toMatchInlineSnapshot(`
+    isForcedOffline: '✅'
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+  `);
+});
+
 test('forced offline mode is scoped to the session key that was active when it was set', async () => {
   let sessionKey: string | false = 'forced-offline-tenant-a';
   const storeManager = createStoreManager({
