@@ -20,6 +20,10 @@ import {
 } from '../utils/genericTestUtils';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
+  createHealthCheckMock,
+  healthRecoveryProbe,
+} from './offlineHealthCheckTestShared';
+import {
   type UpdateValueOperations,
   userRowSchema,
 } from './offlineReplayTestShared';
@@ -58,16 +62,21 @@ function createOfflineDocumentPage({
   storeName,
   testScenario = 'idle',
   networkConfig,
+  sessionConfig,
 }: {
   sessionKey: string;
   storeName: string;
   testScenario?: 'idle' | 'loaded';
   networkConfig?: OfflineSessionConfig['network'];
+  /** Whole `offlineSession` config, for tests that need more than `network`. */
+  sessionConfig?: OfflineSessionConfig;
 }) {
   const storeManager = createStoreManager({
     errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
-    offlineSession: { network: networkConfig ?? network.config },
+    offlineSession: sessionConfig ?? {
+      network: networkConfig ?? network.config,
+    },
   });
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
@@ -606,54 +615,135 @@ test('forced offline mode only takes effect while network mode is enabled', asyn
   `);
 });
 
-test('forced offline mode is ignored while the session gate is closed and applies once it reopens', async () => {
+test('forced offline mode has no effect while the session gate is closed and applies again once it reopens', async () => {
   const sessionKey = 'forced-offline-session-gate-session';
+  const storeName = 'forced-offline-session-gate-doc';
 
-  // Offline support behind a feature flag, read by the session gate.
-  let isOfflineFeatureEnabled = false;
+  // Offline support sits behind a feature flag, read by the session gate.
+  let isOfflineFeatureEnabled = true;
+  // The backend is healthy the whole time: any health check would answer
+  // "up", which normally ends network mode.
+  const health = createHealthCheckMock();
+  const sessionConfig: OfflineSessionConfig = {
+    enabled: () => isOfflineFeatureEnabled,
+    network: { ...network.config, recoveryProbe: healthRecoveryProbe },
+    healthCheck: { check: health.check },
+  };
 
-  const storeManager = createStoreManager({
-    errorNormalizer: normalizeError,
-    getSessionKey: () => sessionKey,
-    offlineSession: {
-      enabled: () => isOfflineFeatureEnabled,
-      network: network.config,
-    },
+  // First page load: online, document cached, then forced offline and an
+  // edit is queued.
+  const firstPage = createOfflineDocumentPage({
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+    sessionConfig,
   });
+  await flushAllTimers();
+  (await firstPage.storeManager.setForcedOfflineMode(true)).unwrap();
+  await firstPage.setValue(2);
 
-  // A closed gate means "no offline session": the simulated network loss is
-  // recorded, but cannot take the session offline.
-  (await storeManager.setForcedOfflineMode(true)).unwrap();
+  // --- The feature flag is turned off. A runtime config update re-reads the
+  // gate right away.
+  isOfflineFeatureEnabled = false;
+  firstPage.storeManager.setOfflineRuntimeConfig({}).unwrap();
+  await advanceTime(30_000);
 
-  expect(getStatusSummary(storeManager)).toMatchInlineSnapshot(`
+  // A closed gate means "no offline session": the forced flag is kept, but
+  // it cannot hold the session offline. The queued edit waits for the gate.
+  expect(getStatusSummary(firstPage.storeManager)).toMatchInlineSnapshot(`
+    isForcedOffline: '✅'
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+  `);
+  expect(firstPage.env.serverMock.current).toBe(1);
+
+  // --- Reload with the gate still closed: the flag survives, the session
+  // boots online and the screen fetches from the server.
+  resetSessionForTests();
+  const reloadedPage = createOfflineDocumentPage({
+    sessionKey,
+    storeName,
+    sessionConfig,
+  });
+  const { env } = reloadedPage;
+
+  expect(getStatusSummary(reloadedPage.storeManager)).toMatchInlineSnapshot(`
     isForcedOffline: '✅'
     isOfflineMode: '❌'
     network: { active: '❌', enabled: '❌' }
   `);
 
-  // The feature flag is turned on. A runtime config update re-reads the gate
-  // right away: the recorded forced flag becomes effective.
-  isOfflineFeatureEnabled = true;
-  storeManager.setOfflineRuntimeConfig({}).unwrap();
-  await flushAllTimers();
+  const screen = reloadedPage.renderScreen();
+  await advanceTime(30_000);
 
-  expect(getStatusSummary(storeManager)).toMatchInlineSnapshot(`
+  // --- The feature flag is turned back on: forced mode applies again, so
+  // the edit queued before the gate closed is still not sent.
+  env.addTimelineComments('beforeNextAction', [
+    'the session gate reopens while offline mode is still forced',
+  ]);
+  isOfflineFeatureEnabled = true;
+  act(() => {
+    reloadedPage.storeManager.setOfflineRuntimeConfig({}).unwrap();
+  });
+  await advanceTime(30_000);
+
+  expect(summarizeStatus(screen.result.current.status)).toMatchInlineSnapshot(`
     isForcedOffline: '✅'
     isOfflineMode: '✅'
     network: { active: '✅', enabled: '✅' }
   `);
+  expect(env.serverMock.current).toBe(1);
 
-  // Closing the gate again leaves offline mode even though it is still
-  // forced, and keeps the flag for the next time the gate opens.
-  isOfflineFeatureEnabled = false;
-  storeManager.setOfflineRuntimeConfig({}).unwrap();
+  // --- Releasing forced mode sends the edit, like a normal reconnect.
+  env.addTimelineComments('beforeNextAction', ['forced offline is turned off']);
+  await act(async () => {
+    (await reloadedPage.storeManager.setForcedOfflineMode(false)).unwrap();
+  });
   await flushAllTimers();
 
-  expect(getStatusSummary(storeManager)).toMatchInlineSnapshot(`
-    isForcedOffline: '✅'
+  expect(summarizeStatus(screen.result.current.status)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isOfflineMode: '❌'
-    network: { active: '❌', enabled: '❌' }
+    network: { active: '❌', enabled: '✅' }
   `);
+  expect(env.serverMock.current).toBe(2);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+
+  // Forced mode is not a detected failure: the health endpoint was never
+  // asked, neither to end it while forced nor to confirm the recovery.
+  expect(health.check).toHaveBeenCalledTimes(0);
+
+  // - gate closed: the screen fetches from the server like an app without
+  //   offline support (the fetched value replaces the optimistic one while
+  //   the edit waits for the gate)
+  // - gate reopened: the session is offline again and nothing is sent
+  // - forced mode released: the edit is replayed once, then the store
+  //   revalidates
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui                                                       |
+    0      | "value:2 success | offline:off forced:on"                | ui-initialized
+    .      | "value:2 success pendingSync | offline:off forced:on"    | ui-changed
+    10ms   | "value:2 refetching pendingSync | offline:off forced:on" | ui-changed
+    .      | "value:2 refetching pendingSync | offline:off forced:on" | 🔴 >fetch-started
+    810ms  | "value:2 refetching pendingSync | offline:off forced:on" | 🔴 <fetch-finished (value: 1)
+    .      | "value:1 success pendingSync | offline:off forced:on"    | ui-changed
+    30s    | "value:1 success pendingSync | offline:off forced:on"    | -- the session gate reopens while offline mode is still forced
+    .      | "value:1 success pendingSync | offline:on forced:on"     | ui-changed
+    60s    | "value:1 success pendingSync | offline:on forced:on"     | -- forced offline is turned off
+    .      | "value:1 success pendingSync | offline:off forced:off"   | ui-changed
+    .      | "value:1 success pendingSync | offline:off forced:off"   | offline:updateValue replay-started
+    61.2s  | "value:1 success pendingSync | offline:off forced:off"   | server-data-changed (value: 2)
+    .      | "value:1 success pendingSync | offline:off forced:off"   | offline:updateValue replay-finished
+    .      | "value:2 success | offline:off forced:off"               | ui-changed
+    61.21s | "value:2 refetching | offline:off forced:off"            | ui-changed
+    .      | "value:2 refetching | offline:off forced:off"            | 🟠 >fetch-started
+    62.01s | "value:2 refetching | offline:off forced:off"            | 🟠 <fetch-finished (value: 2)
+    .      | "value:2 success | offline:off forced:off"               | ui-changed
+    "
+  `);
+
+  screen.unmount();
 });
 
 test('forced offline mode is scoped to the session key that was active when it was set', async () => {
