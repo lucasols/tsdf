@@ -379,8 +379,12 @@ Behavior:
 - `creationAttempted` - Only `true` for an unsent creation whose create
   request is being sent, failed without telling whether the server got it, or
   waits for a manual resolution: the server may already have the item. While
-  it is `false` the creation is still waiting in the queue and the server
-  never saw the item
+  it is `false` the creation is still waiting in the queue, and deleting the
+  item only discards local work. The server never saw the item, except when the
+  creation was queued after its direct online request failed, or sent again
+  with `requeue` after a conflict: an earlier request may have created a
+  server item, which the temporary payload can't target, so the delete leaves
+  it as is
 
 ### Items created offline
 

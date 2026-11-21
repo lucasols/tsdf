@@ -527,8 +527,12 @@ export type ItemOfflineState = {
    * with an operation that cancels pending creations (see
    * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}) sends
    * nothing, unless one operation created it together with other entities
-   * (see that option). Always `false` for items that are not unsent
-   * creations.
+   * (see that option). A creation queued after its direct online request
+   * failed, or sent again with `requeue` after a conflict, also reports
+   * `false`: an earlier request may have created a server item, but the
+   * temporary payload can't target it, so the delete still only discards
+   * local work and that server item is left as is. Always `false` for items
+   * that are not unsent creations.
    */
   creationAttempted: boolean;
 };

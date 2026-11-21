@@ -214,14 +214,16 @@ type SessionRegistration = {
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
   /**
-   * Called when another store of the session cancelled or discarded temp
-   * entities (temp payloads keyed with `getCompositeKey`) that will never
-   * exist on the server.
+   * Called when another store of the session cancelled or discarded entities
+   * created offline that will never exist on the server. `cancelledEntityKeys`
+   * holds their keys in the source store, and `getEntityKey` keys an entity
+   * payload of that store the same way.
    * Only registered by stores with `cancelledWith` operations.
    */
   onTempEntitiesCancelled?: (
     sourceStoreName: string,
-    serializedTempIds: ReadonlySet<string>,
+    cancelledEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
   ) => Promise<void>;
   /** Another tab saved or removed (`null`) a queue entry of the store. */
   onRemoteQueueEntryChange?: (
@@ -1304,12 +1306,13 @@ class SessionOfflineCoordinator {
 
   /**
    * Lets the other stores of the session drop the queued work they declared
-   * as `cancelledWith` temp entities of `sourceStoreName` that will never
-   * exist on the server.
+   * as `cancelledWith` entities of `sourceStoreName` that will never exist on
+   * the server.
    */
   async notifyTempEntitiesCancelled(
     sourceStoreName: string,
-    serializedTempIds: ReadonlySet<string>,
+    cancelledEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
   ): Promise<void> {
     const pendingCleanups: Promise<void>[] = [];
 
@@ -1324,7 +1327,8 @@ class SessionOfflineCoordinator {
       pendingCleanups.push(
         registration.onTempEntitiesCancelled(
           sourceStoreName,
-          serializedTempIds,
+          cancelledEntityKeys,
+          getEntityKey,
         ),
       );
     }

@@ -1,6 +1,5 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
 import {
@@ -1790,7 +1789,10 @@ export function createOfflineStoreController<
         // locally anymore, whether or not it reached the server. One held
         // behind another creation waiting for a decision was never sent: a
         // delete still cancels it (see `findHeldWorkResolutions`).
-        if (tempId !== undefined && !isHeldWorkResolution(resolution)) {
+        if (
+          tempId !== undefined &&
+          !isHeldWorkResolution(resolution, dependencySnapshot)
+        ) {
           attemptedCreationEntityKeys.add(ref.entityKey);
         }
       }
@@ -2819,16 +2821,28 @@ export function createOfflineStoreController<
     return heldResolutions.sort(compareResolutionRecords);
   }
 
-  /** Work held behind a temp creation waiting for a decision, never sent. */
+  /**
+   * Work held behind a temp creation waiting for a decision, never sent. A
+   * `dependencySnapshot` of the current resolutions answers it without
+   * scanning them again.
+   */
   function isHeldWorkResolution(
     resolution: PersistedOfflineResolutionRecord,
+    dependencySnapshot?: ResolutionDependencySnapshot,
   ): boolean {
-    return (
-      resolution.kind === 'retry-exhausted' &&
-      resolution.lastReplayError.message ===
-        BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE &&
-      isHeldBehindTempCreateResolution(resolution)
-    );
+    if (
+      resolution.kind !== 'retry-exhausted' ||
+      resolution.lastReplayError.message !==
+        BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE
+    ) {
+      return false;
+    }
+
+    return dependencySnapshot
+      ? dependencySnapshot.blockedByResolutionIdsByResolutionId.has(
+          resolution.id,
+        )
+      : isHeldBehindTempCreateResolution(resolution);
   }
 
   /**
@@ -2846,7 +2860,7 @@ export function createOfflineStoreController<
     >,
     removedEntityKeys: Set<string>,
     unsentEntityKeys: ReadonlySet<string>,
-    cancelledIds: Set<string>,
+    cancelledEntityKeys: Set<string>,
   ): void {
     for (const entityKey of getClientIdCreatedEntityKeys(workItem)) {
       const payload = getPayloadForEntityRef({
@@ -2866,7 +2880,7 @@ export function createOfflineStoreController<
       // Like a temp entity, an item whose creation was never sent will never
       // exist on the server: the work of other stores on it is dropped too.
       if (unsentEntityKeys.has(entityKey)) {
-        cancelledIds.add(getCompositeKey(payload));
+        cancelledEntityKeys.add(entityKey);
       }
     }
   }
@@ -3051,17 +3065,21 @@ export function createOfflineStoreController<
     // The temp entities and the items created with a client-generated id are
     // removed, not refetched: the server most likely never got them.
     const removedEntityKeys = new Set<string>();
-    const cancelledIds = new Set<string>();
+    // Keys of the entities that will never exist on the server, as this store
+    // keys its entity refs: the other stores match their `cancelledWith` refs
+    // against them through `getEntityKeyOfPayload`.
+    const cancelledEntityKeys = new Set<string>();
 
     for (const workItem of [...droppedDescendants, ...tempCreates]) {
       rollbackClientIdCreatedItems(
         workItem,
         removedEntityKeys,
         unsentClientIdEntityKeys,
-        cancelledIds,
+        cancelledEntityKeys,
       );
       for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
         removedEntityKeys.add(entityKey);
+        cancelledEntityKeys.add(entityKey);
       }
 
       if (!workItem.tempIds || !isTempCreateOperation(workItem.operation)) {
@@ -3069,12 +3087,6 @@ export function createOfflineStoreController<
       }
 
       rollbackTempCreatePendingEntity(workItem);
-      for (const tempId of workItem.tempIds) {
-        // A key independent of the property order of object payloads: the
-        // other stores match it against the refs their `cancelledWith`
-        // builds.
-        cancelledIds.add(getCompositeKey(tempId));
-      }
     }
 
     refreshDerivedState(current);
@@ -3102,10 +3114,11 @@ export function createOfflineStoreController<
       ...droppedDescendants,
     ]);
 
-    if (cancelledIds.size > 0) {
+    if (cancelledEntityKeys.size > 0) {
       await current.session.notifyTempEntitiesCancelled(
         storeName,
-        cancelledIds,
+        cancelledEntityKeys,
+        getEntityKeyOfPayload,
       );
     }
   }
@@ -3118,14 +3131,20 @@ export function createOfflineStoreController<
     await discardTempLifecycles(args.current, [args.resolution]);
   }
 
+  /** Key of an entity payload of this store, as its entity refs hold it. */
+  function getEntityKeyOfPayload(entityRef: ValidPayload): string | undefined {
+    return resolveNormalizedRefs([entityRef])[0]?.entityKey;
+  }
+
   /**
-   * Another store of the session reported temp entities that will never
-   * exist on the server: drops the work of this store declared as
+   * Another store of the session reported entities created offline that will
+   * never exist on the server: drops the work of this store declared as
    * `cancelledWith` one of them, with its own temp lifecycles.
    */
   async function discardWorkCancelledWithExternalTempEntities(
     sourceStoreName: string,
-    serializedTempIds: ReadonlySet<string>,
+    cancelledEntityKeys: ReadonlySet<string>,
+    getSourceEntityKey: (entityRef: ValidPayload) => string | undefined,
   ): Promise<void> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
@@ -3143,11 +3162,13 @@ export function createOfflineStoreController<
 
       return (
         externalEntityRefs !== undefined &&
-        externalEntityRefs.some(
-          (externalEntityRef) =>
-            externalEntityRef.storeName === sourceStoreName &&
-            serializedTempIds.has(getCompositeKey(externalEntityRef.entityRef)),
-        )
+        externalEntityRefs.some((externalEntityRef) => {
+          if (externalEntityRef.storeName !== sourceStoreName) return false;
+          // Keyed by the source store, like its own entity refs: equivalent
+          // payloads match whatever their shape.
+          const entityKey = getSourceEntityKey(externalEntityRef.entityRef);
+          return entityKey !== undefined && cancelledEntityKeys.has(entityKey);
+        })
       );
     }
 
