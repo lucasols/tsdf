@@ -905,8 +905,16 @@ async function openUsersListTab(
   );
 
   const reconciledUsers: string[] = [];
+  const seenByReconciledListeners: {
+    listRows: string[];
+    resolvedTempId: string;
+  }[] = [];
   env.apiStore.storeEvents.on('tempEntityReconciled', ({ payload }) => {
     reconciledUsers.push(`${payload.tempId} -> ${payload.finalPayload}`);
+    seenByReconciledListeners.push({
+      listRows: tab.getListRows(),
+      resolvedTempId: tab.resolveTempItemPayload(payload.tempId),
+    });
   });
 
   const tab = {
@@ -914,6 +922,12 @@ async function openUsersListTab(
     storeManager,
     /** `tempEntityReconciled` events this tab's store emitted, in order. */
     reconciledUsers,
+    /**
+     * What a `tempEntityReconciled` listener of this tab read from the store
+     * when it was called: the rows of the users list and what the temp id of
+     * the event resolved to.
+     */
+    seenByReconciledListeners,
     /** The user stored under `payload` in this tab, if any. */
     getUser(payload: string) {
       return env.apiStore.getItemState(payload);
@@ -2058,13 +2072,28 @@ describe('a record created offline is saved while several tabs are open', () => 
       tabB: 'users||2'
       unknown: 'temp:Unknown'
     `);
+
+    // The listeners were called with the store already updated, in the tab
+    // that sent the creation too: the list shows the saved row and the temp
+    // id already resolves to the final one
+    expect({
+      tabA: tabA.seenByReconciledListeners,
+      tabB: tabB.seenByReconciledListeners,
+    }).toMatchInlineSnapshot(`
+      tabA:
+        - listRows: ['Grace (id 1)', 'Ada (id 2)']
+          resolvedTempId: 'users||2'
+      tabB:
+        - listRows: ['Grace (id 1)', 'Ada (id 2)']
+          resolvedTempId: 'users||2'
+    `);
   });
 
-  test('a tab that has no user data still learns the final id of a user created offline', async () => {
+  test('a tab that does not show the users list still learns the final id of a user created offline', async () => {
     network.setOffline();
     const tabA = await openUsersListTab('A', { focused: true, listOpen: true });
-    // Tab B has no user data: for example it only holds the temp id in a link
-    // to the user's page
+    // Tab B is on another screen: for example it only holds the temp id in a
+    // link to the user's page
     const tabB = await openUsersListTab('B', {
       focused: false,
       listOpen: false,
@@ -2078,7 +2107,7 @@ describe('a record created offline is saved while several tabs are open', () => 
     expect({
       reconciled: tabB.reconciledUsers,
       resolved: tabB.resolveTempItemPayload('temp:Ada'),
-      // The saved user is not added to a tab that does not use user data
+      // The saved user reaches every tab through the store's tab sync
       final: tabB.getUser('users||2'),
     }).toMatchInlineSnapshot(`
       final: { id: 2, name: 'Ada' }

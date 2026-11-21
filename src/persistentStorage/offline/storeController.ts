@@ -1,5 +1,6 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
 import {
@@ -455,12 +456,8 @@ function normalizeEntityRefs(entityRefs: OfflineEntityRef[]): string {
   );
 }
 
-function serializePayload(value: ValidPayload): string {
-  return JSON.stringify(value);
-}
-
 function formatPayloadForError(value: ValidPayload): string {
-  return typeof value === 'string' ? value : serializePayload(value);
+  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
 function compareQueueEntries(
@@ -927,7 +924,9 @@ export function createOfflineStoreController<
     const seen = new Set<string>();
 
     while (true) {
-      const serializedRef = serializePayload(currentRef);
+      // Same key as the stores' item keys: object payloads match whatever the
+      // order of their keys
+      const serializedRef = getCompositeKey(currentRef);
       if (seen.has(serializedRef)) {
         // WORKAROUND: The resolver preserves the caller's entity-ref payload shape,
         // but the remap table stores refs behind the shared ValidPayload boundary.
@@ -950,7 +949,7 @@ export function createOfflineStoreController<
     nextRef: ValidPayload,
   ): void {
     resolvedEntityRefBySerializedRef.set(
-      serializePayload(previousRef),
+      getCompositeKey(previousRef),
       resolveEntityRef(nextRef),
     );
 
@@ -2391,7 +2390,6 @@ export function createOfflineStoreController<
     tempId: ValidPayload;
     finalPayload: ValidPayload;
   }): Promise<void> {
-    rememberResolvedEntityRef(args.tempId, args.finalPayload);
     const changedQueueEntries: OfflineQueueEntry[] = [];
     const entityRefRewrites: Array<{
       previousEntityRefs: OfflineEntityRef[];
@@ -2525,6 +2523,9 @@ export function createOfflineStoreController<
         reconciliation.finalPayload,
         reconciliation.finalData,
       );
+      // Mapped before the store emits `tempEntityReconciled`, so a listener
+      // can already resolve the temp payload, as in the other tabs
+      rememberResolvedEntityRef(tempId, reconciliation.finalPayload);
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
         input: args.input,
@@ -2565,6 +2566,10 @@ export function createOfflineStoreController<
         reconciliation.tempId,
         reconciliation.finalPayload,
         reconciliation.finalData,
+      );
+      rememberResolvedEntityRef(
+        reconciliation.tempId,
+        reconciliation.finalPayload,
       );
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
@@ -5088,7 +5093,12 @@ export function createOfflineStoreController<
     queueMutation,
     getOfflineEntities,
     getItemOfflineState,
-    resolveEntityRef,
+    resolveEntityRef: (entityRef) => {
+      // The remaps belong to the session they were recorded in: this drops
+      // them when the session changed since
+      ensureActiveSession();
+      return resolveEntityRef(entityRef);
+    },
     getOfflineResolutions,
     parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,

@@ -2293,6 +2293,8 @@ export function createListQueryStore<
             reconciliation.finalPayload,
             reconciliation.finalData,
           );
+          // Listeners are told even when this tab had no item to replace
+          emitTempItemReconciled(tempId, reconciliation.finalPayload);
         },
         loadTempEntities: (tempIds, addToQueries) =>
           loadOfflineTempEntities(
@@ -2311,9 +2313,9 @@ export function createListQueryStore<
           );
           // The replaying tab only knows the query memberships it loaded, so
           // this tab moves its own memberships of the temp item to the final
-          // one. Tabs only receive data they already use: the final item is
-          // not added to a tab that has neither the temp item nor a query
-          // listing it.
+          // one. A tab with neither the temp item nor a query listing it has
+          // nothing to replace: the saved item reaches it through the store's
+          // tab sync.
           const holdsTempItem =
             store.state.items[tempItemKey] != null ||
             Object.values(store.state.queries).some((query) =>
@@ -2324,22 +2326,20 @@ export function createListQueryStore<
             runWithoutBroadcast(() =>
               reconcileOfflineTempItem(tempId, finalPayload, finalData),
             );
-          if (!reconciled) {
-            // Listeners are still told, e.g. a page that only holds the id
-            emitTempItemReconciled(tempId, finalPayload);
-            return;
+          if (reconciled) {
+            unsentCreationItemKeys.delete(tempItemKey);
+            rebindOfflineOverlays([
+              {
+                previousItemKey: tempItemKey,
+                nextItemKey: getItemKey(
+                  // WORKAROUND: Same ValidPayload-to-ItemPayload boundary as above.
+                  __LEGIT_CAST__<ItemPayload, ValidPayload>(finalPayload),
+                ),
+              },
+            ]);
           }
-
-          unsentCreationItemKeys.delete(tempItemKey);
-          rebindOfflineOverlays([
-            {
-              previousItemKey: tempItemKey,
-              nextItemKey: getItemKey(
-                // WORKAROUND: Same ValidPayload-to-ItemPayload boundary as above.
-                __LEGIT_CAST__<ItemPayload, ValidPayload>(finalPayload),
-              ),
-            },
-          ]);
+          // Listeners are told either way, e.g. a page that only holds the id
+          emitTempItemReconciled(tempId, finalPayload);
         },
         captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)
@@ -2655,7 +2655,6 @@ export function createListQueryStore<
 
     deleteItemState(tempPayload);
     addItemToState(finalPayload, finalData, undefined, tempLoadedFields);
-    emitTempItemReconciled(tempId, finalPayloadValue);
 
     if (queryMemberships.length === 0) return true;
 

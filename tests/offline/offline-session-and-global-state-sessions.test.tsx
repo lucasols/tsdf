@@ -570,6 +570,102 @@ test('a global offline view sees the same blocked temp item as the store after r
   globalHook.unmount();
 });
 
+test("a temp id saved in one account is no longer resolved to that account's record after switching accounts", async () => {
+  network.setOffline();
+
+  let currentSessionKey = 'offline-session-temp-id-account-a';
+  const usersQuery = { tableId: 'users' } as const;
+
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    CreateListQueryUserOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'offline-session-temp-id-store',
+      getSessionKey: () => currentSessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => currentSessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: { loaded: { queries: [usersQuery] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: async ({ input }) => {
+                const data = { id: 3, name: input.name };
+                await env.serverTable.delayedSetItem('users||3', data);
+                return data;
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Account A creates Linus while offline, and the creation is saved as
+  // `users||3` once the connection is back
+  await act(async () => {
+    await env.apiStore.performMutation('temp:Linus', {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState(
+          'temp:Linus',
+          { id: -1, name: 'Linus' },
+          { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+        );
+      },
+      mutation: async () => {
+        const data = { id: 3, name: 'Linus' };
+        await env.serverTable.delayedSetItem('users||3', data);
+        return data;
+      },
+      offline: { operation: 'createUser', input: { name: 'Linus' } },
+    });
+  });
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+
+  // Code of account A that still holds the temp id follows it to the saved user
+  expect(
+    env.apiStore.resolveTempItemPayload('temp:Linus'),
+  ).toMatchInlineSnapshot(`"users||3"`);
+
+  // The user switches to account B. The same temp id means nothing there: it
+  // must not lead to a record of account A.
+  currentSessionKey = 'offline-session-temp-id-account-b';
+
+  expect(
+    env.apiStore.resolveTempItemPayload('temp:Linus'),
+  ).toMatchInlineSnapshot(`"temp:Linus"`);
+});
+
 test('offline-enabled mutations run as plain online mutations when no session key is available', async () => {
   network.setOffline();
   // No account is loaded yet, so there is no offline session to queue into.

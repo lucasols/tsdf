@@ -1160,14 +1160,16 @@ export function createCollectionStore<
                   ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the collection store.
                     __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
                   : (currentItem?.data ?? undefined);
-              if (finalData === undefined) return;
-              deleteItemState(tempPayload);
               const finalPayload =
                 // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
                 __LEGIT_CAST__<ItemPayload, ValidPayload>(
                   reconciliation.finalPayload,
                 );
-              addItemToState(finalPayload, finalData);
+              if (finalData !== undefined) {
+                deleteItemState(tempPayload);
+                addItemToState(finalPayload, finalData);
+              }
+              // Listeners are told even when this tab had no item to replace
               storeEvents.emit('tempEntityReconciled', {
                 tempId: tempPayload,
                 finalPayload,
@@ -1702,8 +1704,8 @@ export function createCollectionStore<
     const tempItem = store.state[tempItemKey];
     const finalData = finalDataFromSender ?? tempItem?.data ?? undefined;
 
-    // Tabs only receive data they already use: the final item is not added
-    // to a tab that does not have the temp item.
+    // A tab without the temp item has nothing to replace: the saved item
+    // reaches it through the store's tab sync.
     if (tempItem && finalData !== undefined) {
       runWithoutBroadcast(() => {
         deleteItemState(tempPayload);
