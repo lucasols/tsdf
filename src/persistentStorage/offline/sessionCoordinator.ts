@@ -281,6 +281,13 @@ type SessionRegistration = {
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
     minQueueOrder: number,
   ) => Promise<void>;
+  /**
+   * Called when a creation of another store of the session started or
+   * stopped waiting for a manual resolution, so the store reports again the
+   * resolutions its work is held behind. Only registered by stores with
+   * `cancelledWith` operations.
+   */
+  onCreationResolutionsChanged?: () => void;
   /** Another tab saved or removed (`null`) a queue entry of the store. */
   onRemoteQueueEntryChange?: (
     entryId: string,
@@ -1474,6 +1481,19 @@ class SessionOfflineCoordinator {
     for (const result of await Promise.allSettled(pendingRequeues)) {
       if (result.status === 'rejected') {
         this.#onPersistentStorageError?.(result.reason);
+      }
+    }
+  }
+
+  /**
+   * Lets the other stores of the session report again the resolutions their
+   * work is held behind, after a creation of `sourceStoreName` started or
+   * stopped waiting for a manual resolution.
+   */
+  notifyCreationResolutionsChanged(sourceStoreName: string): void {
+    for (const registration of this.#registrations.values()) {
+      if (registration.storeName !== sourceStoreName) {
+        registration.onCreationResolutionsChanged?.();
       }
     }
   }

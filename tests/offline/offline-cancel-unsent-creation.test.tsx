@@ -1309,6 +1309,8 @@ describe('items of other stores', () => {
     return {
       tasks,
       comments,
+      storeManager,
+      commentsStoreName,
       sentRequests,
       addComment,
       addCommentWithId,
@@ -1796,6 +1798,273 @@ describe('items of other stores', () => {
       `['addCommentWithId comments||c1 "Ask Ana about dates" to tasks||50']`,
     );
     expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  /**
+   * What a sync-problems screen listing the resolutions of every store of
+   * the session (`storeManager.getOfflineResolutions()`) shows for the
+   * comments store.
+   */
+  function getSessionWideCommentResolutions(
+    env: ReturnType<typeof createTasksAndCommentsEnv>,
+  ) {
+    return env.storeManager
+      .getOfflineResolutions()
+      .filter((resolution) => resolution.storeName === env.commentsStoreName)
+      .map((resolution) =>
+        pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+      );
+  }
+
+  test('once the user sends only the failed task creation again, the session-wide list stops showing its held comments as blocked', async () => {
+    const { env, list, failedCreation } =
+      await commentOnTaskWhoseCreationKeepsFailing('held-comments-retry-self');
+
+    // While the creation waits for a decision, the session-wide list shows
+    // the comment and its edit as blocked: nothing can be decided on them.
+    expect(getSessionWideCommentResolutions(env)).toMatchInlineSnapshot(`
+      - { blockedBy: 1, op: 'addCommentWithId' }
+      - { blockedBy: 1, op: 'editComment' }
+    `);
+
+    // The user sends only the task creation again (`scope: 'self'`): the
+    // work held behind it is left for them to decide.
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry', scope: 'self' },
+      );
+    });
+    await flushAllTimers();
+
+    // Only the task was sent. Its resolution is gone, so the comment is not
+    // blocked anymore in the session-wide list either (a screen that only
+    // offers actions for unblocked resolutions would otherwise never let the
+    // user send it), and its edit only waits for the comment.
+    expect(env.tasks.sentRequests.slice(3)).toMatchInlineSnapshot(
+      `['createTaskWithId tasks||50']`,
+    );
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.tasks.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(getSessionWideCommentResolutions(env)).toMatchInlineSnapshot(`
+      - op: 'addCommentWithId'
+      - { blockedBy: 1, op: 'editComment' }
+    `);
+
+    list.unmount();
+  });
+
+  test('once the user creates the conflicted task under another id, the session-wide list stops showing its held comment as blocked', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('held-comment-requeue-new-id');
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'tasks||50',
+    );
+
+    // On reconnect the server already has a task with that id: the creation
+    // reports a conflict, and the comment waits behind it.
+    env.tasks.conflicts.createTaskWithId = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.tasks.conflicts.createTaskWithId = false;
+    const conflict = env.tasks.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the task creation conflict');
+    }
+    expect(getSessionWideCommentResolutions(env)).toMatchInlineSnapshot(
+      `- { blockedBy: 1, op: 'addCommentWithId' }`,
+    );
+
+    // The user creates the task again, with a new id.
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        conflict.id,
+        'createTaskWithId',
+        { action: 'requeue', input: { id: 51, name: 'Plan trip' } },
+      );
+    });
+    await flushAllTimers();
+
+    // The comment targets task 50, which the replacement does not create: it
+    // is not sent, and is left for the user to send or discard. The
+    // session-wide list shows it as no longer waiting for anything.
+    expect(env.tasks.sentRequests).toMatchInlineSnapshot(
+      `['createTaskWithId tasks||51']`,
+    );
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(getSessionWideCommentResolutions(env)).toMatchInlineSnapshot(
+      `- op: 'addCommentWithId'`,
+    );
+  });
+
+  test('a reaction to a comment held behind the failed creation of its task is sent after both once the user sends the task creation again', async () => {
+    type ReactionItem = { emoji: string; commentId: string };
+    type ReactionInput = { id: string; emoji: string; commentId: string };
+    type ReactionsOperations = {
+      addReactionWithId: CollectionOfflineOperationDefinition<
+        { value: ReactionItem },
+        string,
+        ReactionInput,
+        unknown
+      >;
+    };
+
+    network.setOffline();
+    const sessionKey = 'held-reaction-retry';
+    const env = createTasksAndCommentsEnv(sessionKey);
+
+    // A third store of the session: reactions to comments, added with a
+    // client-generated id and declared `cancelledWith` their comment, like
+    // the comments are with their task. Its requests are logged with the
+    // ones of the comments store, to assert the order they are sent in.
+    const reactions = createCollectionStoreTestEnv<
+      ReactionItem,
+      ReactionsOperations
+    >(
+      {},
+      {
+        id: `${sessionKey}-reactions`,
+        getSessionKey: () => sessionKey,
+        storeManager: env.storeManager,
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: rc_object({
+            value: rc_object({ emoji: rc_string, commentId: rc_string }),
+          }),
+          payloadSchema: rc_string,
+          offline: {
+            operations: {
+              addReactionWithId: {
+                inputSchema: rc_object({
+                  id: rc_string,
+                  emoji: rc_string,
+                  commentId: rc_string,
+                }),
+                kind: 'create',
+                getEntityRefs: ({ input }) => [input.id],
+                cancelledWith: ({ input }) => [
+                  {
+                    storeName: env.commentsStoreName,
+                    entityRef: input.commentId,
+                  },
+                ],
+                execute: async ({ input: { id, emoji, commentId } }) => {
+                  env.sentRequests.push(
+                    `addReactionWithId ${id} "${emoji}" to ${commentId}`,
+                  );
+                  await reactions.serverTable.delayedSetItem(id, {
+                    emoji,
+                    commentId,
+                  });
+                },
+                onSuccessExecute: () => {},
+              },
+            },
+          },
+        },
+      },
+    );
+
+    function addReactionWithId({ id, emoji, commentId }: ReactionInput) {
+      return act(async () => {
+        await reactions.apiStore.performMutation(id, {
+          optimisticUpdate: () => {
+            reactions.apiStore.addItemToState(id, {
+              value: { emoji, commentId },
+            });
+          },
+          mutation: () =>
+            reactions.serverTable.delayedSetItem(id, { emoji, commentId }),
+          offline: {
+            operation: 'addReactionWithId',
+            input: { id, emoji, commentId },
+          },
+        });
+      });
+    }
+
+    // Offline: create task 50, comment on it and react to the comment.
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'tasks||50',
+    );
+    await advanceTime(1_000);
+    await addReactionWithId({
+      id: 'reactions||r1',
+      emoji: 'thumbs-up',
+      commentId: 'comments||c1',
+    });
+
+    // Back online, the task creation fails on every attempt (3) until it
+    // asks for a manual decision.
+    env.tasks.faults.createTaskWithId.push(
+      'request-lost',
+      'request-lost',
+      'request-lost',
+    );
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    const failedCreation = env.tasks.apiStore.getOfflineResolutions()[0];
+    if (failedCreation?.operation !== 'createTaskWithId') {
+      throw new Error('Expected the failed task creation');
+    }
+
+    // Nothing is sent for a task the server does not have: the comment waits
+    // for the task, and the reaction for the comment.
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(
+      [
+        ...env.comments.apiStore.getOfflineResolutions(),
+        ...reactions.apiStore.getOfflineResolutions(),
+      ].map((resolution) =>
+        pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+      ),
+    ).toMatchInlineSnapshot(`
+      - { blockedBy: 1, op: 'addCommentWithId' }
+      - { blockedBy: 1, op: 'addReactionWithId' }
+    `);
+
+    // The user asks to send the task creation again.
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // The whole chain follows the decision: the task is created, then its
+    // comment, then the reaction to that comment, and nothing is left for
+    // the user to decide.
+    expect([...env.tasks.sentRequests.slice(3), ...env.sentRequests])
+      .toMatchInlineSnapshot(`
+      - 'createTaskWithId tasks||50'
+      - 'addCommentWithId comments||c1 "Ask Ana about dates" to tasks||50'
+      - 'addReactionWithId reactions||r1 "thumbs-up" to comments||c1'
+    `);
+    expect(reactions.serverTable.getAll()).toMatchInlineSnapshot(
+      `reactions||r1: { commentId: 'comments||c1', emoji: 'thumbs-up' }`,
+    );
+    expect(env.storeManager.getOfflineResolutions()).toMatchInlineSnapshot(
       `[]`,
     );
   });

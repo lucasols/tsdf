@@ -618,6 +618,9 @@ export function createOfflineStoreController<
   let heldReplayLockName: string | null = null;
   let replayLockReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   let nextQueueOrder = 0;
+  // Ids of the resolutions the creations of this store wait for, as last
+  // reported to the session (see `refreshDerivedState`).
+  let publishedCreationResolutionIds = '';
   const replayRetryMaxFailures =
     sessionConfig.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
   const replayRetryIntervalMs =
@@ -1011,6 +1014,7 @@ export function createOfflineStoreController<
     resolutions.clear();
     unknownOperationUploadIds.clear();
     nextQueueOrder = 0;
+    publishedCreationResolutionIds = '';
     hydratedSessionKey = null;
     hydratedPromise = null;
   }
@@ -1269,6 +1273,9 @@ export function createOfflineStoreController<
       findCreationResolutionId,
       onCreationsReleased: hasCancelledWithOperations
         ? requeueWorkHeldBehindExternalCreations
+        : undefined,
+      onCreationResolutionsChanged: hasCancelledWithOperations
+        ? refreshExternalCreationBlockers
         : undefined,
       onRemoteQueueEntryChange: (entryId, entry) => {
         applyRecordChangeFromAnotherTab(() => {
@@ -1773,6 +1780,7 @@ export function createOfflineStoreController<
     // out of the entities so that hooks reading them do not re-render when a
     // creation starts being sent.
     const attemptedCreationEntityKeys = new Set<string>();
+    let creationResolutionIds = '';
 
     function createEntityBase(
       ref: OfflineEntityRef,
@@ -1858,6 +1866,12 @@ export function createOfflineStoreController<
       const operationKind = getOperationLifecycleKind(resolution.operation);
       const clientIdCreatedEntityKeys =
         getClientIdCreatedEntityKeys(resolution);
+      if (
+        clientIdCreatedEntityKeys.length > 0 ||
+        getTempLifecycleEntityKeys(resolution).length > 0
+      ) {
+        creationResolutionIds += `${resolution.id}\n`;
+      }
       for (const ref of resolution.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
         const childResolutionIds =
@@ -1970,6 +1984,16 @@ export function createOfflineStoreController<
 
     // The tab that made the change already persisted the derived entities
     if (!isRemoteChange) void syncEntityNamespace(sessionState, entities);
+
+    // The other stores report which of these resolutions their work declared
+    // `cancelledWith` an entity of this store is held behind (see
+    // `getExternalCreationResolutionIds`): they report it again when a
+    // creation of this store starts or stops waiting for one, whatever
+    // changed it (a decision, a replay, another tab, the hydration).
+    if (creationResolutionIds !== publishedCreationResolutionIds) {
+      publishedCreationResolutionIds = creationResolutionIds;
+      sessionState.session.notifyCreationResolutionsChanged(storeName);
+    }
   }
 
   async function syncEntityNamespace(
@@ -3078,12 +3102,29 @@ export function createOfflineStoreController<
     }
     if (releasedWork.size === 0) return;
 
-    await requeueResolutions(
-      current,
-      [...releasedWork.values()],
-      undefined,
-      minQueueOrder,
-    );
+    const requeuedWork = [...releasedWork.values()];
+    await requeueResolutions(current, requeuedWork, undefined, minQueueOrder);
+    // The work other stores held behind the creations queued again follows
+    // them in turn (e.g. the reactions to a comment held behind its task).
+    await notifyCreationsReleased(current, requeuedWork);
+  }
+
+  /**
+   * The creations of another store that wait for a manual resolution
+   * changed: reports again which of them the resolutions of this store are
+   * held behind (see `getExternalCreationResolutionIds`).
+   */
+  function refreshExternalCreationBlockers(): void {
+    const current = activeSession;
+    if (
+      !current ||
+      hydratedSessionKey !== current.sessionKey ||
+      resolutions.size === 0
+    ) {
+      return;
+    }
+
+    refreshDerivedState(current);
   }
 
   /**
