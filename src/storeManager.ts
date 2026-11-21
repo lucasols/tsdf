@@ -136,6 +136,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * right after awaiting it. It resolves to `Result.err(...)` when
    * there is no active session key or `offlineSession.network` is not
    * configured.
+   *
+   * A failed storage write is not reported in the result: like every other
+   * persistence write it goes to `onPersistentStorageError` and the call
+   * still resolves to `Result.ok`. In that case the change applies in the
+   * open tabs but does not survive a reload.
    */
   setForcedOfflineMode: (forced: boolean) => Promise<ResultType<void, Error>>;
   /** Returns the latest aggregated offline status for this manager. */
