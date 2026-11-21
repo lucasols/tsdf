@@ -166,7 +166,24 @@ If the session should pause for that service instead, make `check` cover it (ans
 
 While a check is in flight, every failure and recovery tick that needs an answer waits for that same call: a burst of requests failing right when the backend goes down costs one health request. Failures that arrive while the session is already in offline mode do not run the check at all — the active mode explains them, and asking "are we back?" is the job of the recovery checks.
 
-A finished answer is never reused. A cached `'up'` could hide an outage that started right after it, so the next failure after a check has settled starts a new one. The check is never called on the success path.
+By default a finished answer is not reused. A cached `'up'` could hide an outage that started right after it, so the next failure after a check has settled starts a new one. The check is never called on the success path.
+
+When the check is expensive, an endpoint that keeps failing while the backend is up costs one check per failure, which adds load right when the backend is degraded. `healthCheck.reuseUpForFailuresMs` lets the following failures of the same tab reuse an `'up'` answer for that long:
+
+```ts
+healthCheck: {
+  check: checkApiHealth,
+  // A failure answered "up" explains the next failures for 30s
+  reuseUpForFailuresMs: 30_000,
+},
+```
+
+Inside the window a failure is left to its request without asking the check, so an outage that starts inside it is only noticed by the first failure after it ends. Until then its failures get the handling of [a failure that belongs to the request](#up-means-the-failure-belongs-to-the-request): a direct mutation fails with its own error instead of being queued, and a queued mutation being replayed goes through `classifyRetryableFailure` and the `replayRetry` budget, and can end in a `retry-exhausted` resolution instead of staying queued until the backend recovers. Keep the window short. The reuse never decides recovery:
+
+- only an `'up'` answer to a failure classification starts the window, and only failure classification reads it. Recovery checks always run the check, and their answers are not reused;
+- the window ends early when the session enters an offline mode, for any reason, including the browser going offline or another tab entering one.
+
+A failure that arrives while a check is in flight still waits for that call rather than reusing an older answer.
 
 ### With `classifyFailure` and `recoveryCheck`
 
