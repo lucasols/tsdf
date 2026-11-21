@@ -376,6 +376,15 @@ Behavior:
   `tempEntity` / `tempEntities` operation) and the server has not confirmed it
   yet, so it is still tracked under its temporary payload. Creations queued
   without a temp entity (e.g. with a client-generated id) report `false`
+- `creationAttempted` - Only `true` for an unsent creation whose create
+  request is being sent, failed without telling whether the server got it, or
+  waits for a manual resolution: the server may already have the item. While
+  it is `false` the creation is still waiting in the queue, and deleting the
+  item only discards local work. The server never saw the item, except when the
+  creation was queued after its direct online request failed, or sent again
+  with `requeue` after a conflict: an earlier request may have created a
+  server item, which the temporary payload can't target, so the delete leaves
+  it as is
 
 ### Items created offline
 
@@ -388,21 +397,24 @@ an edit made right after creating it) with `isUnsentCreation: false`.
 function onDeleteClick(itemPayload: UserPayload) {
   const offlineState = store.getItemOfflineState(itemPayload);
 
-  // A creation that was not sent yet only exists locally, so deleting it
+  // The server never saw a creation that was not attempted, so deleting it
   // only discards local work: no need to ask before deleting for everyone.
-  const isLocalOnly =
-    offlineState?.isUnsentCreation && offlineState.syncState === 'pending';
+  const onlyExistsLocally =
+    offlineState?.isUnsentCreation && !offlineState.creationAttempted;
 
-  if (isLocalOnly || confirmDeleteForEveryone()) {
+  if (onlyExistsLocally || confirmDeleteForEveryone()) {
     deleteUser(itemPayload);
   }
 }
 ```
 
 `isUnsentCreation` stays `true` while the creation itself is being sent, until
-the server result is reconciled. The server may already have the item while
-`syncState` is `'syncing'` or `'needs-confirmation'`, which is why the example
-also checks for `'pending'`.
+the server result is reconciled; `creationAttempted` is `true` during that
+time. The check only covers temp-entity creations: an item created with a
+client-generated id reports `isUnsentCreation: false` even when its delete only
+discards local work, so the app can't tell it apart from a server item. See
+[Offline - Deleting entities created offline](./offline.md#deleting-entities-created-offline)
+for what a delete does in each case.
 
 ## useMultipleItems
 

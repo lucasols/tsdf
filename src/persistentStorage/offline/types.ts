@@ -521,6 +521,24 @@ export type ItemOfflineState = {
    * payload reports any mutation still queued with `isUnsentCreation: false`.
    */
   isUnsentCreation: boolean;
+  /**
+   * Whether the creation of an unsent creation left the "never sent" state:
+   * it is being sent, failed with an unknown outcome, or waits for a manual
+   * resolution, so the server may have the item. A creation only held behind
+   * the creation of another entity that waits for a resolution was never
+   * sent, so it stays `false`. While `isUnsentCreation` is
+   * `true` and this is `false`, the item only exists locally: deleting it
+   * with an operation that cancels pending creations (see
+   * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}) sends
+   * nothing, unless one operation created it together with other entities
+   * (see that option). A creation queued after its direct online request
+   * failed, or sent again with `requeue` after a conflict, also reports
+   * `false`: an earlier request may have created a server item, but the
+   * temporary payload can't target it, so the delete still only discards
+   * local work and that server item is left as is. Always `false` for items
+   * that are not unsent creations.
+   */
+  creationAttempted: boolean;
 };
 
 /** Aggregated offline status for a tracked document/item/query entity. */
@@ -888,6 +906,10 @@ export type OfflineRetryExhaustedResolutionAction =
       /**
        * Controls whether retrying a resolution should also requeue retryable
        * descendants from the same temp-lifecycle dependency chain.
+       *
+       * With `'self'`, the descendants stay as resolutions to decide one by
+       * one: they no longer count as work held behind the creation, so later
+       * mutations of their entities don't merge into or cancel them.
        * @default 'self-and-descendants'
        */
       scope?: 'self' | 'self-and-descendants';
@@ -1048,6 +1070,10 @@ export type OfflineAccumulationConfig<TInput> = {
  * `same-entity` only applies to operations that resolve exactly one entity ref.
  * When enabled, the new operation may remove earlier unattempted pending entries
  * targeting that same single entity before the new entry is persisted.
+ *
+ * Entries that were already sent (being sent, or failed with an unknown
+ * outcome) are never pruned, because the server may have applied them: the
+ * new operation is queued behind them instead.
  */
 export type OfflineSupersedeConfig = {
   /** Drop earlier unattempted pending entries for the same single entity. */
@@ -1061,10 +1087,56 @@ export type OfflineSupersedeConfig = {
    */
   operations?: 'self' | readonly string[];
   /**
-   * When the pruned entries include a temp-entity lifecycle, drop the current
-   * operation itself instead of persisting a replacement entry.
+   * Cancels the offline creation of the entity instead of queueing this
+   * operation. Meant for delete operations: deleting something that was
+   * created offline and never sent should not send anything.
+   *
+   * When the pruned entries include the creation of the entity, never sent
+   * (a `tempEntity` / `tempEntities` operation, or a `create` of an item
+   * whose id the app generated on the client), its whole lifecycle is
+   * cancelled and no request is made:
+   *
+   * - the creation, the queued operations targeting the entity and this
+   *   operation itself are dropped
+   * - queued operations that depend on the entity are dropped too, with
+   *   everything queued under them: the ones of this store that declare it in
+   *   `dependsOn`, and the ones of other stores that declare it in
+   *   `cancelledWith`
+   * - the temp entities and the client-id items of the dropped creations are
+   *   removed from the store
+   *
+   * A creation held behind the creation of another entity that waits for a
+   * manual resolution was never sent either, and is cancelled the same way.
+   *
+   * A creation that was already sent is not cancelled, since the server may
+   * have the entity (this includes a `create` of a client-generated id queued
+   * after its direct online request failed, or sent again with `requeue`
+   * after a conflict): this operation is queued behind it and replays with
+   * the final entity ref once the creation is confirmed. Its `execute` should
+   * treat a not-found answer as success (catch the error and return). The
+   * same applies to a `tempEntities` creation of several entities, which is
+   * never cancelled: the other entities still need it.
    */
   dropSelfIfTempLifecycleCancelled?: boolean;
+};
+
+/**
+ * Reference to an entity of another store, returned by the `cancelledWith`
+ * hook of collection and list-query offline operations.
+ *
+ * @typeParam TEntityRef - Payload identifying the entity in its own store.
+ */
+export type OfflineExternalEntityRef<
+  TEntityRef extends ValidPayload = ValidPayload,
+> = {
+  /** `id` of the store that owns the entity. */
+  storeName: string;
+  /**
+   * Payload of the entity in that store. For an entity created offline this
+   * is the temporary payload, or the client-generated one, its create
+   * operation returns in `getEntityRefs`.
+   */
+  entityRef: TEntityRef;
 };
 
 /** Shared context passed to offline replay lifecycle hooks. */
@@ -1615,6 +1687,9 @@ export type AnyOfflineOperationDefinition<
   dependsOnUploads?: (
     ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
   ) => string[];
+  cancelledWith?: (
+    ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
+  ) => OfflineExternalEntityRef[];
 };
 
 /**
@@ -1851,6 +1926,24 @@ export type CollectionOfflineOperationDefinition<
    * record that declares it leaves the queue.
    */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
+  /**
+   * Declares the entities of OTHER stores this operation belongs to (for
+   * example the task a queued comment was written on).
+   *
+   * When the offline creation of one of them will never reach the server (it
+   * was cancelled before being sent, see
+   * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}, or its
+   * manual resolution was discarded), this operation is dropped as well,
+   * together with everything queued under it, and its own temp entities are
+   * removed from the store.
+   *
+   * This only drives that cleanup: it does not delay the replay of this
+   * operation nor rewrite its input when the other entity gets its final
+   * ref. Entities of the same store are declared with `dependsOn`.
+   */
+  cancelledWith?: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => OfflineExternalEntityRef[];
 } & ([ItemState | ItemPayloadUnused] extends [never] ? never : unknown);
 
 /**
@@ -1974,6 +2067,24 @@ export type ListQueryOfflineOperationDefinition<
    * record that declares it leaves the queue.
    */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
+  /**
+   * Declares the entities of OTHER stores this operation belongs to (for
+   * example the task a queued comment was written on).
+   *
+   * When the offline creation of one of them will never reach the server (it
+   * was cancelled before being sent, see
+   * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}, or its
+   * manual resolution was discarded), this operation is dropped as well,
+   * together with everything queued under it, and its own temp entities are
+   * removed from the store.
+   *
+   * This only drives that cleanup: it does not delay the replay of this
+   * operation nor rewrite its input when the other entity gets its final
+   * ref. Entities of the same store are declared with `dependsOn`.
+   */
+  cancelledWith?: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => OfflineExternalEntityRef[];
 } & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
     ? never
     : unknown);

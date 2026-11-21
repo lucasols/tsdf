@@ -30,7 +30,8 @@ export type OfflineMutationResult<T> =
 
 export type PreparedOfflineMutation = {
   initialAction: 'run' | 'queue';
-  queueMutation: () => Promise<void>;
+  /** `afterDirectAttempt`: the direct request failed, so it may have been applied */
+  queueMutation: (afterDirectAttempt: boolean) => Promise<void>;
   classifyError: (error: unknown) => Promise<boolean>;
   handleDirectSuccess: () => Promise<void>;
 };
@@ -64,7 +65,7 @@ export async function runHybridOfflineMutation<
   const prepared = await controller.prepareForMutation({ offline, upload });
 
   if (prepared.initialAction === 'queue') {
-    await prepared.queueMutation();
+    await prepared.queueMutation(false);
     return { kind: 'queued' };
   }
 
@@ -78,7 +79,7 @@ export async function runHybridOfflineMutation<
       throw error;
     }
 
-    await prepared.queueMutation();
+    await prepared.queueMutation(true);
     return { kind: 'queued' };
   }
 }

@@ -94,6 +94,8 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
    */
   storeNames: string[];
   entities: InternalGlobalOfflineEntity[];
+  /** Missing in snapshots sent by tabs running an older version. */
+  attemptedCreationEntityIds?: string[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
   /** The stores of `storeNames` that still have mutations in their queue. */
@@ -194,6 +196,7 @@ type SessionReplayHead = {
 type SessionStoreContribution = {
   adapter: StorageAdapter;
   entities: InternalGlobalOfflineEntity[];
+  attemptedCreationEntityIds: string[];
   resolutions: OfflineResolutionRecord[];
   referencedUploadIds: string[];
   protectedKeys: string[];
@@ -202,7 +205,7 @@ type SessionStoreContribution = {
 
 type SessionStoreItems = Pick<
   SessionStoreContribution,
-  'entities' | 'resolutions'
+  'entities' | 'attemptedCreationEntityIds' | 'resolutions'
 > & {
   /** Whether the store still has mutations in its queue. */
   hasQueuedMutations: boolean;
@@ -212,6 +215,18 @@ type SessionRegistration = {
   storeName: string;
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
+  /**
+   * Called when another store of the session cancelled or discarded entities
+   * created offline that will never exist on the server. `cancelledEntityKeys`
+   * holds their keys in the source store, and `getEntityKey` keys an entity
+   * payload of that store the same way.
+   * Only registered by stores with `cancelledWith` operations.
+   */
+  onTempEntitiesCancelled?: (
+    sourceStoreName: string,
+    cancelledEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
+  ) => Promise<void>;
   /** Another tab saved or removed (`null`) a queue entry of the store. */
   onRemoteQueueEntryChange?: (
     entryId: string,
@@ -281,6 +296,11 @@ const offlineRecoveryListeners = new Set<OfflineRecoveryListener>();
 type SessionStoreState = {
   status: GlobalOfflineStatus;
   entities: InternalGlobalOfflineEntity[];
+  /**
+   * Ids of the temp entities whose creation was already sent or waits for a
+   * manual resolution (see `ItemOfflineState.creationAttempted`).
+   */
+  attemptedCreationEntityIds: string[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
   /**
@@ -931,6 +951,7 @@ class SessionOfflineCoordinator {
             bootstrapStatusFromLocalStorage: shouldBootstrapFromStorage,
           }),
         entities: [],
+        attemptedCreationEntityIds: [],
         resolutions: [],
         uploads: [],
         hasQueuedMutations: false,
@@ -1269,6 +1290,44 @@ class SessionOfflineCoordinator {
     this.#refreshAggregates(!isRemoteChange);
     if (replayHeadChanged) {
       this.#notifyGreenCycle();
+    }
+  }
+
+  /**
+   * Lets the other stores of the session drop the queued work they declared
+   * as `cancelledWith` entities of `sourceStoreName` that will never exist on
+   * the server.
+   */
+  async notifyTempEntitiesCancelled(
+    sourceStoreName: string,
+    cancelledEntityKeys: ReadonlySet<string>,
+    getEntityKey: (entityRef: ValidPayload) => string | undefined,
+  ): Promise<void> {
+    const pendingCleanups: Promise<void>[] = [];
+
+    for (const registration of this.#registrations.values()) {
+      if (
+        registration.storeName === sourceStoreName ||
+        !registration.onTempEntitiesCancelled
+      ) {
+        continue;
+      }
+
+      pendingCleanups.push(
+        registration.onTempEntitiesCancelled(
+          sourceStoreName,
+          cancelledEntityKeys,
+          getEntityKey,
+        ),
+      );
+    }
+
+    // The source store already applied the cancellation: a store that fails
+    // to clean up its work is reported without failing it.
+    for (const result of await Promise.allSettled(pendingCleanups)) {
+      if (result.status === 'rejected') {
+        this.#onPersistentStorageError?.(result.reason);
+      }
     }
   }
 
@@ -2867,22 +2926,28 @@ class SessionOfflineCoordinator {
    */
   #buildItemLists(): SessionStoreItems {
     const allEntities: InternalGlobalOfflineEntity[] = [];
+    const attemptedCreationEntityIds: string[] = [];
     const allResolutions: OfflineResolutionRecord[] = [];
     let hasQueuedMutations = false;
     for (const contribution of this.#storeContributions.values()) {
       if (contribution.replayHead !== null) hasQueuedMutations = true;
       allEntities.push(...contribution.entities);
+      attemptedCreationEntityIds.push(
+        ...contribution.attemptedCreationEntityIds,
+      );
       allResolutions.push(...contribution.resolutions);
     }
     for (const [storeName, items] of this.#remoteStoreItems) {
       if (this.#storeContributions.has(storeName)) continue;
       if (items.hasQueuedMutations) hasQueuedMutations = true;
       allEntities.push(...items.entities);
+      attemptedCreationEntityIds.push(...items.attemptedCreationEntityIds);
       allResolutions.push(...items.resolutions);
     }
 
     return {
       entities: dedupeById(allEntities),
+      attemptedCreationEntityIds,
       resolutions: dedupeById(allResolutions),
       hasQueuedMutations,
     };
@@ -2900,8 +2965,12 @@ class SessionOfflineCoordinator {
       existing.push(...contribution.protectedKeys);
       nextProtectedKeysByAdapter.set(contribution.adapter, existing);
     }
-    const { entities, resolutions, hasQueuedMutations } =
-      this.#buildItemLists();
+    const {
+      entities,
+      attemptedCreationEntityIds,
+      resolutions,
+      hasQueuedMutations,
+    } = this.#buildItemLists();
     for (const [adapter, keys] of nextProtectedKeysByAdapter) {
       nextProtectedKeysByAdapter.set(adapter, [...new Set(keys)].sort());
     }
@@ -3025,7 +3094,7 @@ class SessionOfflineCoordinator {
     }
 
     this.store.setPartialState(
-      { entities, resolutions, hasQueuedMutations },
+      { entities, attemptedCreationEntityIds, resolutions, hasQueuedMutations },
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
@@ -3097,6 +3166,9 @@ class SessionOfflineCoordinator {
       status,
       storeNames: [...this.#storeContributions.keys()],
       entities: contributions.flatMap((contribution) => contribution.entities),
+      attemptedCreationEntityIds: contributions.flatMap(
+        (contribution) => contribution.attemptedCreationEntityIds,
+      ),
       resolutions: contributions.flatMap(
         (contribution) => contribution.resolutions,
       ),
@@ -3110,11 +3182,20 @@ class SessionOfflineCoordinator {
   #applyRemoteSnapshot(message: SessionSnapshotMessage): void {
     // Each tab only reports its own stores, so their items always apply,
     // while the session-wide status and uploads follow the newest snapshot.
+    const attemptedCreationEntityIds = message.attemptedCreationEntityIds;
     for (const storeName of message.storeNames) {
+      const entities = message.entities.filter(
+        (entity) => entity.storeName === storeName,
+      );
       this.#remoteStoreItems.set(storeName, {
-        entities: message.entities.filter(
-          (entity) => entity.storeName === storeName,
-        ),
+        entities,
+        attemptedCreationEntityIds: attemptedCreationEntityIds
+          ? entities
+              .filter((entity) =>
+                attemptedCreationEntityIds.includes(entity.id),
+              )
+              .map((entity) => entity.id)
+          : [],
         resolutions: message.resolutions.filter(
           (resolution) => resolution.storeName === storeName,
         ),
@@ -3896,6 +3977,7 @@ export function useOfflineStoreItemState(
         ? null
         : toItemOfflineState(
             getOfflineStoreEntityLookup(state.entities, storeName).get(itemKey),
+            state.attemptedCreationEntityIds,
           ),
     [itemKey, storeName],
   );
