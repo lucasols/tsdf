@@ -67,6 +67,21 @@ import {
   type TSFDUseListQueryReturn,
 } from './types';
 
+/**
+ * Whether the cached query has rows after `items` that offline `loadMore` can
+ * append. A cached list missing some of its rows can't: its next rows may come
+ * after a missing row.
+ */
+function canLoadMoreFromCachedQuery(
+  items: readonly string[],
+  cachedQuery: { items: readonly string[]; wasLoaded: boolean } | undefined,
+): boolean {
+  return (
+    cachedQuery?.wasLoaded === true &&
+    isStrictItemKeyPrefix(items, cachedQuery.items)
+  );
+}
+
 export type UseMultipleListQueriesOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -566,7 +581,10 @@ export function useMultipleListQueries<
       if (!isOfflineMode && !stickyDerived) {
         const groupQueries = Object.values(state.queries)
           .filter(
-            (query) => derivedQueries.getQueryGroup(query.payload) === groupKey,
+            // A query that never loaded has no rows to vouch for the group.
+            (query) =>
+              query.wasLoaded &&
+              derivedQueries.getQueryGroup(query.payload) === groupKey,
           )
           .map((query) => ({
             payload: query.payload,
@@ -927,11 +945,10 @@ export function useMultipleListQueries<
                 })),
             error,
             hasMore: isOfflineMode
-              ? !!readFallbackQueryState &&
-                effectiveQuery.query.hasMore &&
-                isStrictItemKeyPrefix(
+              ? effectiveQuery.query.hasMore &&
+                canLoadMoreFromCachedQuery(
                   effectiveQuery.query.items,
-                  readFallbackQueryState(queryKey)?.items ?? [],
+                  readFallbackQueryState?.(queryKey),
                 )
               : effectiveQuery.query.hasMore,
             isDerived: effectiveQuery.isDerived,
@@ -995,7 +1012,9 @@ export function useMultipleListQueries<
         ) {
           const fallbackQuery = readFallbackQueryState(queryConfig.key);
 
-          if (fallbackQuery && readFallbackItemState) {
+          // A persisted query missing some of its rows is not restored as
+          // loaded, so it cannot stand in as a `success` either.
+          if (fallbackQuery?.wasLoaded && readFallbackItemState) {
             const visibleItemKeys = getVisibleQueryItemKeys(
               result.queryKey,
               fallbackQuery.items,

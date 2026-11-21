@@ -461,7 +461,8 @@ export type DerivedQueriesConfig<
   getItemGroup: (item: ItemState, itemPayload: ItemPayload) => string;
   /**
    * Returns whether the local data for the query group is complete enough to
-   * derive from while online.
+   * derive from while online. `context.queries` lists the group's queries in
+   * state that have loaded at least once.
    */
   isComplete: (
     queryPayload: QueryPayload,
