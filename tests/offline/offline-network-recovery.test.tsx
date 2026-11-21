@@ -1,3 +1,4 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
@@ -11,8 +12,19 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  HEALTH_CHECK_DURATION_MS,
+  createHealthCheckMock,
+  createOfflineUsersEnv,
+  healthRecoveryProbe,
+  trackOfflineSession,
+} from './offlineHealthCheckTestShared';
 import { userRowSchema } from './offlineReplayTestShared';
-import { docSchema, listQueryQueryPayloadSchema } from './offlineTestShared';
+import {
+  docSchema,
+  getGlobalOfflineStatusSummary,
+  listQueryQueryPayloadSchema,
+} from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
 
@@ -193,7 +205,12 @@ test('network classifications are ignored when network mode is disabled', async 
     storeManager: createStoreManager({
       errorNormalizer: normalizeError,
       getSessionKey: () => sessionKey,
-      offlineSession: { classifyFailure },
+      offlineSession: {
+        classifyFailure,
+        // Failures are only classified while some mode is enabled, so outage
+        // mode keeps the classifier consulted while network mode stays off.
+        outage: { enabled: true, recoveryCheck: () => true },
+      },
     }),
     persistentStorage: {
       adapter: 'local-sync',
@@ -206,6 +223,8 @@ test('network classifications are ignored when network mode is disabled', async 
   env.apiStore.scheduleFetch('highPriority');
   await advanceTime(25);
 
+  // The failure was classified as `network`, which is not enabled: the
+  // session stays online.
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
@@ -734,6 +753,239 @@ test('a document that failed to load offline loads by itself when the session co
   `);
 
   hook.unmount();
+});
+
+// A real recovery check is a request, so it takes a while. A fetch attempted
+// meanwhile re-reads the connectivity and re-arms the recovery probe; when the
+// in-flight check then settled it armed a second timer without cancelling
+// that one, leaving two probe loops running (and one more per repetition).
+test('fetches attempted while a recovery check is in flight do not multiply the recovery checks', async () => {
+  const sessionKey = 'classified-network-single-probe-loop-session';
+  const RECOVERY_CHECK_DURATION_MS = 100;
+  const recoveryCheckStartedAt: number[] = [];
+  // The backend stays unreachable during the whole test.
+  const recoveryCheck = vi.fn(async () => {
+    recoveryCheckStartedAt.push(Date.now() - TEST_INITIAL_TIME);
+    await sleep(RECOVERY_CHECK_DURATION_MS);
+    return false;
+  });
+  const env = createOfflineUsersEnv(sessionKey, {
+    classifyFailure: () => 'network' as const,
+    network: {
+      ...network.config,
+      recoveryCheck,
+      // One recovery check per second.
+      recoveryProbe: healthRecoveryProbe,
+    },
+  });
+
+  // -- Enter classified network mode through a failed fetch (at 10ms) --
+  env.serverTable.setNextFetchError('users||1', 'failed to fetch');
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await advanceTime(50);
+
+  // -- The 1st recovery check starts at 1010ms and is in flight --
+  await advanceTime(1_000);
+  expect(recoveryCheck).toHaveBeenCalledTimes(1);
+
+  // -- The user opens two other items while that check is in flight --
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await advanceTime(20);
+  env.scheduleItemFetch('highPriority', 'users||3');
+  await advanceTime(RECOVERY_CHECK_DURATION_MS);
+
+  // -- Five more seconds in network mode --
+  await advanceTime(5 * (1_000 + RECOVERY_CHECK_DURATION_MS));
+
+  // Still a single loop: each check starts one interval after the previous
+  // one settled.
+  expect(recoveryCheckStartedAt).toMatchInlineSnapshot(
+    `[1010, 2110, 3210, 4310, 5410, 6510]`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// `offlineSession.healthCheck` answering "unreachable": the browser still
+// reports online (captive wifi, VPN down, DNS failure...) but the backend
+// cannot be reached from this device.
+// ---------------------------------------------------------------------------
+
+const userItemIds = ['users||1', 'users||2', 'users||3'];
+
+test('a burst of requests failing while the backend is unreachable costs one health check, enters network mode and recovers through the same check', async () => {
+  const sessionKey = 'health-check-unreachable-session';
+  const health = createHealthCheckMock();
+  const env = createOfflineUsersEnv(sessionKey, {
+    healthCheck: { check: health.check },
+    // No `network.recoveryCheck`: the health check is the recovery check.
+    network: { ...network.config, recoveryProbe: healthRecoveryProbe },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  // -- The backend becomes unreachable while three items are loading --
+  health.setBackend('unreachable');
+  for (const itemId of userItemIds) {
+    env.serverTable.setNextFetchError(itemId, 'failed to fetch');
+    env.scheduleItemFetch('highPriority', itemId);
+  }
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  // Three failures shared one health request, which put the session in
+  // network mode even though the browser still reports online.
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(network.isOnline()).toBe(true);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'health-check-unreachable-session'
+  `);
+  expect(
+    userItemIds.map((itemId) => env.getItemQueryState(itemId)?.error?.message),
+  ).toMatchInlineSnapshot(`['Offline', 'Offline', 'Offline']`);
+
+  // -- A new fetch while in network mode --
+  const requestsBeforeOfflineFetch = env.serverTable.getRequestHistory('all', {
+    includeTime: false,
+  }).length;
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await advanceTime(50);
+
+  // The browser reporting online does not end the mode by itself: the fetch
+  // is answered as offline without a request and without a health check.
+  expect(
+    env.serverTable.getRequestHistory('all', { includeTime: false }).length,
+  ).toBe(requestsBeforeOfflineFetch);
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(true);
+
+  // -- 1st recovery check: still unreachable --
+  session.log.addMark('1st recovery check: still unreachable');
+  await advanceTime(
+    healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+  );
+
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(true);
+
+  // -- 2nd recovery check: the backend is reachable again --
+  session.log.addMark('2nd recovery check: reachable again');
+  health.setBackend('up');
+  await advanceTime(
+    healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+  );
+
+  expect(health.check).toHaveBeenCalledTimes(3);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'health-check-unreachable-session'
+  `);
+
+  // Back online the checks stop.
+  await advanceTime(10 * healthRecoveryProbe.initialIntervalMs);
+  expect(health.check).toHaveBeenCalledTimes(3);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+    -> at: 110ms ⋅ session: offline (network) ⋅ healthChecks: 1
+
+    >>> 1st recovery check: still unreachable
+
+    -> at: 1210ms ⋅ session: offline (network) ⋅ healthChecks: 2
+
+    >>> 2nd recovery check: reachable again
+
+    -> at: 2310ms ⋅ session: online ⋅ healthChecks: 3
+    "
+  `);
+
+  session.unmount();
+});
+
+test('recovery answers of the health check move the session between network and outage mode until it answers "up"', async () => {
+  const sessionKey = 'health-check-mode-switch-session';
+  const health = createHealthCheckMock();
+  const env = createOfflineUsersEnv(sessionKey, {
+    healthCheck: { check: health.check },
+    network: { ...network.config, recoveryProbe: healthRecoveryProbe },
+    outage: { enabled: true, recoveryProbe: healthRecoveryProbe },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  async function waitForNextRecoveryCheck() {
+    await advanceTime(
+      healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+    );
+  }
+
+  // -- A fetch fails while the backend is unreachable --
+  health.setBackend('unreachable');
+  env.serverTable.setNextFetchError('users||1', 'failed to fetch');
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  // -- The device reaches the backend again, but the backend is down --
+  session.log.addMark('recovery check answers "outage"');
+  health.setBackend('outage');
+  await waitForNextRecoveryCheck();
+
+  // The network problem is over and an outage took its place.
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-mode-switch-session'
+  `);
+
+  // -- The backend cannot be reached anymore --
+  session.log.addMark('recovery check answers "unreachable"');
+  health.setBackend('unreachable');
+  await waitForNextRecoveryCheck();
+
+  // Network mode is back. Nothing can be said about the outage while the
+  // backend is unreachable, so it is kept.
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-mode-switch-session'
+  `);
+
+  // -- Everything is healthy again --
+  session.log.addMark('recovery check answers "up"');
+  health.setBackend('up');
+  await waitForNextRecoveryCheck();
+
+  // One "up" answer ends both causes: no second check is needed for the
+  // outage.
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '✅' }
+    sessionKey: 'health-check-mode-switch-session'
+  `);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+    -> at: 110ms ⋅ session: offline (network) ⋅ healthChecks: 1
+
+    >>> recovery check answers "outage"
+
+    -> at: 1210ms ⋅ session: offline (outage) ⋅ healthChecks: 2
+
+    >>> recovery check answers "unreachable"
+
+    -> at: 2310ms ⋅ session: offline (network + outage) ⋅ healthChecks: 3
+
+    >>> recovery check answers "up"
+
+    -> at: 3410ms ⋅ session: online ⋅ healthChecks: 4
+    "
+  `);
+
+  session.unmount();
 });
 
 test('a store of a manager without offline support revalidates when another manager of the same session recovers', async () => {

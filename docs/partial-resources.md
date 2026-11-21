@@ -196,4 +196,6 @@ It is the only availability signal for snapshots without `itemLoadedFields` meta
 
 Because it can vouch for any snapshot, `inferFields` must only report fields whose data is genuinely usable — inspect the item, don't return `'*'` unconditionally unless every snapshot your store can ever hold is complete. Staleness is not its concern: fields awaiting an invalidation refetch are excluded by TSDF before `inferFields` is consulted.
 
+Offline temp entities are metadata-free too, and they cannot be fetched before their mutation is replayed: a hook that requests a field `inferFields` does not vouch for stays in `loading`. An `inferFields` that lists the fields present in the snapshot never returns `'*'`, so it cannot satisfy `fields: '*'` hooks. Declare the loaded fields of the pending entity in the offline operation instead (`tempEntity.loadedFields`, or `loadedFields` in each `tempEntities` entry) — see [Temp Entities in List Queries](./offline.md#temp-entities-in-list-queries).
+
 TSDF does not infer fields by checking object keys internally. If your field names are top-level properties, implement that rule explicitly in `inferFields` (excluding keys with `undefined` values); if your fields are logical or nested, return those logical field names instead.

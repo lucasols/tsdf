@@ -1055,7 +1055,9 @@ export function createFetchApi<
     if (!persistence) return 'skipped';
 
     const hydratedQuery = persistence.readHydratedQuery(queryKey);
-    if (!hydratedQuery) return 'skipped';
+    // A cached list missing some of its rows can't continue the loaded one:
+    // its next rows may come after a missing row.
+    if (!hydratedQuery?.wasLoaded) return 'skipped';
     if (!isStrictItemKeyPrefix(queryState.items, hydratedQuery.items)) {
       return 'skipped';
     }
@@ -1220,7 +1222,9 @@ export function createFetchApi<
     if (isOfflineStoreError(query?.error)) {
       const hydratedQuery = persistence?.readHydratedQuery(queryKey);
 
-      if (hydratedQuery) {
+      // A persisted query missing some of its rows is not a loaded query, so
+      // the offline error is returned instead of an incomplete list.
+      if (hydratedQuery?.wasLoaded) {
         query = hydratedQuery;
         store.produceState(
           (draft) => {

@@ -315,6 +315,49 @@ describe('indexeddb async storage efficiency: list-query', () => {
     );
   });
 
+  test('a store whose custom maxQueryBytes was removed from its config clears the persisted limit on its next save', async () => {
+    const cachedQuery = { tableId: 'cached' };
+    const fetchedQuery = { tableId: 'fetched' };
+    const storeName = 'lq-query-policy-reset';
+    const sessionKey = 'sess1';
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+
+    // An earlier version of the app persisted the store with a custom limit.
+    listQueryScope.listQuery.seedQuery(cachedQuery, []);
+    listQueryScope.listQuery.setQueryStaticPolicy({ b: 5000 });
+
+    // The current version uses the default limit.
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      serverData: { fetched: [{ id: 1, name: 'Fetched' }] },
+    });
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Saving a fetched query also saves the store's current limit: none. The
+    // cleanup at the next app start would otherwise keep enforcing the old one.
+    env.scheduleFetch('highPriority', fetchedQuery);
+    await settleIndexedDbStorage();
+    await advanceTime(1100);
+    await settleIndexedDbStorage();
+
+    expect(
+      (await listQueryScope.listQuery.listStoredQueryKeys()).sort(),
+    ).toMatchInlineSnapshot(`['{tableId:"cached"}', '{tableId:"fetched"}']`);
+    expect(
+      await readListQueryNamespacePolicyRow({
+        kind: 'listQuery.query',
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`
+      p: null
+      s: 'sess1'
+    `);
+  });
+
   test('when maxQueries limit is reached the flush trims queries inline', async () => {
     const firstQuery = { tableId: 'first' };
     const secondQuery = { tableId: 'second' };

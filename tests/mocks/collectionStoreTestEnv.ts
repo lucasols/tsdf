@@ -59,7 +59,9 @@ type TestCollectionOfflineOperationsRegistry<
   D extends Record<string, unknown>,
 > = Record<
   string,
-  AnyOfflineOperationDefinition & {
+  // Mirrors the store constraint: `any` as the upload ref keeps operations
+  // typed with a specific upload ref assignable.
+  AnyOfflineOperationDefinition<__LEGIT_ANY__> & {
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
     }) => CollectionOfflineEntityRef<string>[];

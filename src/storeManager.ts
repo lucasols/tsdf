@@ -1,4 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   Result,
   type Result as ResultType,
@@ -32,8 +31,13 @@ import {
   defaultOfflineRuntimeConfig,
   OfflineResolutionActionError,
 } from './persistentStorage/offline/types';
+import {
+  idleUploadFile,
+  missingUploadFile,
+} from './persistentStorage/offlineUploadsShared';
 import type {
   OfflineUpload,
+  OfflineUploadFile,
   ReplaceOfflineUploadArgs,
   SaveOfflineUploadArgs,
 } from './persistentStorage/offlineUploadTypes';
@@ -156,13 +160,34 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   ) => Promise<ResultType<void, OfflineResolutionActionError>>;
   /** Returns the latest session-scoped offline uploads for this manager. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
-  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  /**
+   * Resolves a staged upload id to its latest final ref, uploading first if
+   * needed. An upload deleted after it was sent keeps resolving to its ref for
+   * the rest of the app session, in every tab open when it was deleted.
+   *
+   * When the `upload` transport fails, the result is `Result.err` with the
+   * transport error and the upload becomes `failed` with `lastError` set. The
+   * session failure classifiers are not consulted and nothing is retried
+   * automatically: call it again to run the upload again.
+   */
   resolveOfflineUpload: (id: string) => Promise<ResultType<TUploadRef, Error>>;
-  /** Resolves multiple staged upload ids to their latest final refs. */
+  /**
+   * Resolves multiple staged upload ids to their latest final refs.
+   *
+   * Fails as a whole with the first transport error, following the same rules
+   * as `resolveOfflineUpload`. Uploads that already succeeded stay `uploaded`
+   * and are not sent again by a later call.
+   */
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<ResultType<Record<string, TUploadRef>, Error>>;
-  /** Saves a session-scoped upload locally for later dependency resolution. */
+  /**
+   * Saves a session-scoped upload locally for later dependency resolution. It
+   * is deleted automatically once the queued work that depends on it leaves
+   * the queue. Only stores created in the tab count as depending on it, so
+   * create the stores that share an upload id before their queued work
+   * replays.
+   */
   saveOfflineUpload: (
     args: SaveOfflineUploadArgs,
   ) => Promise<ResultType<void, Error>>;
@@ -172,7 +197,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   ) => Promise<ResultType<void, Error>>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
-  /** Deletes a stored upload when it is no longer referenced. */
+  /**
+   * Deletes a stored upload that no queued work references. Only needed for
+   * uploads no queued mutation used: the others are deleted with the work that
+   * depends on them.
+   */
   deleteOfflineUpload: (id: string) => Promise<ResultType<void, Error>>;
   /** React hook subscribing to the manager's aggregated offline status. */
   useOfflineStatus: () => GlobalOfflineStatus;
@@ -182,6 +211,20 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** React hook subscribing to the manager's aggregated offline uploads. */
   useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /**
+   * React hook that reads the file of a staged upload while it is staged, to
+   * render local files (e.g. thumbnails of optimistic entities) by upload id.
+   *
+   * The returned `url` is an object URL managed by TSDF: components using the
+   * same id share one read and one URL, and the URL is revoked shortly after
+   * the last of them stops using it or as soon as the upload is replaced,
+   * deleted or leaves the session. Pass a falsy id to disable the hook (status
+   * `idle`), e.g. once the entity holds the uploaded server ref instead of the
+   * staged upload id.
+   */
+  useOfflineUploadFile: (
+    id: string | false | null | undefined,
+  ) => OfflineUploadFile;
 };
 
 /** Shared coordinator passed to every TSDF store instance in an app/session. */
@@ -213,6 +256,28 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
    */
   onTransportReconnect: () => void;
 } & StoreManagerOfflineApi<TUploadRef>;
+
+/**
+ * Upload ref type of a store manager, as inferred from the `upload` transport
+ * in its `offlineSession.uploads` config.
+ *
+ * Pass it as the last type argument of `DefineDocumentOfflineOperations`,
+ * `DefineCollectionOfflineOperations` or `DefineListQueryOfflineOperations` so
+ * `execute` reads typed refs from `ctx.uploads.resolvedRefsById`.
+ *
+ * @example
+ * ```ts
+ * type UploadRef = StoreManagerUploadRef<typeof storeManager>;
+ *
+ * type Operations = DefineDocumentOfflineOperations<
+ *   UserDoc,
+ *   { setAvatar: DefineOfflineOperation<{ avatarUploadId: string }> },
+ *   UploadRef
+ * >;
+ * ```
+ */
+export type StoreManagerUploadRef<TStoreManager extends StoreManager> =
+  TStoreManager extends StoreManager<infer TUploadRef> ? TUploadRef : never;
 
 type RegisteredStore = {
   id: string;
@@ -329,6 +394,7 @@ function createDisabledStoreManagerOfflineApi<
     useOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
     useOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
     useOfflineUploads: () => emptyUploads,
+    useOfflineUploadFile: (id) => (id ? missingUploadFile : idleUploadFile),
   };
 }
 
@@ -545,6 +611,8 @@ export function createStoreManager<
         useOfflineResolutions: () =>
           resolvedOfflineSession.useOfflineResolutions(),
         useOfflineUploads: () => resolvedOfflineSession.useOfflineUploads(),
+        useOfflineUploadFile: (id) =>
+          resolvedOfflineSession.useOfflineUploadFile(id),
       }
     : createDisabledStoreManagerOfflineApi<TUploadRef>(options.getSessionKey);
 
@@ -706,20 +774,12 @@ export function getOrCreateStoreManagerBrowserTabsPresence(
   return { priority: presence.priority, tabId: presence.tabId };
 }
 
-export function resolveStoreManagerOfflineSession<
-  TUploadRef extends ValidPayload = ValidPayload,
->(
-  storeManager: StoreManager<TUploadRef>,
+export function resolveStoreManagerOfflineSession(
+  storeManager: StoreManager,
   storeName: string,
   usesOfflineStorage: boolean,
-): OfflineSession<TUploadRef> | null {
-  // WORKAROUND: The manager registry stores sessions behind a shared
-  // non-generic weak map, and this rebind restores the caller's known upload-ref
-  // type when reading its own session back out.
-  const offlineSession = __LEGIT_CAST__<
-    OfflineSession<TUploadRef> | undefined,
-    OfflineSession | undefined
-  >(storeManagerOfflineSessionRegistry.get(storeManager));
+): OfflineSession | null {
+  const offlineSession = storeManagerOfflineSessionRegistry.get(storeManager);
   if (!usesOfflineStorage) return null;
 
   if (!offlineSession) {

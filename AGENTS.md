@@ -17,6 +17,8 @@ TSDF (TypeScript Data Fetching) is a data fetching library built on top of `t-st
 - Do not add runtime validation solely to protect untyped JavaScript consumers unless the user explicitly asks for it or the runtime check protects persisted data / network data / other truly unsafe inputs
 - When a type-level contract is sufficient for intended consumers, prefer the simpler type-only enforcement over duplicating the same rule at runtime
 - This library don't support server-side rendering (SSR), so dont introduce isomorphic code like useIsomorphicLayoutEffect.
+- Apps are expected to reload tabs running an old deploy; keeping old and new deploys working together is the app's concern, not the library's. For version skew between tabs (e.g. persisted offline work of an operation the running deploy doesn't define), the library only prevents permanent data loss and unrecoverable bugs: never delete or corrupt work a deploy can't run, but don't add ordering, pausing or other coordination between deploys.
+- Persisted offline queue and resolution record formats must stay readable by older TSDF versions, because a deploy deletes records it can't parse: only add optional fields, and don't add new literal values (e.g. a new resolution `kind`) unless older parsers already accept them.
 
 ## Development Commands
 

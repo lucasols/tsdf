@@ -1,6 +1,21 @@
 import type { ValidPayload } from '../utils/storeShared';
+import type { StandardSchemaLike } from './types';
 
-/** Lifecycle state for a session-scoped offline upload. */
+/**
+ * Lifecycle state for a session-scoped offline upload.
+ *
+ * - `pending`: staged and waiting to be uploaded. An upload whose transport
+ *   failed during replay with a failure TSDF retries on its own (session went
+ *   offline, or the failure was classified as retryable) goes back to
+ *   `pending` with `lastError` set.
+ * - `uploading`: the `upload` transport is running.
+ * - `uploaded`: the transport returned the final ref (`resolvedRef`).
+ * - `failed`: the last transport attempt failed and TSDF will not retry on
+ *   its own: the dependent operation was moved to manual resolution, or the
+ *   upload was started through `resolveOfflineUpload(s)`. A failed upload is
+ *   not blocked: it is uploaded again when a dependent operation is replayed
+ *   (resolution `retry`) or `resolveOfflineUpload(s)` is called again.
+ */
 export type OfflineUploadState =
   | 'pending'
   | 'uploading'
@@ -48,6 +63,62 @@ export type ReplaceOfflineUploadArgs = {
   metadata?: ValidPayload;
 };
 
+/**
+ * File of a staged upload, as returned by
+ * `storeManager.useOfflineUploadFile(id)`.
+ *
+ * `url` is an object URL managed by TSDF: it is created once per staged file
+ * while at least one component uses the id, shared by every component using
+ * that id, and revoked shortly after the last one stops using it or as soon
+ * as the upload is replaced, deleted or leaves the session. Render it directly
+ * (e.g. `<img src={url}>`), never revoke it, and do not keep it outside of
+ * render: always use the latest value returned by the hook.
+ *
+ * Narrow on `status`:
+ *
+ * - `idle`: the hook was called with a falsy id.
+ * - `loading`: the staged file is being read. Files the session already holds
+ *   skip this state and are returned on the first render.
+ * - `success`: the file is staged; `url` and `file` are available.
+ * - `missing`: no upload with this id is staged in the active session (never
+ *   staged, deleted, expired, or already consumed by its mutation).
+ * - `error`: reading the staged file from the upload adapter failed.
+ */
+export type OfflineUploadFile =
+  | {
+      /** Current read status of the staged file. */
+      status: 'idle' | 'loading' | 'missing';
+      /** Managed object URL of the staged file, only set on `success`. */
+      url: null;
+      /** Staged file, only set on `success`. */
+      file: null;
+      /** Read failure, only set on `error`. */
+      error: null;
+    }
+  | {
+      /** The file is staged and ready to render. */
+      status: 'success';
+      /** Managed object URL of the staged file. Do not revoke it. */
+      url: string;
+      /**
+       * Staged file, for reading its contents. Use `url` to render it instead
+       * of creating another object URL from this file.
+       */
+      file: File;
+      /** Read failure, only set on `error`. */
+      error: null;
+    }
+  | {
+      /** Reading the staged file from the upload adapter failed. */
+      status: 'error';
+      /** Managed object URL of the staged file, only set on `success`. */
+      url: null;
+      /** Staged file, only set on `success`. */
+      file: null;
+      /** Failure reported by the upload adapter. */
+      error: Error;
+    };
+
 /** Public metadata for a file staged for offline mutation replay. */
 export type OfflineUpload<TResolvedRef extends ValidPayload = ValidPayload> = {
   /** Stable upload id used by offline operation inputs. */
@@ -68,11 +139,17 @@ export type OfflineUpload<TResolvedRef extends ValidPayload = ValidPayload> = {
   createdAt: number;
   /** Epoch timestamp for the latest upload metadata change. */
   updatedAt: number;
-  /** Final server-side reference after upload completes. */
+  /**
+   * Final server-side reference after upload completes, as returned by the
+   * session `upload` transport.
+   */
   resolvedRef?: TResolvedRef;
   /** Latest upload progress snapshot. */
   progress?: OfflineUploadProgress;
-  /** Last upload failure message, when any. */
+  /**
+   * Message of the latest failed upload attempt. It stays set while the upload
+   * is retried and is cleared once the upload succeeds.
+   */
   lastError?: { message: string };
   /**
    * App-defined metadata saved with the upload through `saveOfflineUpload` /
@@ -147,14 +224,63 @@ export type OfflineUploadTransportContext = {
   onProgress: (progress: OfflineUploadProgress) => void;
 };
 
+/**
+ * Schema accepted by `offlineSession.uploads.resolvedRefSchema`.
+ *
+ * Takes the same schemas as an operation `inputSchema`: a `runcheck` type or a
+ * Standard Schema v1 (zod, valibot, ...). It is typed only by what the schema
+ * outputs, which keeps a store manager with a typed upload ref assignable to
+ * the default `StoreManager`.
+ */
+export type OfflineUploadRefSchema<
+  TResolvedRef extends ValidPayload = ValidPayload,
+> =
+  | StandardSchemaLike<TResolvedRef>
+  | {
+      /** `runcheck` schemas are matched through their `parse` method. */
+      parse: (
+        input: unknown,
+      ) => { ok: true; value: TResolvedRef } | { ok: false; errors: string[] };
+    };
+
 /** Upload handling config for an offline session. */
 export type OfflineSessionUploadsConfig<
   TResolvedRef extends ValidPayload = ValidPayload,
 > = {
   /** Adapter used to persist staged files until replay can upload them. */
   adapter: OfflineUploadAdapter;
-  /** Upload transport that returns the final server-side file reference. */
+  /**
+   * Upload transport that returns the final server-side file reference.
+   *
+   * Its return type is the upload ref type of the whole session:
+   * `createStoreManager` infers it, so `resolveOfflineUpload(s)` and the
+   * `OfflineUpload` entries of that manager are typed with it.
+   *
+   * Reject (throw) to report a failure. When the upload runs as a dependency
+   * of a replayed operation, the thrown error goes through the session's
+   * `classifyFailure` / `classifyRetryableFailure` hooks with `ctx.uploadId`
+   * set, exactly like a failed `execute`: classify connection problems as
+   * `'network'` / `'outage'` (or as retryable) so they are retried, and leave
+   * permanent ones (file too large, type not accepted) unclassified so the
+   * operation goes to manual resolution. Throw errors those hooks can tell
+   * apart.
+   */
   upload: (ctx: OfflineUploadTransportContext) => Promise<TResolvedRef>;
+  /**
+   * Schema for the ref returned by `upload`.
+   *
+   * Refs returned by `upload` are trusted, but a ref can also come back from
+   * the upload adapter after a reload or from another browser tab, possibly
+   * written by a different app version. When this schema is set, those refs
+   * are parsed once when they enter the session. A ref that fails is dropped
+   * and its upload goes back to `pending`, so the still-staged file is uploaded
+   * again the next time the ref is needed instead of a malformed ref reaching
+   * `execute`, `resolveOfflineUpload(s)`, or the upload status APIs.
+   *
+   * Without a schema, restored refs are exposed as they were stored. Async
+   * Standard Schemas are not supported: every restored ref fails them.
+   */
+  resolvedRefSchema?: OfflineUploadRefSchema<TResolvedRef>;
   /** Maximum number of concurrent upload transports. */
   concurrency?: number;
 };
@@ -170,6 +296,10 @@ export type OfflineOperationUploadsContext<
 > = {
   /** Locally staged files by upload id. */
   filesById: Record<string, File>;
-  /** Final uploaded refs by upload id. */
+  /**
+   * Final uploaded refs by upload id, for the ids returned by
+   * `dependsOnUploads`. Typed with the upload ref type of the operation
+   * definition.
+   */
   resolvedRefsById: Record<string, TResolvedRef>;
 };

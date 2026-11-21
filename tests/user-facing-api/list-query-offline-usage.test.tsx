@@ -93,6 +93,36 @@ const validListQueryTempEntity: NonNullable<
 
 void validListQueryTempEntity;
 
+// A temp entity can declare the queries that show it while it is queued, and
+// its loaded fields, as plain values...
+const validListQueryTempEntityWithQueries: NonNullable<
+  DirectListQueryOfflineOperations['createUser']['tempEntity']
+> = {
+  ...validListQueryTempEntity,
+  addToQueries: { queries: { tableId: 'users' }, appendTo: 'end' },
+  loadedFields: '*',
+};
+
+void validListQueryTempEntityWithQueries;
+
+// ...or derive the queries from the mutation input and the temp payload.
+const validListQueryTempEntityWithInputQueries: NonNullable<
+  DirectListQueryOfflineOperations['createUser']['tempEntity']
+> = {
+  ...validListQueryTempEntity,
+  addToQueries: (input, tempId) =>
+    input.name === ''
+      ? undefined
+      : {
+          queries: (_query, data) => data.items.length > 0,
+          appendTo: (itemsPayload) =>
+            typeof tempId === 'string' ? 0 : itemsPayload.length,
+        },
+  loadedFields: ['id', 'name'],
+};
+
+void validListQueryTempEntityWithInputQueries;
+
 const invalidListQueryPendingTempEntity: NonNullable<
   DirectListQueryOfflineOperations['createUser']['tempEntity']
 > = {

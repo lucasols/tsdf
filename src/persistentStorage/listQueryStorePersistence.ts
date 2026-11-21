@@ -136,6 +136,7 @@ type ManagedQueryEntry = {
   hasMore: boolean;
   items: string[];
   lastAccessAt: number;
+  missingItems: boolean;
   offlineProtected: boolean;
   payload: unknown;
   queryKey: string;
@@ -196,6 +197,21 @@ function toItemState<
     },
     loadedFields,
   };
+}
+
+/**
+ * Whether the rows left of a persisted list are its first rows, so only its
+ * end is missing (e.g. cut by the byte budget). Like `maxQuerySize`
+ * truncation, such a list is still a loaded list that has more pages.
+ */
+function isOnlyTailMissing(
+  remainingItemKeys: readonly string[],
+  persistedItemKeys: readonly string[],
+): boolean {
+  return (
+    remainingItemKeys.length > 0 &&
+    isStrictItemKeyPrefix(remainingItemKeys, persistedItemKeys)
+  );
 }
 
 function limitPersistedQueryItems(
@@ -600,6 +616,10 @@ export function setupListQueryPersistence<
   const querySizeBytesByKey = new Map<string, number>();
   const hydratedPersistedItemKeys = new Set<string>();
   const hydratedPersistedQueryKeys = new Set<string>();
+  // Persisted queries restored without some of the rows they list (see
+  // `createRestoredQueryState`). Their stored entry is the only record that
+  // rows are missing, so flushes keep it as is until the query is loaded again.
+  const incompleteRestoredQueryKeys = new Set<string>();
   // Remembers in-state entries that lost their persistence slot to the byte
   // budget, keyed by entry key. Without this memory a budget-evicted entry
   // would re-enter the next flush as if it were freshly accessed (it has no
@@ -623,9 +643,7 @@ export function setupListQueryPersistence<
   const pendingLocalQueryReconciliationSessions = new Set<string>();
 
   function isOfflineNetworkActive(): boolean {
-    return isOfflineNetworkModeActiveSync(
-      config.offline?.session.getConfig().network,
-    );
+    return isOfflineNetworkModeActiveSync(config.offline?.session.getConfig());
   }
 
   function clearSaveTimer(): void {
@@ -734,6 +752,7 @@ export function setupListQueryPersistence<
       items: entry.items,
       hasMore: entry.hasMore,
       lastAccessAt: entry.lastAccessAt,
+      missingItems: entry.missingItems === true,
       offlineProtected: entry.offlineProtected,
       rawValue: rawEntry,
       sizeBytes,
@@ -881,6 +900,7 @@ export function setupListQueryPersistence<
         payload: data.payload,
         items: data.items,
         hasMore: data.hasMore,
+        missingItems: data.missingItems,
         version,
       }),
     );
@@ -1034,6 +1054,7 @@ export function setupListQueryPersistence<
           payload: entry.payload,
           items: entry.items,
           hasMore: entry.hasMore,
+          missingItems: entry.missingItems,
           version,
         }),
       );
@@ -1367,6 +1388,7 @@ export function setupListQueryPersistence<
 
   function forgetPersistedQuery(queryKey: string): void {
     hydratedPersistedQueryKeys.delete(queryKey);
+    incompleteRestoredQueryKeys.delete(queryKey);
     querySnapshotByKey.delete(queryKey);
     querySizeBytesByKey.delete(queryKey);
     knownPersistedQueryKeys?.delete(queryKey);
@@ -1617,16 +1639,31 @@ export function setupListQueryPersistence<
     return snapshot ? parseHydratedQuerySnapshot(snapshot) : undefined;
   }
 
-  function filterRetainableHydratedSuffix(
+  /**
+   * Returns the cached rows that can follow a refreshed first page. Stops at
+   * the first row that can't be restored: keeping the rows after it would
+   * save a list with a hole that is later restored as a complete one. The
+   * query still has more pages, so the rows left out are loaded again.
+   */
+  function getRetainableHydratedSuffix(
+    previousPersistedQuery: ParsedPersistedListQueryData<QueryPayload>,
     suffixItemKeys: readonly string[],
   ): string[] {
-    return suffixItemKeys.filter((itemKey) => {
+    // Rows were already dropped from this list: where they were is unknown.
+    if (previousPersistedQuery.missingItems) return [];
+
+    const retainable: string[] = [];
+    for (const itemKey of suffixItemKeys) {
       const hydratedItem = readHydratedItem(itemKey);
-      return (
-        hydratedItem?.item != null &&
-        !shouldIgnoreItem(hydratedItem.itemQuery.payload)
-      );
-    });
+      if (
+        hydratedItem?.item == null ||
+        shouldIgnoreItem(hydratedItem.itemQuery.payload)
+      ) {
+        break;
+      }
+      retainable.push(itemKey);
+    }
+    return retainable;
   }
 
   async function hydrateMissingAsyncItems(itemKeys: readonly string[]) {
@@ -1703,7 +1740,12 @@ export function setupListQueryPersistence<
     }
 
     const persistedQuery = parsePersistedListQueryData(
-      { payload: entry.payload, items: entry.items, hasMore: entry.hasMore },
+      {
+        payload: entry.payload,
+        items: entry.items,
+        hasMore: entry.hasMore,
+        missingItems: entry.missingItems,
+      },
       config.queryPayloadSchema,
     );
     if (!persistedQuery) {
@@ -1725,23 +1767,48 @@ export function setupListQueryPersistence<
         payload: persistedQuery.payload,
         items: persistedQuery.items,
         hasMore: persistedQuery.hasMore,
+        ...(persistedQuery.missingItems ? { missingItems: true } : {}),
       },
       getSerializedStringSize(rawEntry),
     );
     return persistedQuery;
   }
 
-  function buildHydratedQueryState(
+  /**
+   * Builds the state of a query restored from storage. A persisted query
+   * lists the rows it had when it was saved. When some of them can no longer
+   * be restored (evicted by the byte budget, discarded on read, ...), the rows
+   * that are left are still restored. If only the end of the list is missing,
+   * it is restored as loaded with more pages, like `maxQuerySize` truncation.
+   * Otherwise (a gap before a row that is left, or no row left) the query is
+   * not restored as loaded: it would be reported as a complete `success` with
+   * a list missing rows. A query that was not loaded is reported as `loading`
+   * and always fetched, and fails with the offline error while offline.
+   */
+  function createRestoredQueryState(
+    queryKey: string,
     persistedQuery: ParsedPersistedListQueryData<QueryPayload>,
+    restoredItemKeys: string[],
   ): TSFDListQuery<QueryPayload> {
-    const filteredItemKeys = persistedQuery.items.filter((itemKey) => {
-      return readHydratedItem(itemKey) !== undefined;
-    });
+    const hasAllRows =
+      !persistedQuery.missingItems &&
+      restoredItemKeys.length === persistedQuery.items.length;
+    const isTailMissing =
+      !hasAllRows &&
+      !persistedQuery.missingItems &&
+      isOnlyTailMissing(restoredItemKeys, persistedQuery.items);
+    const wasLoaded = hasAllRows || isTailMissing;
     const limitedQuery = limitPersistedQueryItems(
-      filteredItemKeys,
-      persistedQuery.hasMore,
+      restoredItemKeys,
+      persistedQuery.hasMore || isTailMissing,
       maxQuerySize,
     );
+
+    // Only a load of the query (or forgetting it) clears the record: storage
+    // can be re-read with every row back (e.g. the hook fallback after a
+    // missing row is saved by another query) while the query in state is
+    // still not loaded, and its stored entry must survive until it loads.
+    if (!wasLoaded) incompleteRestoredQueryKeys.add(queryKey);
 
     return {
       error: null,
@@ -1749,9 +1816,22 @@ export function setupListQueryPersistence<
       items: limitedQuery.itemKeys,
       payload: persistedQuery.payload,
       refetchOnMount: 'lowPriority',
-      status: 'success',
-      wasLoaded: true,
+      status: wasLoaded ? 'success' : 'loading',
+      wasLoaded,
     };
+  }
+
+  function buildHydratedQueryState(
+    queryKey: string,
+    persistedQuery: ParsedPersistedListQueryData<QueryPayload>,
+  ): TSFDListQuery<QueryPayload> {
+    return createRestoredQueryState(
+      queryKey,
+      persistedQuery,
+      persistedQuery.items.filter((itemKey) => {
+        return readHydratedItem(itemKey) !== undefined;
+      }),
+    );
   }
 
   function createInitialState(baseState: State): State {
@@ -1785,7 +1865,9 @@ export function setupListQueryPersistence<
     queryKey: string,
   ): TSFDListQuery<QueryPayload> | undefined {
     const persistedQuery = readPersistedQueryData(queryKey);
-    return persistedQuery ? buildHydratedQueryState(persistedQuery) : undefined;
+    return persistedQuery
+      ? buildHydratedQueryState(queryKey, persistedQuery)
+      : undefined;
   }
 
   function resolveAsyncPreloadedItem(
@@ -1962,21 +2044,10 @@ export function setupListQueryPersistence<
           activeStore.state.itemQueries[itemKey] !== undefined
         );
       });
-      const limitedQuery = limitPersistedQueryItems(
-        filteredItemKeys,
-        persistedQuery.hasMore,
-        maxQuerySize,
+      materializeHydratedQueryState(
+        queryKey,
+        createRestoredQueryState(queryKey, persistedQuery, filteredItemKeys),
       );
-
-      materializeHydratedQueryState(queryKey, {
-        error: null,
-        hasMore: limitedQuery.hasMore,
-        items: limitedQuery.itemKeys,
-        payload: persistedQuery.payload,
-        refetchOnMount: 'lowPriority',
-        status: 'success',
-        wasLoaded: true,
-      });
 
       return true;
     }
@@ -2017,26 +2088,16 @@ export function setupListQueryPersistence<
             activeStore.state.itemQueries[itemKey] !== undefined
           );
         });
-        const limitedQuery = limitPersistedQueryItems(
-          filteredItemKeys,
-          persistedQuery.hasMore,
-          maxQuerySize,
-        );
-
         suppressedPersistedStateFlushes++;
         activeStore.setState({
           ...activeStore.state,
           queries: {
             ...activeStore.state.queries,
-            [queryKey]: {
-              error: null,
-              hasMore: limitedQuery.hasMore,
-              items: limitedQuery.itemKeys,
-              payload: persistedQuery.payload,
-              refetchOnMount: 'lowPriority',
-              status: 'success',
-              wasLoaded: true,
-            },
+            [queryKey]: createRestoredQueryState(
+              queryKey,
+              persistedQuery,
+              filteredItemKeys,
+            ),
           },
         });
 
@@ -2795,9 +2856,16 @@ export function setupListQueryPersistence<
         const filteredItems = queryData.items.filter((itemKey) =>
           keptItemKeys.has(itemKey),
         );
+        const hasMissingRows = filteredItems.length < queryData.items.length;
+        // Only the end of the list was cut: it stays a loaded list with more
+        // pages, like `maxQuerySize` truncation.
+        const isTailMissing =
+          hasMissingRows &&
+          !queryData.missingItems &&
+          isOnlyTailMissing(filteredItems, queryData.items);
         const limitedQuery = limitPersistedQueryItems(
           filteredItems,
-          queryData.hasMore,
+          queryData.hasMore || isTailMissing,
           maxQuerySize,
         );
 
@@ -2812,6 +2880,11 @@ export function setupListQueryPersistence<
           payload: queryData.payload,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
+          // A row before the rows that are left is gone: the entry records
+          // it, so the query is not restored as a loaded one.
+          ...(queryData.missingItems || (hasMissingRows && !isTailMissing)
+            ? { missingItems: true }
+            : {}),
         };
         let saved = true;
         if (idleContext === undefined) {
@@ -2826,7 +2899,17 @@ export function setupListQueryPersistence<
         } else {
           saved = false;
         }
-        if (!saved) staleQueryFound = true;
+        if (!saved) {
+          staleQueryFound = true;
+        } else if (querySnapshotByKey.has(queryData.queryKey)) {
+          // Keep the remembered entry in sync with the rewrite: a later save
+          // of the same rows as before the eviction must not be skipped as
+          // unchanged.
+          querySnapshotByKey.set(
+            queryData.queryKey,
+            JSON.stringify(nextQueryData),
+          );
+        }
       }
 
       if (staleQueryFound) {
@@ -3067,7 +3150,21 @@ export function setupListQueryPersistence<
       }
 
       for (const [queryKey, query] of queryEntries) {
-        if (query.status !== 'success' && !query.wasLoaded) continue;
+        if (query.status !== 'success' && !query.wasLoaded) {
+          if (incompleteRestoredQueryKeys.has(queryKey)) {
+            // Keep the stored entry (and the rows it still has) untouched
+            // until the query is loaded again.
+            nextQueryKeys.add(queryKey);
+            for (const itemKey of query.items) {
+              persistedQueryItemKeys.add(itemKey);
+            }
+          }
+          continue;
+        }
+        // A loaded query is complete again and is persisted as usual.
+        if (incompleteRestoredQueryKeys.size > 0) {
+          incompleteRestoredQueryKeys.delete(queryKey);
+        }
 
         const filteredItems = query.items.filter((itemKey) => {
           const hasItemInState = Object.hasOwn(state.items, itemKey);
@@ -3104,7 +3201,10 @@ export function setupListQueryPersistence<
               filteredItems.length,
             );
             await hydrateMissingAsyncItems(suffixItemKeys);
-            const cachedSuffix = filterRetainableHydratedSuffix(suffixItemKeys);
+            const cachedSuffix = getRetainableHydratedSuffix(
+              previousPersistedQuery,
+              suffixItemKeys,
+            );
             queryItemsToPersist = [...filteredItems, ...cachedSuffix];
           }
         }
@@ -3394,6 +3494,10 @@ export function setupListQueryPersistence<
 
     for (const [queryKey, query] of queryEntries) {
       if (query.status !== 'success' && !query.wasLoaded) continue;
+      // A loaded query is complete again and is persisted as usual.
+      if (incompleteRestoredQueryKeys.size > 0) {
+        incompleteRestoredQueryKeys.delete(queryKey);
+      }
 
       const filteredItems = query.items.filter((itemKey) => {
         const hasItemInState = Object.hasOwn(state.items, itemKey);
@@ -3426,7 +3530,10 @@ export function setupListQueryPersistence<
             filteredItems.length,
           );
           await hydrateMissingAsyncItems(suffixItemKeys);
-          const cachedSuffix = filterRetainableHydratedSuffix(suffixItemKeys);
+          const cachedSuffix = getRetainableHydratedSuffix(
+            previousPersistedQuery,
+            suffixItemKeys,
+          );
           queryItemsToPersist = [...filteredItems, ...cachedSuffix];
         }
       }
@@ -3452,6 +3559,9 @@ export function setupListQueryPersistence<
     for (const queryKey of previousKnownLocalQueryKeys) {
       if (finalQueryDataByKey.has(queryKey)) continue;
       if (!hydratedPersistedQueryKeys.has(queryKey)) continue;
+      // Keep the stored entry of a query restored without some of its rows
+      // untouched until the query is loaded again.
+      if (incompleteRestoredQueryKeys.has(queryKey)) continue;
       finalPersistedQueryKeys.delete(queryKey);
     }
 
@@ -3983,6 +4093,7 @@ export function setupListQueryPersistence<
     pendingQueryPreloads.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    incompleteRestoredQueryKeys.clear();
     syncHydrationItemMissCache.clearAll();
     syncHydrationQueryMissCache.clearAll();
     knownPersistedItemKeys = null;
@@ -4025,6 +4136,7 @@ export function setupListQueryPersistence<
     budgetEvictedQueryRecency.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    incompleteRestoredQueryKeys.clear();
     syncHydrationItemMissCache.clearAll();
     syncHydrationQueryMissCache.clearAll();
     await Promise.all([itemNamespace.clear(), clearLocalStorageQueries()]);

@@ -15,6 +15,7 @@ import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   deleteItemInputSchema,
+  getLocalStorageKeys,
   type UpdateValueOperations,
   userPatchSchema,
 } from './offlineReplayTestShared';
@@ -958,6 +959,140 @@ test('an offline creation that keeps its client-generated id shows the server va
     2.22s | "  Ada  " | 🔴 [users||client-1] >fetch-started
     3.02s | "  Ada  " | 🔴 [users||client-1] <fetch-finished (value: {"name":"Ada"})
     .     | "Ada"     | [user] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('discarding a failed offline creation with a client-generated id removes the collection item', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-discard-client-id-collection-session';
+  const storeName = 'offline-discard-client-id-collection-store';
+
+  type CreateWithClientIdOperations = {
+    createUser: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+  };
+
+  // The app generates the item id on the client, so the creation needs no
+  // temp entity. The server rejects it on every replay attempt.
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    CreateWithClientIdOperations
+  >(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: userPatchSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('creation rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  env.addTimelineComments('beforeNextAction', ['offline: create Linus']);
+  await act(async () => {
+    await env.apiStore.performMutation('users||3', {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState('users||3', { value: { name: 'Linus' } });
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'createUser',
+        input: { itemId: 'users||3', name: 'Linus' },
+      },
+    });
+  });
+
+  // The user opens the detail screen of Linus.
+  const hook = renderHook(() => {
+    const linus = env.apiStore.useItem('users||3');
+
+    env.trackItemUI('linus', linus.data?.value.name ?? `- ${linus.status}`);
+  });
+  await flushAllTimers();
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects the creation until it needs a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(15_000);
+  await flushAllTimers();
+
+  const [createResolution] = env.apiStore.getOfflineResolutions();
+  if (!createResolution) {
+    throw new Error('Expected the creation to wait for a resolution');
+  }
+
+  // Discarding the creation removes Linus, like the rollback of a temp
+  // entity. He is not fetched: the server never got him.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the creation: Linus is removed',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      createResolution.id,
+      'createUser',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  // The never-saved item is not readable as loaded data anymore, and its
+  // persisted cache entry is gone, so a reload does not restore it.
+  expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
+  expect(
+    getLocalStorageKeys().filter((key) =>
+      key.startsWith(`tsdf.${sessionKey}.${storeName}.ci.`),
+    ),
+  ).toMatchInlineSnapshot(
+    `- 'tsdf.offline-discard-client-id-collection-session.offline-discard-client-id-collection-store.ci."users||1'`,
+  );
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | linus     |
+    0      | -         | -- offline: create Linus
+    .      | -         | offline:createUser queued
+    .      | Linus     | ui-initialized
+    1.01s  | Linus     | -- back online: the server rejects the creation until it needs a resolution
+    .      | Linus     | offline:createUser replay-started
+    6.01s  | Linus     | offline:createUser replay-started
+    11.01s | Linus     | offline:createUser replay-started
+    .      | Linus     | offline:createUser resolution-required
+    16.01s | Linus     | -- discard the creation: Linus is removed
+    .      | - deleted | ui-changed
     "
   `);
 

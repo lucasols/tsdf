@@ -1,0 +1,1549 @@
+import { renderHook } from '@testing-library/react';
+import { act } from 'react';
+import { rc_object, rc_string } from 'runcheck';
+import { describe, expect, test } from 'vitest';
+import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
+import {
+  createStoreManagerForSession,
+  createTasksEnv,
+  network,
+  setupCancelUnsentCreationTests,
+  tasksQuery,
+} from './offlineCancelUnsentCreationShared';
+import {
+  deleteItemInputSchema,
+  getSortedQueueSummary,
+  getSortedSessionQueueSummary,
+  userPatchSchema,
+} from './offlineReplayTestShared';
+import {
+  collectionCreateInputSchema,
+  summarizeResolution,
+} from './offlineTestShared';
+
+setupCancelUnsentCreationTests();
+
+describe('list-query rows', () => {
+  test('deleting a task created offline drops its creation, its edits and the subtasks queued under it, without sending anything', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'cancel-unsent-task-session',
+      'cancel-unsent-task-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create a task, rename it, and add a subtask that is renamed too',
+    ]);
+    await env.createTask('Plan trip');
+    await env.renameTask('temp:Plan trip', 'Plan summer trip');
+    await env.createSubtask('Book flights', 'temp:Plan trip');
+    await env.renameTask('temp:Book flights', 'Book cheap flights');
+
+    // An edit of a task the server already has: it must survive the cancel.
+    env.addTimelineComments('beforeNextAction', [
+      'offline: rename a task that already exists on the server',
+    ]);
+    await env.renameTask('tasks||1', 'Write final report');
+
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+        syncState: 'pending'
+      - input: { itemId: 'temp:Plan trip', name: 'Plan summer trip' }
+        operation: 'renameTask'
+        syncState: 'pending'
+      - input: { name: 'Book flights', parentId: 'temp:Plan trip' }
+        operation: 'createSubtask'
+        syncState: 'pending'
+      - input: { itemId: 'temp:Book flights', name: 'Book cheap flights' }
+        operation: 'renameTask'
+        syncState: 'pending'
+      - input: { itemId: 'tasks||1', name: 'Write final report' }
+        operation: 'renameTask'
+        syncState: 'pending'
+    `);
+
+    // The app only removes the deleted task row. The subtask row is removed
+    // by the store, because its creation is cancelled with its parent.
+    env.addTimelineComments('beforeNextAction', [
+      'offline: delete the task that was never sent',
+    ]);
+    await env.deleteTask('temp:Plan trip');
+
+    // Nothing about the cancelled task is left to send: its creation, its
+    // rename, its subtask (creation + rename) and the delete itself are gone.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { itemId: 'tasks||1', name: 'Write final report' }
+        operation: 'renameTask'
+        syncState: 'pending'
+    `);
+    expect(list.result.current.items).toMatchInlineSnapshot(`
+      ['Write final report', 'Review budget']
+    `);
+    expect({
+      task: env.apiStore.getItemState('temp:Plan trip'),
+      subtask: env.apiStore.getItemState('temp:Book flights'),
+      taskOfflineState: env.apiStore.getItemOfflineState('temp:Plan trip'),
+      subtaskOfflineState:
+        env.apiStore.getItemOfflineState('temp:Book flights'),
+    }).toMatchInlineSnapshot(`
+      subtask: null
+      subtaskOfflineState: null
+      task: null
+      taskOfflineState: null
+    `);
+
+    env.addTimelineComments('beforeNextAction', [
+      'back online: only the rename of the existing task is sent',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      ['renameTask tasks||1 to "Write final report"']
+    `);
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(`
+      ['1: Write final report', '2: Review budget']
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | tasks                                                                   |
+      0      | Write report, Review budget                                             | [tasks] ui-initialized
+      12s    | Write report, Review budget                                             | -- offline: create a task, rename it, and add a subtask that is renamed too
+      .      | Write report, Review budget, Plan trip                                  | [tasks] ui-changed
+      .      | Write report, Review budget, Plan trip                                  | offline:createTask queued
+      .      | Write report, Review budget, Plan summer trip                           | [tasks] ui-changed
+      .      | Write report, Review budget, Plan summer trip                           | offline:renameTask queued
+      .      | Write report, Review budget, Plan summer trip, Book flights             | [tasks] ui-changed
+      .      | Write report, Review budget, Plan summer trip, Book flights             | offline:createSubtask queued
+      .      | Write report, Review budget, Plan summer trip, Book cheap flights       | [tasks] ui-changed
+      .      | Write report, Review budget, Plan summer trip, Book cheap flights       | offline:renameTask queued
+      .      | Write report, Review budget, Plan summer trip, Book cheap flights       | -- offline: rename a task that already exists on the server
+      .      | Write final report, Review budget, Plan summer trip, Book cheap flights | [tasks] ui-changed
+      .      | Write final report, Review budget, Plan summer trip, Book cheap flights | offline:renameTask queued
+      .      | Write final report, Review budget, Plan summer trip, Book cheap flights | -- offline: delete the task that was never sent
+      .      | Write final report, Review budget                                       | [tasks] ui-changed
+      .      | Write final report, Review budget                                       | offline:deleteTask queued
+      .      | Write final report, Review budget                                       | -- back online: only the rename of the existing task is sent
+      .      | Write final report, Review budget                                       | offline:renameTask replay-started
+      13.2s  | Write final report, Review budget                                       | [tasks||1] server-data-changed (value: {"name":"Write final report"})
+      .      | Write final report, Review budget                                       | offline:renameTask replay-finished
+      13.21s | Write final report, Review budget                                       | 🔴 >list-fetch-started
+      14.01s | Write final report, Review budget                                       | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('deleting a subtask created offline with a client-generated id drops its creation, the subtask added under it and its edits, without sending anything', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'cancel-unsent-client-id-task-session',
+      'cancel-unsent-client-id-task-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    // Offline: add a subtask with an id the app generates under a server
+    // task, add another one under it, and rename the nested one.
+    await env.createSubtaskWithId(50, 'Book flights', 'tasks||1');
+    await env.createSubtaskWithId(51, 'Compare prices', 'tasks||50');
+    await env.renameTask('tasks||51', 'Compare flight prices');
+
+    await env.deleteTask('tasks||50');
+    await flushAllTimers();
+
+    // The server never got the subtask: the delete cancels its creation
+    // instead of being sent for an id the server does not know, and the
+    // nested subtask and its rename, which depend on it, are dropped with it.
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(list.result.current.items).toMatchInlineSnapshot(`
+      ['Write report', 'Review budget']
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is sent, and nothing is left for the user to resolve.
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
+  test('deleting a subtask with a client-generated id whose direct creation request failed still deletes it on the server', async () => {
+    const env = createTasksEnv(
+      'delete-client-id-after-direct-attempt-session',
+      'delete-client-id-after-direct-attempt-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    // Online: the subtask is created with a direct request. The server
+    // creates it, but the connection drops before the answer arrives, so the
+    // creation is queued for replay.
+    let directCreation = Promise.resolve<unknown>(null);
+    act(() => {
+      directCreation = env.apiStore.performMutation('tasks||50', {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'tasks||50',
+            { id: 50, name: 'Book flights', parentId: 'tasks||1' },
+            { addItemToQueries: { queries: [tasksQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: async () => {
+          await env.serverTable.delayedSetItem('tasks||50', {
+            id: 50,
+            name: 'Book flights',
+            parentId: 'tasks||1',
+          });
+          network.goOffline();
+          throw new Error('connection lost');
+        },
+        offline: {
+          operation: 'createSubtaskWithId',
+          input: { id: 50, name: 'Book flights', parentId: 'tasks||1' },
+        },
+      });
+    });
+    await resolveAfterAllTimers(directCreation);
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { id: 50, name: 'Book flights', parentId: 'tasks||1' }
+        operation: 'createSubtaskWithId'
+        syncState: 'pending'
+    `);
+
+    // Still offline, the user deletes the subtask.
+    await env.deleteTask('tasks||50');
+    await flushAllTimers();
+
+    // Cancelling the creation locally would leave the subtask on the server:
+    // the delete is queued behind it instead.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { id: 50, name: 'Book flights', parentId: 'tasks||1' }
+        operation: 'createSubtaskWithId'
+        syncState: 'pending'
+      - input: { itemId: 'tasks||50' }
+        operation: 'deleteTask'
+        syncState: 'pending'
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // The creation is sent again (it writes the same item), then the delete:
+    // the server no longer has the subtask.
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createSubtaskWithId tasks||50', 'deleteTask tasks||50']`,
+    );
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget']`,
+    );
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
+
+    list.unmount();
+  });
+
+  test('deleting a subtask with a client-generated id whose creation the user sent again after a conflict still deletes it on the server', async () => {
+    const env = createTasksEnv(
+      'delete-client-id-after-conflict-requeue-session',
+      'delete-client-id-after-conflict-requeue-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    // Online: the server creates the subtask, but the connection drops
+    // before the answer arrives, so the creation is queued for replay.
+    let directCreation = Promise.resolve<unknown>(null);
+    act(() => {
+      directCreation = env.apiStore.performMutation('tasks||50', {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'tasks||50',
+            { id: 50, name: 'Book flights', parentId: 'tasks||1' },
+            { addItemToQueries: { queries: [tasksQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: async () => {
+          await env.serverTable.delayedSetItem('tasks||50', {
+            id: 50,
+            name: 'Book flights',
+            parentId: 'tasks||1',
+          });
+          network.goOffline();
+          throw new Error('connection lost');
+        },
+        offline: {
+          operation: 'createSubtaskWithId',
+          input: { id: 50, name: 'Book flights', parentId: 'tasks||1' },
+        },
+      });
+    });
+    await resolveAfterAllTimers(directCreation);
+
+    // On reconnect the replay finds a task with that id on the server and
+    // reports a conflict instead of sending the creation.
+    env.conflicts.createSubtaskWithId = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.conflicts.createSubtaskWithId = false;
+    const conflict = env.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the subtask creation conflict');
+    }
+
+    // Offline again, the user sends the creation again with the same id, then
+    // deletes the subtask.
+    act(() => {
+      network.goOffline();
+    });
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        conflict.id,
+        'createSubtaskWithId',
+        {
+          action: 'requeue',
+          input: { id: 50, name: 'Book flights', parentId: 'tasks||1' },
+        },
+      );
+    });
+    await env.deleteTask('tasks||50');
+    await flushAllTimers();
+
+    // The server may have the subtask (an earlier request created it), so the
+    // creation sent again is not cancelled locally: the delete is queued
+    // behind it.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { id: 50, name: 'Book flights', parentId: 'tasks||1' }
+        operation: 'createSubtaskWithId'
+        syncState: 'pending'
+      - input: { itemId: 'tasks||50' }
+        operation: 'deleteTask'
+        syncState: 'pending'
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // The creation is sent again (it writes the same item), then the delete:
+    // the server no longer has the subtask.
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createSubtaskWithId tasks||50', 'deleteTask tasks||50']`,
+    );
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget']`,
+    );
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
+
+    list.unmount();
+  });
+
+  test('deleting a task created offline puts an existing task moved under it back under its server parent', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'cancel-unsent-task-moved-session',
+      'cancel-unsent-task-moved-store',
+    );
+    const list = env.renderTaskList();
+    // Tracks where the existing task "Write report" is shown.
+    const movedTask = renderHook(() => {
+      const task = env.apiStore.useItem('tasks||1');
+      env.trackItemUI(
+        'tasks||1 parent',
+        task.data ? (task.data.parentId ?? 'no parent') : '-',
+      );
+    });
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create a task and move an existing task under it',
+    ]);
+    await env.createTask('Plan trip');
+    await env.moveTask('tasks||1', 'temp:Plan trip');
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: delete the task that was never sent',
+    ]);
+    await env.deleteTask('temp:Plan trip');
+
+    // The move only made sense under the cancelled task: it is dropped with
+    // it and never sent.
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+
+    env.addTimelineComments('beforeNextAction', ['back online']);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing was sent. The moved task cannot be rolled back locally, so it
+    // is refetched as soon as the server is reachable: it shows its server
+    // parent again instead of the task that never existed.
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getItemState('tasks||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Write report'
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | tasks                                  | tasks||1 parent |
+      0     | Write report, Review budget            | no parent       | [tasks, tasks||1 parent] ui-initialized
+      3.01s | Write report, Review budget            | no parent       | -- offline: create a task and move an existing task under it
+      .     | Write report, Review budget, Plan trip | no parent       | [tasks] ui-changed
+      .     | Write report, Review budget, Plan trip | no parent       | offline:createTask queued
+      .     | Write report, Review budget, Plan trip | temp:Plan trip  | [tasks||1 parent] ui-changed
+      .     | Write report, Review budget, Plan trip | temp:Plan trip  | offline:moveTask queued
+      .     | Write report, Review budget, Plan trip | temp:Plan trip  | -- offline: delete the task that was never sent
+      .     | Write report, Review budget            | temp:Plan trip  | [tasks] ui-changed
+      .     | Write report, Review budget            | temp:Plan trip  | offline:deleteTask queued
+      3.02s | Write report, Review budget            | temp:Plan trip  | -- back online
+      .     | Write report, Review budget            | temp:Plan trip  | 🔴 [tasks||1] >fetch-started
+      .     | Write report, Review budget            | temp:Plan trip  | 🟠 >list-fetch-started
+      3.82s | Write report, Review budget            | temp:Plan trip  | 🔴 [tasks||1] <fetch-finished (value: {"id":1,"name":"Write report"})
+      .     | Write report, Review budget            | no parent       | [tasks||1 parent] ui-changed
+      .     | Write report, Review budget            | no parent       | 🟠 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    movedTask.unmount();
+    list.unmount();
+  });
+
+  test('deleting a task while its creation is being sent waits for the server id, then deletes the task on the server', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'delete-task-in-flight-session',
+      'delete-task-in-flight-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create a task and rename it',
+    ]);
+    await env.createTask('Plan trip');
+    await env.renameTask('temp:Plan trip', 'Plan summer trip');
+
+    env.addTimelineComments('beforeNextAction', [
+      'back online: the creation request is sent',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    // The creation request takes 1.2s: it is in flight now.
+    await advanceTime(300);
+
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+        syncState: 'syncing'
+      - input: { itemId: 'temp:Plan trip', name: 'Plan summer trip' }
+        operation: 'renameTask'
+        syncState: 'pending'
+    `);
+
+    env.addTimelineComments('beforeNextAction', [
+      'delete the task while its creation is in flight',
+    ]);
+    await env.deleteTask('temp:Plan trip');
+
+    // The creation may already be on the server, so it is not dropped. The
+    // delete waits behind it (it cannot be sent before the server id is
+    // known), and only the rename, never sent, is superseded by the delete.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+        syncState: 'syncing'
+      - input: { itemId: 'temp:Plan trip' }
+        operation: 'deleteTask'
+        syncState: 'pending'
+    `);
+
+    await flushAllTimers();
+
+    // The delete was sent with the id the server assigned, never the temp id.
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      ['createTask "Plan trip"', 'deleteTask tasks||3']
+    `);
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(`
+      ['1: Write report', '2: Review budget']
+    `);
+    expect({
+      tempPayload: env.apiStore.getItemState('temp:Plan trip'),
+      finalPayload: env.apiStore.getItemState('tasks||3'),
+    }).toMatchInlineSnapshot(`
+      finalPayload: null
+      tempPayload: null
+    `);
+    // The deleted row never comes back to the list while the creation and the
+    // delete are replayed.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | tasks                                         |
+      0     | Write report, Review budget                   | [tasks] ui-initialized
+      3.01s | Write report, Review budget                   | -- offline: create a task and rename it
+      .     | Write report, Review budget, Plan trip        | [tasks] ui-changed
+      .     | Write report, Review budget, Plan trip        | offline:createTask queued
+      .     | Write report, Review budget, Plan summer trip | [tasks] ui-changed
+      .     | Write report, Review budget, Plan summer trip | offline:renameTask queued
+      .     | Write report, Review budget, Plan summer trip | -- back online: the creation request is sent
+      .     | Write report, Review budget, Plan summer trip | offline:createTask replay-started
+      3.31s | Write report, Review budget, Plan summer trip | -- delete the task while its creation is in flight
+      .     | Write report, Review budget                   | [tasks] ui-changed
+      .     | Write report, Review budget                   | offline:deleteTask queued
+      4.21s | Write report, Review budget                   | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
+      .     | Write report, Review budget                   | offline:createTask replay-finished
+      .     | Write report, Review budget                   | offline:deleteTask replay-started
+      .     | Write report, Review budget                   | [tasks||3] >delete-item-started (value: {"id":3,"name":"Plan trip"})
+      5.05s | Write report, Review budget                   | [tasks||3] <delete-item-persisted (value: {"id":3,"name":"Plan trip"})
+      5.41s | Write report, Review budget                   | offline:deleteTask replay-finished
+      5.42s | Write report, Review budget                   | 🔴 >list-fetch-started
+      6.22s | Write report, Review budget                   | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('deleting a task whose creation may have reached the server keeps the creation, and a not-found answer to the delete counts as done', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'delete-task-unconfirmed-session',
+      'delete-task-unconfirmed-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', ['offline: create a task']);
+    await env.createTask('Plan trip');
+
+    // The creation fails in a way that does not tell whether the server got
+    // it. The delete request will reach the server but its answer is lost.
+    env.faults.createTask.push('request-lost');
+    env.faults.deleteTask.push('response-lost');
+
+    env.addTimelineComments('beforeNextAction', [
+      'back online: the creation request fails with an unknown outcome',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(100);
+
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+        syncState: 'needs-confirmation'
+    `);
+
+    env.addTimelineComments('beforeNextAction', [
+      'delete the task while its creation is unconfirmed',
+    ]);
+    await env.deleteTask('temp:Plan trip');
+
+    // Dropping the creation here could leave a task on the server that the
+    // user deleted. Both stay queued: the delete is sent once the creation
+    // is confirmed and the server id is known.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+        syncState: 'needs-confirmation'
+      - input: { itemId: 'temp:Plan trip' }
+        operation: 'deleteTask'
+        syncState: 'pending'
+    `);
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createTask "Plan trip"']`,
+    );
+
+    env.addTimelineComments('beforeNextAction', [
+      'the creation is retried and confirmed, then the delete is sent',
+    ]);
+    await flushAllTimers();
+
+    // 1. the creation is retried and the server assigns `tasks||3`
+    // 2. the delete is sent with that id; the server deletes the task but the
+    //    answer is lost
+    // 3. the delete is retried: the server answers not-found, which the
+    //    operation treats as success instead of asking the user what to do
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'deleteTask tasks||3'
+      - 'deleteTask tasks||3'
+    `);
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.apiStore.getOfflineResolutions().map(summarizeResolution),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(`
+      ['1: Write report', '2: Review budget']
+    `);
+    expect({
+      tempPayload: env.apiStore.getItemState('temp:Plan trip'),
+      finalPayload: env.apiStore.getItemState('tasks||3'),
+    }).toMatchInlineSnapshot(`
+      finalPayload: null
+      tempPayload: null
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | tasks                                  |
+      0      | Write report, Review budget            | [tasks] ui-initialized
+      3.01s  | Write report, Review budget            | -- offline: create a task
+      .      | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .      | Write report, Review budget, Plan trip | offline:createTask queued
+      .      | Write report, Review budget, Plan trip | -- back online: the creation request fails with an unknown outcome
+      .      | Write report, Review budget, Plan trip | offline:createTask replay-started
+      3.11s  | Write report, Review budget, Plan trip | -- delete the task while its creation is unconfirmed
+      .      | Write report, Review budget            | [tasks] ui-changed
+      .      | Write report, Review budget            | offline:deleteTask queued
+      8.01s  | Write report, Review budget            | -- the creation is retried and confirmed, then the delete is sent
+      .      | Write report, Review budget            | offline:createTask replay-started
+      9.21s  | Write report, Review budget            | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
+      .      | Write report, Review budget            | offline:createTask replay-finished
+      .      | Write report, Review budget            | offline:deleteTask replay-started
+      .      | Write report, Review budget            | [tasks||3] >delete-item-started (value: {"id":3,"name":"Plan trip"})
+      10.05s | Write report, Review budget            | [tasks||3] <delete-item-persisted (value: {"id":3,"name":"Plan trip"})
+      15.41s | Write report, Review budget            | offline:deleteTask replay-started
+      .      | Write report, Review budget            | offline:deleteTask replay-finished
+      15.42s | Write report, Review budget            | 🔴 >list-fetch-started
+      16.22s | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('deleting a task whose failed creation was sent again by the user still keeps the creation', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'delete-task-retried-creation-session',
+      'delete-task-retried-creation-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    await env.createTask('Plan trip');
+
+    // Before anything was sent the creation can still be cancelled locally.
+    expect(env.apiStore.getItemOfflineState('temp:Plan trip'))
+      .toMatchInlineSnapshot(`
+        creationAttempted: '❌'
+        isUnsentCreation: '✅'
+        pendingMutations: 1
+        requiresResolution: '❌'
+        syncState: 'pending'
+      `);
+
+    // The creation fails on every attempt (3) without telling whether the
+    // server got it, and asks for a manual decision.
+    env.faults.createTask.push('request-lost', 'request-lost', 'request-lost');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    const failedCreation = env.apiStore.getOfflineResolutions()[0];
+    if (!failedCreation) throw new Error('Expected the failed task creation');
+
+    // The user loses the connection again and asks to send the creation
+    // again: it goes back to the queue, waiting for the connection.
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'retry' },
+      );
+    });
+
+    // Waiting in the queue again does not make the creation "never sent".
+    expect(env.apiStore.getItemOfflineState('temp:Plan trip'))
+      .toMatchInlineSnapshot(`
+        creationAttempted: '✅'
+        isUnsentCreation: '✅'
+        pendingMutations: 1
+        requiresResolution: '❌'
+        syncState: 'pending'
+      `);
+
+    await env.deleteTask('temp:Plan trip');
+
+    // One of the failed attempts may have reached the server, so the creation
+    // is not dropped: the delete waits for it.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+        syncState: 'pending'
+      - input: { itemId: 'temp:Plan trip' }
+        operation: 'deleteTask'
+        syncState: 'pending'
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // 3 failed attempts, the attempt asked by the user, then the delete with
+    // the id assigned by the server.
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'deleteTask tasks||3'
+    `);
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(`
+      ['1: Write report', '2: Review budget']
+    `);
+
+    list.unmount();
+  });
+});
+
+describe('collection items', () => {
+  type NoteItem = { name: string };
+  type NotesOperations = {
+    createNote: CollectionOfflineOperationDefinition<
+      { value: NoteItem },
+      string,
+      { name: string },
+      unknown,
+      { id: string; name: string }
+    >;
+    renameNote: CollectionOfflineOperationDefinition<
+      { value: NoteItem },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+    deleteNote: CollectionOfflineOperationDefinition<
+      { value: NoteItem },
+      string,
+      { itemId: string },
+      unknown
+    >;
+  };
+  type NotesEnv = ReturnType<
+    typeof createCollectionStoreTestEnv<NoteItem, NotesOperations>
+  >;
+
+  const noteSchema = rc_object({ value: rc_object({ name: rc_string }) });
+
+  /**
+   * A notes collection with offline create (temp items `temp:<name>`, the
+   * server assigns `notes||2`), rename and delete. The delete cancels the
+   * creation of a note that was never sent.
+   *
+   * Unlike the task list above, this app does not remove a deleted note from
+   * its state by itself: it waits for the delete to be confirmed.
+   */
+  function createNotesEnv(sessionKey: string, storeName: string) {
+    const sentRequests: string[] = [];
+
+    const env: NotesEnv = createCollectionStoreTestEnv<
+      NoteItem,
+      NotesOperations
+    >(
+      { 'notes||1': { name: 'Groceries' } },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManagerForSession(sessionKey),
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: noteSchema,
+          payloadSchema: rc_string,
+          offline: {
+            operations: {
+              createNote: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({
+                    value: { name: input.name },
+                  }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: result.id,
+                    finalData: { value: { name: result.name } },
+                  }),
+                },
+                execute: async ({ input }) => {
+                  sentRequests.push(`createNote "${input.name}"`);
+                  const result = { id: 'notes||2', name: input.name };
+                  await env.serverTable.delayedSetItem(result.id, {
+                    name: result.name,
+                  });
+                  return result;
+                },
+              },
+              renameNote: {
+                inputSchema: userPatchSchema,
+                kind: 'update',
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: async ({ input }) => {
+                  sentRequests.push(
+                    `renameNote ${input.itemId} to "${input.name}"`,
+                  );
+                  await env.serverTable.delayedUpdateItem(input.itemId, {
+                    name: input.name,
+                  });
+                  return { value: { name: input.name } };
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (draft) => {
+                    draft.value.name = input.name;
+                  });
+                },
+              },
+              deleteNote: {
+                inputSchema: deleteItemInputSchema,
+                kind: 'delete',
+                getEntityRefs: ({ input }) => [input.itemId],
+                supersedes: {
+                  scope: 'same-entity',
+                  dropSelfIfTempLifecycleCancelled: true,
+                },
+                execute: async ({ input }) => {
+                  sentRequests.push(`deleteNote ${input.itemId}`);
+                  await env.serverTable.deleteItem(input.itemId);
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.deleteItemState(input.itemId);
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    function createNote(name: string) {
+      return act(async () => {
+        await env.apiStore.performMutation(null, {
+          mutation: async () => {
+            const result = { id: 'notes||2', name };
+            await env.serverTable.delayedSetItem(result.id, { name });
+            return result;
+          },
+          offline: { operation: 'createNote', input: { name } },
+        });
+      });
+    }
+
+    function renameNote(itemId: string, name: string) {
+      return act(async () => {
+        await env.apiStore.performMutation(itemId, {
+          optimisticUpdate: () => {
+            env.apiStore.updateItemState(itemId, (draft) => {
+              draft.value.name = name;
+            });
+          },
+          mutation: async () => {
+            await env.serverTable.delayedUpdateItem(itemId, { name });
+            return { value: { name } };
+          },
+          offline: { operation: 'renameNote', input: { itemId, name } },
+        });
+      });
+    }
+
+    /** No optimistic update: the note stays until the delete is confirmed. */
+    function deleteNote(itemId: string) {
+      return act(async () => {
+        await env.apiStore.performMutation(itemId, {
+          mutation: () => env.serverTable.deleteItem(itemId),
+          offline: { operation: 'deleteNote', input: { itemId } },
+        });
+      });
+    }
+
+    /**
+     * Tracks in the timeline the note the store holds under its temp payload
+     * and under its final payload (read from the store, without fetching).
+     */
+    function trackNote() {
+      return renderHook(() => {
+        const notes = env.store.useSelector(() =>
+          ['temp:Ideas', 'notes||2'].map(
+            (payload) =>
+              env.apiStore.getItemState(payload)?.data?.value.name ?? 'no note',
+          ),
+        );
+
+        env.trackItemUI('temp:Ideas', notes[0]);
+        env.trackItemUI('notes||2', notes[1]);
+      });
+    }
+
+    return {
+      ...env,
+      // `timelineString` is a getter: spreading `env` would freeze its value.
+      get timelineString() {
+        return env.timelineString;
+      },
+      sentRequests,
+      createNote,
+      renameNote,
+      deleteNote,
+      trackNote,
+      getQueue: () =>
+        getSortedQueueSummary(sessionKey, storeName, [
+          'operation',
+          'input',
+          'syncState',
+        ]),
+    };
+  }
+
+  test('deleting an item created offline drops its creation and its edits without sending anything, and removes the item', async () => {
+    network.setOffline();
+    const env = createNotesEnv(
+      'cancel-unsent-note-session',
+      'cancel-unsent-note-store',
+    );
+    const note = env.trackNote();
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create a note and rename it',
+    ]);
+    await env.createNote('Ideas');
+    await env.renameNote('temp:Ideas', 'Ideas for the trip');
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: delete the note that was never sent',
+    ]);
+    await env.deleteNote('temp:Ideas');
+
+    // No delete will ever be confirmed by the server, since nothing is sent:
+    // the store removes the note that only existed locally.
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect({
+      note: env.apiStore.getItemState('temp:Ideas'),
+      offlineState: env.apiStore.getItemOfflineState('temp:Ideas'),
+    }).toMatchInlineSnapshot(`
+      note: null
+      offlineState: null
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.addTimelineComments('afterLastAction', [
+      'back online: there was nothing to send',
+    ]);
+
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.serverTable.getAll()).toMatchInlineSnapshot(
+      `notes||1: { name: 'Groceries' }`,
+    );
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time | notes||2 | temp:Ideas         |
+      0    | no note  | no note            | [temp:Ideas, notes||2] ui-initialized
+      .    | no note  | no note            | -- offline: create a note and rename it
+      .    | no note  | Ideas              | [temp:Ideas] ui-changed
+      .    | no note  | Ideas              | offline:createNote queued
+      .    | no note  | Ideas for the trip | [temp:Ideas] ui-changed
+      .    | no note  | Ideas for the trip | offline:renameNote queued
+      .    | no note  | Ideas for the trip | -- offline: delete the note that was never sent
+      .    | no note  | no note            | [temp:Ideas] ui-changed
+      .    | no note  | no note            | offline:deleteNote queued
+      .    | no note  | no note            | -- back online: there was nothing to send
+      "
+    `);
+
+    note.unmount();
+  });
+
+  test('deleting an item while its creation is being sent deletes it on the server once its id is known', async () => {
+    network.setOffline();
+    const env = createNotesEnv(
+      'delete-note-in-flight-session',
+      'delete-note-in-flight-store',
+    );
+    const note = env.trackNote();
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create a note and rename it',
+    ]);
+    await env.createNote('Ideas');
+    await env.renameNote('temp:Ideas', 'Ideas for the trip');
+
+    env.addTimelineComments('beforeNextAction', [
+      'back online: the creation request is sent',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    // The creation request takes 1.2s: it is in flight now.
+    await advanceTime(300);
+
+    env.addTimelineComments('beforeNextAction', [
+      'delete the note while its creation is in flight',
+    ]);
+    await env.deleteNote('temp:Ideas');
+
+    // The creation is kept, the delete waits for the server id, and the
+    // rename, never sent, is superseded by the delete.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Ideas' }
+        operation: 'createNote'
+        syncState: 'syncing'
+      - input: { itemId: 'temp:Ideas' }
+        operation: 'deleteNote'
+        syncState: 'pending'
+    `);
+
+    await flushAllTimers();
+
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      ['createNote "Ideas"', 'deleteNote notes||2']
+    `);
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.serverTable.getAll()).toMatchInlineSnapshot(
+      `notes||1: { name: 'Groceries' }`,
+    );
+    // The note shows under its server id while the delete is sent, then it
+    // is removed when the server confirms the delete.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | notes||2 | temp:Ideas         |
+      0     | no note  | no note            | [temp:Ideas, notes||2] ui-initialized
+      .     | no note  | no note            | -- offline: create a note and rename it
+      .     | no note  | Ideas              | [temp:Ideas] ui-changed
+      .     | no note  | Ideas              | offline:createNote queued
+      .     | no note  | Ideas for the trip | [temp:Ideas] ui-changed
+      .     | no note  | Ideas for the trip | offline:renameNote queued
+      .     | no note  | Ideas for the trip | -- back online: the creation request is sent
+      .     | no note  | Ideas for the trip | offline:createNote replay-started
+      300ms | no note  | Ideas for the trip | -- delete the note while its creation is in flight
+      .     | no note  | Ideas for the trip | offline:deleteNote queued
+      1.2s  | no note  | Ideas for the trip | [notes||2] server-data-changed (value: {"name":"Ideas"})
+      .     | no note  | Ideas for the trip | offline:createNote replay-finished
+      .     | Ideas    | no note            | [temp:Ideas, notes||2] ui-changed
+      .     | Ideas    | no note            | offline:deleteNote replay-started
+      .     | Ideas    | no note            | [notes||2] >delete-item-started (value: {"name":"Ideas"})
+      2.04s | Ideas    | no note            | [notes||2] <delete-item-persisted (value: {"name":"Ideas"})
+      2.4s  | Ideas    | no note            | offline:deleteNote replay-finished
+      .     | no note  | no note            | [notes||2] ui-changed
+      "
+    `);
+
+    note.unmount();
+  });
+});
+
+describe('items of other stores', () => {
+  type CommentItem = { text: string; taskId: string };
+  type CommentsOperations = {
+    addComment: CollectionOfflineOperationDefinition<
+      { value: CommentItem },
+      string,
+      CommentItem,
+      unknown,
+      { id: string; text: string; taskId: string }
+    >;
+    editComment: CollectionOfflineOperationDefinition<
+      { value: CommentItem },
+      string,
+      { itemId: string; text: string },
+      unknown
+    >;
+    addCommentWithId: CollectionOfflineOperationDefinition<
+      { value: CommentItem },
+      string,
+      { id: string; text: string; taskId: string },
+      unknown
+    >;
+  };
+  type CommentsEnv = ReturnType<
+    typeof createCollectionStoreTestEnv<CommentItem, CommentsOperations>
+  >;
+
+  const commentInputSchema = rc_object({ text: rc_string, taskId: rc_string });
+  const commentSchema = rc_object({ value: commentInputSchema });
+  const editCommentInputSchema = rc_object({
+    itemId: rc_string,
+    text: rc_string,
+  });
+  const commentWithIdInputSchema = rc_object({
+    id: rc_string,
+    text: rc_string,
+    taskId: rc_string,
+  });
+
+  /**
+   * A task list plus a separate comments collection in the same offline
+   * session. Comments can be added offline (temp items `temp:<text>`), also
+   * to a task that was itself created offline: `cancelledWith` tells the
+   * comments store which task of the tasks store a queued comment belongs to.
+   * `addCommentWithId` adds a comment whose id the app generates on the
+   * client, so it needs no temp item.
+   */
+  function createTasksAndCommentsEnv(sessionKey: string) {
+    const tasksStoreName = `${sessionKey}-tasks`;
+    const commentsStoreName = `${sessionKey}-comments`;
+    const storeManager = createStoreManagerForSession(sessionKey);
+    const tasks = createTasksEnv(sessionKey, tasksStoreName, storeManager);
+    const sentRequests: string[] = [];
+    let nextCommentId = 1;
+
+    const comments: CommentsEnv = createCollectionStoreTestEnv<
+      CommentItem,
+      CommentsOperations
+    >(
+      {},
+      {
+        id: commentsStoreName,
+        getSessionKey: () => sessionKey,
+        storeManager,
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: commentSchema,
+          payloadSchema: rc_string,
+          offline: {
+            operations: {
+              addComment: {
+                inputSchema: commentInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.text}`],
+                cancelledWith: ({ input }) => [
+                  { storeName: tasksStoreName, entityRef: input.taskId },
+                ],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ value: input }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: result.id,
+                    finalData: {
+                      value: { text: result.text, taskId: result.taskId },
+                    },
+                  }),
+                },
+                execute: async ({ input }) => {
+                  sentRequests.push(
+                    `addComment "${input.text}" to ${input.taskId}`,
+                  );
+                  const result = { id: `comments||${nextCommentId}`, ...input };
+                  nextCommentId += 1;
+                  await comments.serverTable.delayedSetItem(result.id, input);
+                  return result;
+                },
+              },
+              editComment: {
+                inputSchema: editCommentInputSchema,
+                kind: 'update',
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: async ({ input }) => {
+                  sentRequests.push(
+                    `editComment ${input.itemId} to "${input.text}"`,
+                  );
+                  await comments.serverTable.delayedUpdateItem(input.itemId, {
+                    text: input.text,
+                  });
+                  return { text: input.text };
+                },
+                onSuccessExecute: ({ input }) => {
+                  comments.apiStore.updateItemState(input.itemId, (draft) => {
+                    draft.value.text = input.text;
+                  });
+                },
+              },
+              addCommentWithId: {
+                inputSchema: commentWithIdInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [input.id],
+                cancelledWith: ({ input }) => [
+                  { storeName: tasksStoreName, entityRef: input.taskId },
+                ],
+                execute: async ({ input: { id, text, taskId } }) => {
+                  sentRequests.push(
+                    `addCommentWithId ${id} "${text}" to ${taskId}`,
+                  );
+                  await comments.serverTable.delayedSetItem(id, {
+                    text,
+                    taskId,
+                  });
+                },
+                onSuccessExecute: () => {},
+              },
+            },
+          },
+        },
+      },
+    );
+
+    function addComment(text: string, taskId: string) {
+      return act(async () => {
+        await comments.apiStore.performMutation(null, {
+          mutation: async () => {
+            const result = { id: 'comments||online', text, taskId };
+            await comments.serverTable.delayedSetItem(result.id, {
+              text,
+              taskId,
+            });
+            return result;
+          },
+          offline: { operation: 'addComment', input: { text, taskId } },
+        });
+      });
+    }
+
+    function addCommentWithId(id: string, text: string, taskId: string) {
+      return act(async () => {
+        await comments.apiStore.performMutation(id, {
+          optimisticUpdate: () => {
+            comments.apiStore.addItemToState(id, { value: { text, taskId } });
+          },
+          mutation: () =>
+            comments.serverTable.delayedSetItem(id, { text, taskId }),
+          offline: {
+            operation: 'addCommentWithId',
+            input: { id, text, taskId },
+          },
+        });
+      });
+    }
+
+    function editComment(itemId: string, text: string) {
+      return act(async () => {
+        await comments.apiStore.performMutation(itemId, {
+          optimisticUpdate: () => {
+            comments.apiStore.updateItemState(itemId, (draft) => {
+              draft.value.text = text;
+            });
+          },
+          mutation: async () => {
+            await comments.serverTable.delayedUpdateItem(itemId, { text });
+            return { text };
+          },
+          offline: { operation: 'editComment', input: { itemId, text } },
+        });
+      });
+    }
+
+    /**
+     * Mounts the task list and tracks, in the timeline of the tasks store,
+     * the visible tasks and the comments the comments store holds locally.
+     */
+    function renderTasksAndComments() {
+      return renderHook(() => {
+        const query = tasks.apiStore.useListQuery(tasksQuery, {
+          itemSelector: (item) => item.name,
+        });
+        const localComments = comments.store.useSelector((state) =>
+          Object.values(state)
+            .map((comment) => comment?.data?.value.text)
+            .filter((text) => text !== undefined)
+            .join(', '),
+        );
+
+        tasks.trackItemUI('tasks', query.items.join(', '));
+        tasks.trackItemUI('comments', localComments || 'no comments');
+        return query;
+      });
+    }
+
+    return {
+      tasks,
+      comments,
+      sentRequests,
+      addComment,
+      addCommentWithId,
+      editComment,
+      renderTasksAndComments,
+      /** Queued mutations of both stores, in replay order. */
+      getSessionQueue: () =>
+        getSortedSessionQueueSummary(sessionKey, ['operation', 'input']),
+      /** Text of the comments that exist locally, by payload. */
+      getLocalComments: (payloads: string[]) =>
+        Object.fromEntries(
+          payloads.map((payload) => [
+            payload,
+            comments.apiStore.getItemState(payload)?.data?.value.text ?? null,
+          ]),
+        ),
+    };
+  }
+
+  test('deleting a task created offline also drops the comments queued on it in the comments store', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('cancel-unsent-task-with-comments');
+    const list = env.renderTasksAndComments();
+    await flushAllTimers();
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline: create a task, comment on it and on an existing task',
+    ]);
+    await env.tasks.createTask('Plan trip');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    await env.addComment('Ask Ana about dates', 'temp:Plan trip');
+    await env.editComment(
+      'temp:Ask Ana about dates',
+      'Ask Ana about the dates',
+    );
+    await env.addComment('Due on friday', 'tasks||1');
+
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+      - input: { taskId: 'temp:Plan trip', text: 'Ask Ana about dates' }
+        operation: 'addComment'
+      - input: { itemId: 'temp:Ask Ana about dates', text: 'Ask Ana about the dates' }
+        operation: 'editComment'
+      - input: { taskId: 'tasks||1', text: 'Due on friday' }
+        operation: 'addComment'
+    `);
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline: delete the task that was never sent',
+    ]);
+    await env.tasks.deleteTask('temp:Plan trip');
+    await flushAllTimers();
+
+    // The comment written on the cancelled task (and its edit) would be sent
+    // for a task that will never exist: both are dropped and the comment is
+    // removed locally. The comment on the existing task is untouched.
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { taskId: 'tasks||1', text: 'Due on friday' }
+        operation: 'addComment'
+    `);
+    expect(
+      env.getLocalComments(['temp:Ask Ana about dates', 'temp:Due on friday']),
+    ).toMatchInlineSnapshot(`
+      temp:Ask Ana about dates: null
+      temp:Due on friday: 'Due on friday'
+    `);
+    expect(
+      env.comments.apiStore.getOfflineEntities().map((e) => e.entityKey),
+    ).toMatchInlineSnapshot(`['"temp:Due on friday']`);
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'back online: only the comment on the existing task is sent',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect([
+      ...env.tasks.sentRequests,
+      ...env.sentRequests,
+    ]).toMatchInlineSnapshot(`['addComment "Due on friday" to tasks||1']`);
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.tasks.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | comments                               | tasks                                  |
+      0     | no comments                            | Write report, Review budget            | [tasks, comments] ui-initialized
+      3.01s | no comments                            | Write report, Review budget            | -- offline: create a task, comment on it and on an existing task
+      .     | no comments                            | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .     | no comments                            | Write report, Review budget, Plan trip | offline:createTask queued
+      4.01s | Ask Ana about the dates, Due on friday | Write report, Review budget, Plan trip | [comments, comments, comments] ui-changed
+      .     | Ask Ana about the dates, Due on friday | Write report, Review budget, Plan trip | -- offline: delete the task that was never sent
+      .     | Due on friday                          | Write report, Review budget            | [tasks, comments] ui-changed
+      .     | Due on friday                          | Write report, Review budget            | offline:deleteTask queued
+      6.22s | Due on friday                          | Write report, Review budget            | -- back online: only the comment on the existing task is sent
+      .     | Due on friday                          | Write report, Review budget            | 🔴 >list-fetch-started
+      7.02s | Due on friday                          | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('deleting a task created offline also drops the edits of a comment added to it with a client-generated id', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('cancel-unsent-task-with-id-comment');
+    const list = env.renderTasksAndComments();
+    await flushAllTimers();
+
+    // Offline: create a task, add a comment to it with an id generated by the
+    // app, then edit the comment.
+    await env.tasks.createTask('Plan trip');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'temp:Plan trip',
+    );
+    await env.editComment('comments||c1', 'Ask Ana about the dates');
+
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+      - input: { id: 'comments||c1', taskId: 'temp:Plan trip', text: 'Ask Ana about dates' }
+        operation: 'addCommentWithId'
+      - input: { itemId: 'comments||c1', text: 'Ask Ana about the dates' }
+        operation: 'editComment'
+    `);
+
+    await env.tasks.deleteTask('temp:Plan trip');
+    await flushAllTimers();
+
+    // The comment is cancelled with the task. Its edit would be sent for a
+    // comment the server never gets: it is dropped with it.
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.getLocalComments(['comments||c1'])).toMatchInlineSnapshot(
+      `comments||c1: null`,
+    );
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is sent, and nothing is left for the user to resolve.
+    expect([
+      ...env.tasks.sentRequests,
+      ...env.sentRequests,
+    ]).toMatchInlineSnapshot(`[]`);
+    expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+
+    list.unmount();
+  });
+
+  test('discarding a task creation the server keeps refusing also drops the comments queued on it afterwards', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('discard-failed-task-with-comments');
+    const list = env.renderTasksAndComments();
+    await flushAllTimers();
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline: create a task',
+    ]);
+    await env.tasks.createTask('Plan trip');
+
+    // The creation fails on every attempt (3) and asks for a manual decision.
+    env.tasks.faults.createTask.push(
+      'request-lost',
+      'request-lost',
+      'request-lost',
+    );
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'back online: the creation keeps failing until it needs a manual decision',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    const failedCreation = env.tasks.apiStore.getOfflineResolutions()[0];
+    if (!failedCreation) throw new Error('Expected the failed task creation');
+    expect(summarizeResolution(failedCreation)).toMatchInlineSnapshot(`
+      error: 'connection lost'
+      input: 'name: "Plan trip"'
+      kind: 'retry-exhausted'
+      on: 'item:temp:Plan trip'
+      op: 'createTask'
+      tempIds: ['temp:Plan trip']
+    `);
+
+    // The task row is still visible, waiting for the decision, and the user
+    // comments on it after losing the connection again.
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline again: comment on the task whose creation failed',
+    ]);
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    await env.addComment('Ask Ana about dates', 'temp:Plan trip');
+
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { taskId: 'temp:Plan trip', text: 'Ask Ana about dates' }
+        operation: 'addComment'
+    `);
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'discard the failed task creation',
+    ]);
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'discard' },
+      );
+    });
+    await flushAllTimers();
+
+    // The task will never exist, so its comment is dropped with it.
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.getLocalComments(['temp:Ask Ana about dates']),
+    ).toMatchInlineSnapshot(`temp:Ask Ana about dates: null`);
+    expect(list.result.current.items).toMatchInlineSnapshot(`
+      ['Write report', 'Review budget']
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.tasks.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | comments            | tasks                                  |
+      0      | no comments         | Write report, Review budget            | [tasks, comments] ui-initialized
+      3.01s  | no comments         | Write report, Review budget            | -- offline: create a task
+      .      | no comments         | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .      | no comments         | Write report, Review budget, Plan trip | offline:createTask queued
+      .      | no comments         | Write report, Review budget, Plan trip | -- back online: the creation keeps failing until it needs a manual decision
+      .      | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
+      8.01s  | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
+      13.01s | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
+      .      | no comments         | Write report, Review budget, Plan trip | offline:createTask resolution-required
+      .      | no comments         | Write report, Review budget, Plan trip | -- offline again: comment on the task whose creation failed
+      .      | Ask Ana about dates | Write report, Review budget, Plan trip | [comments] ui-changed
+      .      | Ask Ana about dates | Write report, Review budget, Plan trip | -- discard the failed task creation
+      .      | no comments         | Write report, Review budget            | [tasks, comments] ui-changed
+      14.02s | no comments         | Write report, Review budget            | 🔴 >list-fetch-started
+      14.82s | no comments         | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    list.unmount();
+  });
+});
