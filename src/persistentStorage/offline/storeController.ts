@@ -1,5 +1,6 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
 import {
@@ -85,6 +86,8 @@ const REPLAY_LOCK_UNAVAILABLE_WARNING =
   '[TSDF] navigator.locks is unavailable; with several tabs open, a queued offline mutation can be sent more than once.';
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';
+/** Temp ref -> final ref remaps kept per store for the session lifetime. */
+const MAX_RESOLVED_ENTITY_REFS = 1000;
 
 /**
  * List-query placement declared for a pending temp entity. Stores without
@@ -134,13 +137,15 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
     addToQueries: ListQueryAddItemToQueries<TQueryPayload, ValidPayload>[],
   ) => Promise<unknown> | undefined;
   /**
-   * Another tab reconciled a temp entity of the store. The final item's data
-   * arrives through the store's tab sync; this applies what only this tab
-   * knows (like where the temp item sits in its lists) and notifies listeners.
+   * Another tab reconciled a temp entity of the store. This tab replaces its
+   * own copy of the temp item (also where it sits in its lists), with
+   * `finalData` when the sender had it, and notifies listeners. The store's
+   * tab sync then brings the item snapshots of the sender.
    */
   applyTempReconciliationFromAnotherTab?: (
     tempId: ValidPayload,
     finalPayload: ValidPayload,
+    finalData: unknown,
   ) => void;
   captureQueuedMutationOverlays?: (args: {
     sessionKey: string;
@@ -451,12 +456,24 @@ function normalizeEntityRefs(entityRefs: OfflineEntityRef[]): string {
   );
 }
 
-function serializePayload(value: ValidPayload): string {
-  return JSON.stringify(value);
+function formatPayloadForError(value: ValidPayload): string {
+  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-function formatPayloadForError(value: ValidPayload): string {
-  return typeof value === 'string' ? value : serializePayload(value);
+/**
+ * Runs store code that calls the app's listeners after the server already
+ * applied a replayed mutation. A listener that throws must not fail the replay
+ * (the mutation would be sent again), so its error is thrown later, out of the
+ * replay, where the app's error reporting still sees it.
+ */
+function runWithoutFailingReplay(run: () => void): void {
+  try {
+    run();
+  } catch (error) {
+    setTimeout(() => {
+      throw error;
+    }, 0);
+  }
 }
 
 function compareQueueEntries(
@@ -523,6 +540,11 @@ export type OfflineStoreController<
   }) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
   getItemOfflineState: (itemKey: string) => ItemOfflineState | null;
+  /**
+   * Latest known final ref of an entity created offline, or the ref itself
+   * while it was not reconciled (by this tab or another one) in this session.
+   */
+  resolveEntityRef: <TRef extends ValidPayload>(entityRef: TRef) => TRef;
   getOfflineResolutions: () => OfflineResolutionRecordForStore<TOperations>[];
   parseOfflineResolutionConflict: <TName extends keyof TOperations & string>(
     resolution: OfflineResolutionRecordForStore<TOperations, TName>,
@@ -918,7 +940,9 @@ export function createOfflineStoreController<
     const seen = new Set<string>();
 
     while (true) {
-      const serializedRef = serializePayload(currentRef);
+      // Same key as the stores' item keys: object payloads match whatever the
+      // order of their keys
+      const serializedRef = getCompositeKey(currentRef);
       if (seen.has(serializedRef)) {
         // WORKAROUND: The resolver preserves the caller's entity-ref payload shape,
         // but the remap table stores refs behind the shared ValidPayload boundary.
@@ -941,9 +965,18 @@ export function createOfflineStoreController<
     nextRef: ValidPayload,
   ): void {
     resolvedEntityRefBySerializedRef.set(
-      serializePayload(previousRef),
+      getCompositeKey(previousRef),
       resolveEntityRef(nextRef),
     );
+
+    // The table lives as long as the session: drop the oldest remaps so it
+    // cannot grow without bound in a long session.
+    if (resolvedEntityRefBySerializedRef.size > MAX_RESOLVED_ENTITY_REFS) {
+      for (const oldestSerializedRef of resolvedEntityRefBySerializedRef.keys()) {
+        resolvedEntityRefBySerializedRef.delete(oldestSerializedRef);
+        break;
+      }
+    }
   }
 
   function scheduleReplayRetry(): void {
@@ -1277,14 +1310,16 @@ export function createOfflineStoreController<
           revalidateDiscardedWork(discardedWork, new Set(removedEntityKeys));
         });
       },
-      onRemoteTempReconciled: (tempId, finalPayload) => {
-        // The replaying tab already rewrote and broadcast the queued records
-        // that referenced the temp entity; this tab maps the temp payload and
-        // replaces its own copy of the temp entity
+      onRemoteTempReconciled: (tempId, finalPayload, finalData) => {
+        // Sent before the replaying tab rewrites the queued records that
+        // reference the temp entity (those reach this tab in later messages):
+        // this tab maps the temp payload and replaces its own copy of the
+        // temp entity
         rememberResolvedEntityRef(tempId, finalPayload);
         storeAdapter.applyTempReconciliationFromAnotherTab?.(
           tempId,
           finalPayload,
+          finalData,
         );
       },
     });
@@ -2372,7 +2407,6 @@ export function createOfflineStoreController<
     tempId: ValidPayload;
     finalPayload: ValidPayload;
   }): Promise<void> {
-    rememberResolvedEntityRef(args.tempId, args.finalPayload);
     const changedQueueEntries: OfflineQueueEntry[] = [];
     const entityRefRewrites: Array<{
       previousEntityRefs: OfflineEntityRef[];
@@ -2476,7 +2510,8 @@ export function createOfflineStoreController<
     const tempEntity = operation.tempEntity;
     const tempEntities = operation.tempEntities;
     if (!tempEntity && !tempEntities) return;
-    if (!storeAdapter.reconcileTempEntity) return;
+    const reconcileTempEntity = storeAdapter.reconcileTempEntity;
+    if (!reconcileTempEntity) return;
 
     // The server already applied the mutation, so a failed storage read, or a
     // throwing `addToQueries` filter, must not fail the replay: the temp items
@@ -2504,13 +2539,23 @@ export function createOfflineStoreController<
         storeName,
         tempId,
         reconciliation.finalPayload,
+        reconciliation.finalData,
       );
-      storeAdapter.reconcileTempEntity({
-        operationName: args.operationName,
-        input: args.input,
-        tempId,
-        result: args.result,
-        reconciliation,
+      // Mapped before the store emits `tempEntityReconciled`, so a listener
+      // can already resolve the temp payload, as in the other tabs. Not when
+      // the session changed while the request was running: the mapping
+      // belongs to the session that created the entity.
+      if (isActiveSessionState(args.current)) {
+        rememberResolvedEntityRef(tempId, reconciliation.finalPayload);
+      }
+      runWithoutFailingReplay(() => {
+        reconcileTempEntity({
+          operationName: args.operationName,
+          input: args.input,
+          tempId,
+          result: args.result,
+          reconciliation,
+        });
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
@@ -2544,13 +2589,22 @@ export function createOfflineStoreController<
         storeName,
         reconciliation.tempId,
         reconciliation.finalPayload,
+        reconciliation.finalData,
       );
-      storeAdapter.reconcileTempEntity({
-        operationName: args.operationName,
-        input: args.input,
-        tempId: reconciliation.tempId,
-        result: args.result,
-        reconciliation,
+      if (isActiveSessionState(args.current)) {
+        rememberResolvedEntityRef(
+          reconciliation.tempId,
+          reconciliation.finalPayload,
+        );
+      }
+      runWithoutFailingReplay(() => {
+        reconcileTempEntity({
+          operationName: args.operationName,
+          input: args.input,
+          tempId: reconciliation.tempId,
+          result: args.result,
+          reconciliation,
+        });
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
@@ -5067,6 +5121,12 @@ export function createOfflineStoreController<
     queueMutation,
     getOfflineEntities,
     getItemOfflineState,
+    resolveEntityRef: (entityRef) => {
+      // The remaps belong to the session they were recorded in: this drops
+      // them when the session changed since
+      ensureActiveSession();
+      return resolveEntityRef(entityRef);
+    },
     getOfflineResolutions,
     parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,

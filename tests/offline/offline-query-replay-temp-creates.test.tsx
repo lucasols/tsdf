@@ -44,10 +44,15 @@ afterEach(() => {
 });
 
 describe('list-query replay', () => {
-  test('temp create replays before the queued edit and remaps it to the final server id', async () => {
-    network.setOffline();
-    const sessionKey = 'offline-replay-temp-create-then-edit-session';
-    const storeName = 'offline-replay-temp-create-then-edit-store';
+  /**
+   * A users list where Linus is created while offline under a temp id and
+   * renamed before reconnecting, so the queue holds the creation followed by
+   * an edit that still targets the temp id.
+   */
+  async function queueTempCreateThenEdit(
+    sessionKey: string,
+    storeName: string,
+  ) {
     const usersQuery = { tableId: 'users' } as const;
     let nextUserId = 3;
     const replayedOperations: Array<{
@@ -213,6 +218,18 @@ describe('list-query replay', () => {
       });
     });
 
+    return { env, hook, replayedOperations };
+  }
+
+  test('temp create replays before the queued edit and remaps it to the final server id', async () => {
+    network.setOffline();
+    const sessionKey = 'offline-replay-temp-create-then-edit-session';
+    const storeName = 'offline-replay-temp-create-then-edit-store';
+    const { env, hook, replayedOperations } = await queueTempCreateThenEdit(
+      sessionKey,
+      storeName,
+    );
+
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       ['Ada', 'Grace', 'Linus edited']
     `);
@@ -298,6 +315,61 @@ describe('list-query replay', () => {
       14.41s | Ada, Grace, Linus edited  | success      | 🔴 >list-fetch-started
       15.21s | Ada, Grace, Linus edited  | success      | 🔴 <list-fetch-finished (value: {"count":3})
       "
+    `);
+
+    hook.unmount();
+  });
+
+  test('a listener that throws when the creation is saved does not make the creation be sent again', async () => {
+    network.setOffline();
+    const sessionKey = 'offline-replay-temp-create-listener-throws-session';
+    const storeName = 'offline-replay-temp-create-listener-throws-store';
+    const { env, hook, replayedOperations } = await queueTempCreateThenEdit(
+      sessionKey,
+      storeName,
+    );
+
+    // App code that follows the record to its final payload has a bug and
+    // throws when the creation is saved
+    env.apiStore.storeEvents.on('tempEntityReconciled', () => {
+      throw new Error('bug in the app listener');
+    });
+
+    // Reconnect and replay the queue. The listener runs after the server
+    // already saved Linus, so its error must not count as a failed creation.
+    await act(async () => {
+      network.goOnline();
+      await Promise.resolve();
+      // The error is not swallowed: it is thrown out of the replay as an
+      // uncaught error, which the app's error reporting sees. With fake timers
+      // it surfaces from the timers flush.
+      await expect(flushAllTimers()).rejects.toThrow('bug in the app listener');
+      await flushAllTimers();
+      await Promise.resolve();
+    });
+
+    // Linus is created only once, and the queued edit is sent for the saved
+    // user instead of the temp id
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input: { name: 'Linus offline' }
+        operation: 'createUser'
+      - input: { itemId: 'users||3', name: 'Linus edited' }
+        operation: 'patchUserName'
+    `);
+    // Nothing is left to send or to resolve
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+    // The list shows the saved user with the edit, and the server has a single
+    // Linus
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus edited']`,
+    );
+    expect(env.serverTable.getAll()).toMatchInlineSnapshot(`
+      users||1: { id: 1, name: 'Ada' }
+      users||2: { id: 2, name: 'Grace' }
+      users||3: { id: 3, name: 'Linus edited' }
     `);
 
     hook.unmount();

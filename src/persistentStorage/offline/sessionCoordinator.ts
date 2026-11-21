@@ -134,15 +134,21 @@ type SessionResolutionMessage = BrowserTabsMessageMeta & {
 
 /**
  * A tab replayed the creation of a temp entity and the server assigned its
- * final payload. The item data reaches the other tabs through the store's own
- * tab sync; this message lets them map the temp payload to the final one, so
- * a tab that queued the creation still learns where its temp entity went.
+ * final payload. Sent before the replacement, so the other tabs replace the
+ * temp item themselves (in their own lists too) before the store's tab sync
+ * tells them it was deleted, map the temp payload to the final one, and emit
+ * `tempEntityReconciled`, wherever the creation was queued.
  */
 type SessionTempReconciledMessage = BrowserTabsMessageMeta & {
   kind: 'offline-temp-reconciled';
   storeName: string;
   tempId: ValidPayload;
   finalPayload: ValidPayload;
+  /**
+   * The saved item data, when the operation's reconciliation provides it.
+   * Missing in messages sent by tabs running an older version.
+   */
+  finalData?: unknown;
 };
 
 /** Queued work the user discarded: what its refetch needs. */
@@ -256,6 +262,7 @@ type SessionRegistration = {
   onRemoteTempReconciled?: (
     tempId: ValidPayload,
     finalPayload: ValidPayload,
+    finalData: unknown,
   ) => void;
   /** Another tab discarded queued work of the store. */
   onRemoteWorkDiscarded?: (
@@ -1055,7 +1062,11 @@ class SessionOfflineCoordinator {
           if (message.kind === 'offline-temp-reconciled') {
             this.#registrations
               .get(message.storeName)
-              ?.onRemoteTempReconciled?.(message.tempId, message.finalPayload);
+              ?.onRemoteTempReconciled?.(
+                message.tempId,
+                message.finalPayload,
+                message.finalData,
+              );
             return;
           }
           if (message.kind === 'offline-work-discarded') {
@@ -1396,6 +1407,7 @@ class SessionOfflineCoordinator {
     storeName: string,
     tempId: ValidPayload,
     finalPayload: ValidPayload,
+    finalData: unknown,
   ): void {
     if (this.#disposed) return;
 
@@ -1404,6 +1416,7 @@ class SessionOfflineCoordinator {
       storeName,
       tempId,
       finalPayload,
+      ...(finalData === undefined ? {} : { finalData }),
     });
   }
 

@@ -269,3 +269,5 @@ store.storeEvents.on('mutationEnd', ({ mutationId, status }) => {
 `status` is `'success' | 'error' | 'skipped'`. A mutation is `'skipped'` when its `optimisticUpdate` callback returns `false` or when a debounced mutation is superseded by a newer one with the same debounce key — these are not failures and should usually not trigger error handling.
 
 Collection and List Query stores also include the affected `payload`/`items` in the event.
+
+Collection and List Query stores also emit `tempEntityReconciled` (`{ tempId, finalPayload }`) when an item created offline is saved, in every tab of the session. See [Offline - Following a temp entity to its final payload](./offline.md#following-a-temp-entity-to-its-final-payload).

@@ -155,6 +155,7 @@ if (result.ok) {
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).
 - `blockWindowClose` on `createStoreManager(...)` prevents accidental window close mid-mutation; it defaults to `null`.
 - Lifecycle events: `store.storeEvents.on('mutationStart' | 'mutationEnd', ...)`.
+- Items created offline: `store.storeEvents.on('tempEntityReconciled', ({ payload: { tempId, finalPayload } }) => ...)` fires in every tab when the item is saved; `store.resolveTempItemPayload(payload)` returns the final payload later (Collection, List Query).
 
 Docs: `docs/mutations.md`.
 

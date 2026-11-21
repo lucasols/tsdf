@@ -327,6 +327,30 @@ tempEntity: {
 },
 ```
 
+### Following a temp entity to its final payload
+
+When a queued creation is saved, TSDF replaces the temp payload with the final one: the item state, the query memberships (the saved item takes the place of the temp row) and the offline state of the item. This happens in every open tab of the session, whichever tab sent the creation.
+
+Code that keeps a temp payload outside the store (a route open on the record, a selection, an embedded frame that created it) can follow the record in two ways:
+
+```ts
+// Called in every tab when the creation is saved
+const stopListening = userStore.storeEvents.on(
+  'tempEntityReconciled',
+  ({ payload: { tempId, finalPayload } }) => {
+    if (openedUserPayload.id === tempId.id) openUser(finalPayload);
+  },
+);
+
+// Or ask later, for a payload that may still be the temp one
+const userPayload = userStore.resolveTempItemPayload(openedUserPayload);
+```
+
+`resolveTempItemPayload(payload)` returns the final payload once the item was saved, and the given payload otherwise. Collection and list-query stores have both the event and the lookup.
+
+- The mapping is kept in memory, for the tabs that were open when the creation was saved (the 1000 most recent creations per store). A tab opened or reloaded afterwards starts from the saved item and cannot resolve the old temp payload, so replace temp payloads kept in URLs when the event fires.
+- A tab that does not hold the temp item is still told about it and can resolve it.
+
 ### Deleting entities created offline
 
 When the user deletes something that was created offline, the server may have never seen it. Declare this on the delete operation with `supersedes.dropSelfIfTempLifecycleCancelled`:
@@ -499,7 +523,7 @@ Tabs of the same session share one offline queue. Every tab can queue mutations 
 - The **leading tab** replays the queue: the visible tab, or the one that was visible most recently. `useOfflineStatus().isLeader` tells whether the current tab leads.
 - A mutation queued in any other tab is sent by the leading tab after the connection recovers, in the order the mutations were queued across tabs. No reload or tab switch is needed.
 - Every queued mutation is sent once. A cross-tab lock (Web Locks API) keeps two tabs from replaying a store's queue at the same time, and a tab drops an entry as soon as another tab reports it as sent, so it does not send it again when it leads later. Where the Web Locks API is unavailable (pages served over plain `http` other than `localhost`), this guarantee does not hold and TSDF logs a warning. It also only holds between tabs running the same app version (`getAppVersion`) and the same TSDF release: tabs on different versions do not see each other's messages, so after a deploy an old tab and a new tab can both send the same queued mutation.
-- When the leading tab sends a temp-entity creation queued in another tab, every tab with the store emits `tempEntityReconciled`, so a view that follows the temp id can switch to the final one in any tab.
+- When the leading tab sends a temp-entity creation queued in another tab, every tab with the store replaces the temp item with the saved one and emits `tempEntityReconciled`, so a view that follows the temp id can switch to the final one in any tab. See [Following a temp entity to its final payload](#following-a-temp-entity-to-its-final-payload).
 - When the leading tab is closed or hidden, a visible tab takes over. When the previous tab was replaying or just did, the new one first waits for the mutation that tab is sending to finish, then up to a second more, so it learns what that tab already sent before it starts.
 
 Things to keep in mind:
