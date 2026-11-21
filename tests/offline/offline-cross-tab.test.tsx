@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type {
   CollectionOfflineOperationDefinition,
   DocumentOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
   PersistentStorageSchema,
   ValidPayload,
 } from '../../src/main';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
+import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
@@ -624,6 +626,15 @@ type CreateUserWithIdOperations = {
   >;
 };
 
+/** Deletes a user. A user created offline is created and then deleted. */
+type DeleteUserOperations = {
+  deleteUser: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { id: string }
+  >;
+};
+
 async function openUsersTab(
   name: string,
   options: {
@@ -651,7 +662,10 @@ async function openUsersTab(
   });
   const env = createCollectionStoreTestEnv<
     { name: string },
-    CreateUserOperations & RenameUserOperations & CreateUserWithIdOperations
+    CreateUserOperations &
+      RenameUserOperations &
+      CreateUserWithIdOperations &
+      DeleteUserOperations
   >(
     Object.fromEntries(
       (options.loadedUsers ?? []).map((payload) => [
@@ -735,6 +749,18 @@ async function openUsersTab(
                 });
               },
             },
+            deleteUser: {
+              inputSchema: rc_object({ id: rc_string }),
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.id],
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent delete ${input.id}`);
+                await env.serverTable.delayedRemoveItem(input.id);
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.deleteItemState(input.id);
+              },
+            },
           },
         },
       },
@@ -757,6 +783,23 @@ async function openUsersTab(
     /** What code holding a user's temp id resolves it to in this tab. */
     resolveTempItemPayload(payload: string) {
       return env.apiStore.resolveTempItemPayload(payload);
+    },
+    /**
+     * The name a screen of this tab renders for the user, with the changes
+     * still waiting to be sent applied (`null` for a deleted user). The
+     * screen does not fetch on its own.
+     */
+    async renderUserName(payload: string) {
+      const screen = renderHook(() =>
+        env.apiStore.useItem(payload, {
+          disableRefetches: true,
+          disableRefetchOnMount: true,
+        }),
+      );
+      await advanceTime(10);
+      const userName = screen.result.current.data?.value.name ?? null;
+      screen.unmount();
+      return userName;
     },
     /**
      * Whether the user is marked for a refetch: set when the store is
@@ -797,6 +840,19 @@ async function openUsersTab(
       });
       await advanceTime(10);
     },
+    /** Deletes a user offline, removing it from the screen right away. */
+    async queueDelete(payload: string) {
+      await env.apiStore.performMutation(payload, {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState(payload);
+        },
+        mutation: async () => {
+          await env.serverTable.delayedRemoveItem(payload);
+        },
+        offline: { operation: 'deleteUser', input: { id: payload } },
+      });
+      await advanceTime(10);
+    },
     /**
      * Creates a user offline under an id generated in this tab, showing it
      * right away.
@@ -831,6 +887,16 @@ async function openUsersTab(
 
 const usersListQuery = { tableId: 'users' } as const;
 
+/** Deletes a user. A user created offline is created and then deleted. */
+type DeleteListQueryUserOperations = {
+  deleteUser: ListQueryOfflineOperationDefinition<
+    { id: number; name: string },
+    ListQueryParams,
+    string,
+    { id: string }
+  >;
+};
+
 /**
  * Opens a simulated tab (see `openTab`) with a users list-query store whose
  * offline `createUser` operation lists the new user under a temp id
@@ -862,7 +928,7 @@ async function openUsersListTab(
     { id: number; name: string },
     false,
     false,
-    CreateListQueryUserOperations
+    CreateListQueryUserOperations & DeleteListQueryUserOperations
   >(
     {},
     {
@@ -896,6 +962,18 @@ async function openUsersListTab(
                 const result = { id: 2, name: input.name };
                 await env.serverTable.delayedSetItem('users||2', result);
                 return result;
+              },
+            },
+            deleteUser: {
+              inputSchema: rc_object({ id: rc_string }),
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.id],
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent delete ${input.id}`);
+                await env.serverTable.delayedRemoveItem(input.id);
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.deleteItemState(input.id);
               },
             },
           },
@@ -936,6 +1014,23 @@ async function openUsersListTab(
     resolveTempItemPayload(payload: string) {
       return env.apiStore.resolveTempItemPayload(payload);
     },
+    /**
+     * The name a screen of this tab renders for the user, with the changes
+     * still waiting to be sent applied (`null` for a deleted user). The
+     * screen does not fetch on its own.
+     */
+    async renderUserName(payload: string) {
+      const screen = renderHook(() =>
+        env.apiStore.useItem(payload, {
+          disableRefetches: true,
+          disableRefetchOnMount: true,
+        }),
+      );
+      await advanceTime(10);
+      const userName = screen.result.current.data?.name ?? null;
+      screen.unmount();
+      return userName;
+    },
     /** The rows the users list shows, like `Ada (temp id)`. */
     getListRows() {
       const query = env.apiStore.getQueryState(usersListQuery);
@@ -965,6 +1060,19 @@ async function openUsersListTab(
           return result;
         },
         offline: { operation: 'createUser', input: { name: userName } },
+      });
+      await advanceTime(10);
+    },
+    /** Deletes a user offline, removing it from the list right away. */
+    async queueDelete(payload: string) {
+      await env.apiStore.performMutation(payload, {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState(payload);
+        },
+        mutation: async () => {
+          await env.serverTable.delayedRemoveItem(payload);
+        },
+        offline: { operation: 'deleteUser', input: { id: payload } },
       });
       await advanceTime(10);
     },
@@ -1707,6 +1815,74 @@ test('a user created offline stays in the list of its tab when a tab on another 
       leader: '❌'
       resolutions: []
   `);
+});
+
+test('a user created and then deleted offline stays deleted in the tab that did it while another tab sends both changes', async () => {
+  network.setOffline();
+  await openUsersTab('A', { focused: true });
+  const tabB = await openUsersTab('B', { focused: false });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+
+  // While offline the user creates Ada in tab B and then deletes her there.
+  await tabB.queueCreate('Ada');
+  await tabB.queueDelete('temp:Ada');
+  expect(await tabB.renderUserName('temp:Ada')).toBeNull();
+
+  // On reconnect tab A sends the creation and then the deletion. This is
+  // right before the deletion is saved: the server holds Ada.
+  network.goOnline();
+  await advanceTime(2_200);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A sent create Ada', 'tab A sent delete users||Ada']`,
+  );
+  expect(sharedUsersServer.items.has('users||Ada')).toBe(true);
+
+  // A screen of tab B that resolves the temp id it holds still renders Ada
+  // as deleted: the deletion tab B queued follows her to her final id.
+  const adaInTabB = tabB.resolveTempItemPayload('temp:Ada');
+  expect(adaInTabB).toBe('users||Ada');
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
+
+  // Once the deletion is saved Ada is gone from the server and stays
+  // deleted in tab B
+  await advanceTime(3_000);
+  expect(sharedUsersServer.items.has('users||Ada')).toBe(false);
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
+});
+
+test('a listed user created and then deleted offline stays deleted in the tab that did it while another tab sends both changes', async () => {
+  network.setOffline();
+  await openUsersListTab('A', { focused: true, listOpen: true });
+  const tabB = await openUsersListTab('B', { focused: false, listOpen: true });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+
+  // While offline the user creates Ada in tab B and then deletes her there.
+  await tabB.queueCreate('Ada');
+  await tabB.queueDelete('temp:Ada');
+  expect(await tabB.renderUserName('temp:Ada')).toBeNull();
+
+  // On reconnect tab A sends the creation and then the deletion. This is
+  // right before the deletion is saved: the server holds Ada.
+  network.goOnline();
+  await advanceTime(2_200);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A sent create Ada', 'tab A sent delete users||2']`,
+  );
+  expect(sharedUserRowsServer.items.has('users||2')).toBe(true);
+
+  // A screen of tab B that resolves the temp id it holds still renders Ada
+  // as deleted: the deletion tab B queued follows her to her final id.
+  const adaInTabB = tabB.resolveTempItemPayload('temp:Ada');
+  expect(adaInTabB).toBe('users||2');
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
+
+  // Once the deletion is saved Ada is gone from the server and stays
+  // deleted in tab B
+  await advanceTime(3_000);
+  expect(sharedUserRowsServer.items.has('users||2')).toBe(false);
+  expect(await tabB.renderUserName(adaInTabB)).toBeNull();
 });
 
 test('"+1" clicks queued at the same moment in two tabs all reach the server', async () => {

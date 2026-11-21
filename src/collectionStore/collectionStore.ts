@@ -1711,11 +1711,14 @@ export function createCollectionStore<
         deleteItemState(tempPayload);
         addItemToState(finalPayload, finalData);
       });
-      unsentCreationItemKeys.delete(tempItemKey);
-      rebindOfflineOverlays([
-        { previousItemKey: tempItemKey, nextItemKey: getItemKey(finalPayload) },
-      ]);
     }
+    // The changes this tab queued for the temp item follow it to the saved
+    // one, also when there was nothing to replace (a queued deletion already
+    // removed the temp item here).
+    unsentCreationItemKeys.delete(tempItemKey);
+    rebindOfflineOverlays([
+      { previousItemKey: tempItemKey, nextItemKey: getItemKey(finalPayload) },
+    ]);
 
     storeEvents.emit('tempEntityReconciled', {
       tempId: tempPayload,

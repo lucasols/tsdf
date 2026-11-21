@@ -2321,23 +2321,24 @@ export function createListQueryStore<
             Object.values(store.state.queries).some((query) =>
               query.items.includes(tempItemKey),
             );
-          const reconciled =
-            holdsTempItem &&
+          if (holdsTempItem) {
             runWithoutBroadcast(() =>
               reconcileOfflineTempItem(tempId, finalPayload, finalData),
             );
-          if (reconciled) {
-            unsentCreationItemKeys.delete(tempItemKey);
-            rebindOfflineOverlays([
-              {
-                previousItemKey: tempItemKey,
-                nextItemKey: getItemKey(
-                  // WORKAROUND: Same ValidPayload-to-ItemPayload boundary as above.
-                  __LEGIT_CAST__<ItemPayload, ValidPayload>(finalPayload),
-                ),
-              },
-            ]);
           }
+          // The changes this tab queued for the temp item follow it to the
+          // saved one, also when there was nothing to replace (a queued
+          // deletion already removed the temp item here).
+          unsentCreationItemKeys.delete(tempItemKey);
+          rebindOfflineOverlays([
+            {
+              previousItemKey: tempItemKey,
+              nextItemKey: getItemKey(
+                // WORKAROUND: Same ValidPayload-to-ItemPayload boundary as above.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(finalPayload),
+              ),
+            },
+          ]);
           // Listeners are told either way, e.g. a page that only holds the id
           emitTempItemReconciled(tempId, finalPayload);
         },
@@ -2620,13 +2621,13 @@ export function createListQueryStore<
 
   /**
    * Replaces an offline temp item with its final one, in place in every query
-   * that lists it. Returns `false` when there is no data for the final item.
+   * that lists it. Does nothing when there is no data for the final item.
    */
   function reconcileOfflineTempItem(
     tempId: ValidPayload,
     finalPayloadValue: ValidPayload,
     finalDataValue: unknown,
-  ): boolean {
+  ): void {
     const tempPayload =
       // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
       __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
@@ -2637,7 +2638,7 @@ export function createListQueryStore<
         ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the list-query store.
           __LEGIT_CAST__<ItemState, unknown>(finalDataValue)
         : (currentItem ?? undefined);
-    if (finalData === undefined) return false;
+    if (finalData === undefined) return;
 
     const finalPayload =
       // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
@@ -2656,7 +2657,7 @@ export function createListQueryStore<
     deleteItemState(tempPayload);
     addItemToState(finalPayload, finalData, undefined, tempLoadedFields);
 
-    if (queryMemberships.length === 0) return true;
+    if (queryMemberships.length === 0) return;
 
     store.produceState(
       (draft) => {
@@ -2681,7 +2682,6 @@ export function createListQueryStore<
     for (const { queryKey } of queryMemberships) {
       publishQuerySnapshot(queryKey);
     }
-    return true;
   }
 
   function cleanupItemStateMetadata(itemKey: string): void {

@@ -1311,9 +1311,10 @@ export function createOfflineStoreController<
         });
       },
       onRemoteTempReconciled: (tempId, finalPayload, finalData) => {
-        // The replaying tab already rewrote and broadcast the queued records
-        // that referenced the temp entity; this tab maps the temp payload and
-        // replaces its own copy of the temp entity
+        // Sent before the replaying tab rewrites the queued records that
+        // reference the temp entity (those reach this tab in later messages):
+        // this tab maps the temp payload and replaces its own copy of the
+        // temp entity
         rememberResolvedEntityRef(tempId, finalPayload);
         storeAdapter.applyTempReconciliationFromAnotherTab?.(
           tempId,
