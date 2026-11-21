@@ -22,10 +22,10 @@ import { summarizeResolution } from './offlineTestShared';
 
 setupCancelUnsentCreationTests();
 
-type NotesItem = { text: string };
-
 const notesInputSchema = rc_object({ taskId: rc_string, text: rc_string });
 const notesSchema = rc_object({ value: rc_object({ text: rc_string }) });
+
+type NotesItem = { text: string };
 
 type NotesOperations = {
   saveNotes: CollectionOfflineOperationDefinition<
