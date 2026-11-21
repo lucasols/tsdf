@@ -220,6 +220,8 @@ With [partial resources](./partial-resources.md), "cached" is decided per hook, 
 
 Both can be mounted for the same item or query at the same time: the hook waiting for missing fields does not disturb the one reading cached fields.
 
+A cached list query that lost a row before one of the rows that are left (or every row) is not a cached read: it is not reported as a complete `success`. A list that only lost its last rows (e.g. to `maxItemBytes`) is still a cached read, with fewer rows. Hooks return the rows that are left with `status: 'error'` and the offline error (`isOfflineStoreError(error)`), so the screen can show them together with a notice that the list is incomplete. See [Cached list queries that lost rows](./persistent-storage.md#cached-list-queries-that-lost-rows).
+
 Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
 
 ## Revalidation After Recovering
@@ -259,6 +261,51 @@ Optional replay behavior:
 Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up and sends or resolves them. Apps are expected to reload tabs running an old deploy: TSDF doesn't coordinate the order of offline work between deploys, so an old tab can send its own edits around the work it keeps. Records of an operation removed from the app for good also stay in storage until the session's storage is cleared (`clearSessionStorage`), so keep an operation defined until its queued work is likely gone.
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
+
+### Temp Entities in List Queries
+
+In a list-query store the pending entity is inserted as an item only, so it is not part of any list unless `optimisticListUpdates` rules match it. Declare `addToQueries` to add it to the lists that should show it while the mutation is queued:
+
+```ts
+createUser: {
+  inputSchema: createUserInputSchema,
+  kind: 'create',
+  getEntityRefs: ({ input }) => [`temp:${input.clientId}`],
+  tempEntity: {
+    buildPendingEntity: (input) => ({ id: input.clientId, name: input.name }),
+    // Same shape as the `addItemToQueries` option of `addItemToState`,
+    // or a function of the mutation input that returns it
+    addToQueries: (input) => ({
+      queries: { teamId: input.teamId },
+      appendTo: 'start',
+    }),
+    reconcileServerEntity: (result) => ({
+      finalPayload: result.id,
+      finalData: result,
+    }),
+  },
+  execute: ({ input }) => api.createUser(input),
+},
+```
+
+- The entity is added to the queries when the mutation is queued, so `optimisticUpdate` does not need to call `addItemToState` for it. A mutation that runs online right away is never queued and creates no pending entity.
+- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function only matches the queries the app session already knows, so prefer query payloads.
+- The membership is stored with the queries, so the row is still in its lists after the app restarts with the mutation queued.
+- When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. The declared queries that are only in persistent storage are loaded first: the function form of `addToQueries` runs again for this, so it should only depend on its arguments. Discarding the queued mutation removes the row from its lists.
+- While the mutation is pending, a list refetch that does not return the row keeps it rendered at its last known position. This memory does not survive an app restart.
+
+With `tempEntities`, each entry returned by `buildPendingEntities` declares its own `addToQueries`. The builder does not run again at replay, so a declared query that is only in persistent storage when the mutation is replayed gets the final entities on its next fetch.
+
+With [partial resources](./partial-resources.md), the pending entity has no loaded-fields metadata, so only `inferFields` can vouch for it. Declare `loadedFields` (for example `'*'`) when the pending entity should count as loaded for hooks that read those fields: it cannot be fetched from the server before the mutation is replayed. The entity keeps the same loaded fields when it is reconciled to its final payload, so a `finalData` returned by the reconcile hook must hold at least those fields; omit `finalData` to keep the pending entity's data instead.
+
+```ts
+tempEntity: {
+  buildPendingEntity: (input) => ({ id: input.clientId, name: input.name }),
+  addToQueries: { queries: { teamId: 'team-1' }, appendTo: 'start' },
+  loadedFields: '*',
+  // ...
+},
+```
 
 ## Conflict Resolution
 
@@ -444,6 +491,70 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `useOfflineUploadFile(id)` — see [Rendering staged files](#rendering-staged-files)
 
 Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+
+### Upload refs
+
+The value the `upload` transport resolves to is the upload ref: whatever the server needs to reference the uploaded file (a string, or an object such as `{ fileId, url }`). `createStoreManager` infers its type from the transport, so it does not have to be narrowed by hand:
+
+```ts
+const uploadRefSchema = rc_object({ fileId: rc_string, url: rc_string });
+
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    uploads: {
+      adapter: opfsOfflineUploadAdapter,
+      // Resolves to `{ fileId: string; url: string }`.
+      upload: ({ file, onProgress }) => api.uploadFile(file, onProgress),
+      // Optional: validates refs restored from storage or other tabs.
+      resolvedRefSchema: uploadRefSchema,
+    },
+  },
+});
+
+// `{ fileId: string; url: string }`
+type UploadRef = StoreManagerUploadRef<typeof storeManager>;
+
+const result = await storeManager.resolveOfflineUpload(attachmentId);
+if (result.ok) console.log(result.value.url);
+```
+
+- `resolveOfflineUpload(id)`, `resolveOfflineUploads(ids)` and the `resolvedRef` of the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()` are typed with the inferred ref.
+- Let the manager type be inferred. Annotating it as plain `StoreManager` (or its config as plain `OfflineSessionConfig`) replaces the inferred ref with the default `ValidPayload`. A manager with a typed ref is still accepted wherever a plain `StoreManager` is expected, including `storeManager` on every store.
+- Stores are created with explicit type arguments, so TypeScript cannot carry the ref type from the `storeManager` option into `execute`. Pass it as the last type argument of `DefineDocumentOfflineOperations`, `DefineCollectionOfflineOperations` or `DefineListQueryOfflineOperations` (the single-operation `*OfflineOperationDefinition` aliases take it last too). Without it, operations keep the default `ValidPayload`:
+
+```ts
+type UserOfflineOperations = DefineListQueryOfflineOperations<
+  User,
+  UsersQuery,
+  UserPayload,
+  { setAvatar: DefineOfflineOperation<{ id: number; uploadId: string }> },
+  UploadRef
+>;
+
+// In the operation definition:
+dependsOnUploads: ({ input }) => [input.uploadId],
+execute: ({ input, uploads }) => {
+  // `UploadRef | undefined`
+  const avatar = uploads.resolvedRefsById[input.uploadId];
+  if (!avatar) throw new Error('Missing avatar upload');
+
+  return api.setUserAvatar(input.id, avatar.fileId);
+},
+```
+
+#### Validating restored refs
+
+A ref returned by the `upload` transport is trusted. A ref can also reach the session without going through the transport: it is persisted with the upload record, so it is read back from the upload adapter after a reload, and other browser tabs publish the refs they resolved. Either source can come from a different app version with a different ref shape.
+
+Set `resolvedRefSchema` to validate those refs. It accepts the same schemas as an operation `inputSchema` (a `runcheck` type or a synchronous Standard Schema such as zod), and its output has to agree with what the transport returns: the inferred ref type is what both produce.
+
+- Refs restored from the upload adapter are parsed once when their record is loaded, and refs received from another tab once per record version.
+- A ref that fails the schema is dropped and its upload goes back to `pending`. The staged file is kept with the record, so the next `resolveOfflineUpload(s)` call or the replay of an operation that depends on the upload sends the file through the transport again and stores the new ref. The dependent operation is not failed, and `execute` never receives the invalid ref. The file uploaded under the old ref is not cleaned up by TSDF.
+- The exception is a ref another tab sends when it deletes an upload that was already sent: its staged file is gone, so a ref that fails the schema can't be uploaded again, and its id stops resolving (`resolveOfflineUpload(s)` returns an unknown upload error).
+- Queued operations only persist upload ids. Their refs are resolved when the operation replays, so they are covered by the same validation.
+- Without `resolvedRefSchema`, restored refs are exposed as they were stored.
 
 ### Upload metadata
 

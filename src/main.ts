@@ -17,6 +17,7 @@ export {
   type CreateStoreManagerOptions,
   type DynamicRealtimeThrottleMs,
   type StoreManager,
+  type StoreManagerUploadRef,
 } from './storeManager';
 export type { RemovedStore } from './persistentStorage/removedStoresCleanup';
 export type {
@@ -49,6 +50,8 @@ export type {
   FieldsInput,
   FieldsOption,
   DerivedQuerySource,
+  ItemLoadedFields,
+  ListQueryAddItemToQueries,
   ListQueryUseMultipleItemsQuery,
   ListQueryUseMultipleListQueriesQuery,
   OffsetPaginationConfig,
@@ -119,6 +122,7 @@ export type {
   OfflineUploadAdapter,
   OfflineUploadFile,
   OfflineUploadProgress,
+  OfflineUploadRefSchema,
   OfflineUploadSource,
   OfflineUploadState,
   OfflineUploadTransportContext,

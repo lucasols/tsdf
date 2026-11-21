@@ -381,6 +381,68 @@ test('online queries fetch from the server when the local group is incomplete', 
   expect(deriveQuery).not.toHaveBeenCalled();
 });
 
+test('online queries are not derived from a group whose full list is still loading for the first time', async () => {
+  const renders = createLoggerStore({ arrays: 'all' });
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    derivedQueries: {
+      getQueryGroup,
+      getItemGroup,
+      // The group is complete once the unfiltered list has every row.
+      isComplete: (_queryPayload, { queries }) =>
+        queries.some((query) => !query.payload.filters && !query.hasMore),
+      deriveQuery: (queryPayload, items) => {
+        const startsWithFilterValue = getStartsWithNameFilter(queryPayload);
+
+        return items
+          .filter(({ data }) =>
+            startsWithFilterValue
+              ? data.name.startsWith(startsWithFilterValue)
+              : true,
+          )
+          .map(({ key }) => key);
+      },
+    },
+  });
+
+  // A "G" search loaded earlier, so the group only has Grace locally.
+  const gSearch = renderHook(() =>
+    env.apiStore.useListQuery({
+      tableId: 'users',
+      filters: [{ field: 'name', op: 'startsWith', value: 'G' }],
+    }),
+  );
+  await flushAllTimers();
+  gSearch.unmount();
+
+  // The full users list starts its first fetch, so it has no rows yet.
+  renderHook(() => env.apiStore.useListQuery({ tableId: 'users' }));
+
+  // An "A" search opens while the full list is still loading.
+  renderHook(() => {
+    const query = env.apiStore.useListQuery({
+      tableId: 'users',
+      filters: [{ field: 'name', op: 'startsWith', value: 'A' }],
+    });
+
+    renders.add({
+      status: query.status,
+      isDerived: query.isDerived,
+      itemNames: query.items.map((item) => item.name),
+    });
+  });
+
+  await flushAllTimers();
+
+  // The "A" search must wait for its own fetch instead of showing an empty
+  // `success` list derived from the single locally known row (Grace).
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ isDerived: ❌ ⋅ itemNames: []
+    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Alan]
+    "
+  `);
+});
+
 test('online queries fetch when deriveQuery explicitly declines to derive a result', async () => {
   const deriveQuery = vi.fn<TestDeriveQuery>(() => false as const);
   const env = createListQueryStoreTestEnv(initialServerData, {

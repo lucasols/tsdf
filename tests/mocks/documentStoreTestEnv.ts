@@ -1,4 +1,7 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  __LEGIT_CAST__,
+  type __LEGIT_ANY__,
+} from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 import {
   createDocumentStore,
@@ -48,9 +51,11 @@ export type DocumentStoreTestScenario<D> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: D };
 
+// Mirrors the store constraint: `any` as the upload ref keeps operations typed
+// with a specific upload ref assignable.
 type TestDocumentOfflineOperationsRegistry<D> = Record<
   string,
-  AnyOfflineOperationDefinition
+  AnyOfflineOperationDefinition<__LEGIT_ANY__>
 > &
   ([D] extends [never] ? never : unknown);
 

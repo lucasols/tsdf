@@ -14,6 +14,7 @@ const compactListQueryLocalStorageEntrySchema = rc_object({
   o: rc_boolean.withFallback(false).optionalKey(),
   p: rc_unknown,
   h: rc_boolean.withFallback(false).optionalKey(),
+  m: rc_boolean.withFallback(false).optionalKey(),
   v: rc_number.optionalKey(),
 });
 
@@ -25,6 +26,11 @@ export type CompactListQueryLocalStorageEntry = {
   hasMore: boolean;
   items: string[];
   lastAccessAt: number;
+  /**
+   * Whether rows were dropped from `items` because their item entries were
+   * evicted from storage, see `PersistedListQueryData.missingItems`.
+   */
+  missingItems?: boolean;
   offlineProtected: boolean;
   payload: unknown;
   version?: number;
@@ -49,6 +55,7 @@ export function parseCompactListQueryLocalStorageEntry(
     offlineProtected: parsed.o === true,
     payload: parsed.p,
     hasMore: parsed.h === true,
+    ...(parsed.m === true ? { missingItems: true } : {}),
     version: parsed.v,
   };
 }
@@ -61,6 +68,7 @@ export function createCompactListQueryLocalStorageEntry(
     i: entry.items,
     p: entry.payload,
     ...(entry.hasMore ? { h: true } : {}),
+    ...(entry.missingItems ? { m: true } : {}),
     ...(entry.offlineProtected ? { o: true } : {}),
     ...(entry.version !== undefined ? { v: entry.version } : {}),
   };

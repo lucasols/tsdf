@@ -35,6 +35,7 @@ const persistedListQueryDataSchema = rc_object({
   payload: rc_unknown,
   items: rc_array(rc_string),
   hasMore: rc_boolean,
+  missingItems: rc_boolean.optional(),
 });
 
 export type NormalizedPersistentStorageDataSchema<TFinal, TStorage = unknown> =
@@ -263,6 +264,7 @@ export type ParsedPersistedListQueryData<QueryPayload extends ValidPayload> = {
   payload: QueryPayload;
   items: string[];
   hasMore: boolean;
+  missingItems?: boolean;
 };
 
 export function parsePersistedListQueryData<QueryPayload extends ValidPayload>(
@@ -275,5 +277,10 @@ export function parsePersistedListQueryData<QueryPayload extends ValidPayload>(
   const payload = validateWithSchema(payloadSchema, result.value.payload);
   if (payload === null) return null;
 
-  return { payload, items: result.value.items, hasMore: result.value.hasMore };
+  return {
+    payload,
+    items: result.value.items,
+    hasMore: result.value.hasMore,
+    ...(result.value.missingItems ? { missingItems: true } : {}),
+  };
 }

@@ -1,12 +1,59 @@
+import { isPromise } from '@ls-stack/utils/typeGuards';
 import type { ValidPayload } from '../utils/storeShared';
 import type {
   OfflineStoredUploadRecord,
   OfflineUpload,
   OfflineUploadFile,
   OfflineUploadProgress,
+  OfflineUploadRefSchema,
   OfflineUploadSource,
   OfflineUploadState,
 } from './offlineUploadTypes';
+
+/**
+ * Parses an upload ref that came from storage or from another tab.
+ *
+ * @returns The parsed ref, or `undefined` when it does not match the schema.
+ */
+export function parseRestoredUploadRef<TResolvedRef extends ValidPayload>(
+  schema: OfflineUploadRefSchema<TResolvedRef>,
+  resolvedRef: unknown,
+): TResolvedRef | undefined {
+  if ('~standard' in schema) {
+    const result = schema['~standard'].validate(resolvedRef);
+
+    // Async schemas are not supported
+    if (isPromise(result) || result.issues) return undefined;
+
+    return result.value;
+  }
+
+  const result = schema.parse(resolvedRef);
+
+  return result.ok ? result.value : undefined;
+}
+
+/**
+ * Applies the outcome of {@link parseRestoredUploadRef} to a restored upload.
+ *
+ * An upload whose ref failed the schema goes back to `pending` without the
+ * ref, so its staged file is uploaded again the next time the ref is needed.
+ */
+export function applyRestoredUploadRef<TUpload extends OfflineUpload>(
+  upload: TUpload,
+  parsedRef: ValidPayload | undefined,
+): TUpload {
+  if (parsedRef !== undefined) {
+    return parsedRef === upload.resolvedRef
+      ? upload
+      : { ...upload, resolvedRef: parsedRef };
+  }
+
+  const pendingUpload = { ...upload, state: 'pending' as const };
+  delete pendingUpload.resolvedRef;
+  delete pendingUpload.progress;
+  return pendingUpload;
+}
 
 function createEmptyUploadFile(
   status: 'idle' | 'loading' | 'missing',
