@@ -105,7 +105,7 @@ await userStore.performMutation(
 
 When the online mutation succeeds, the result value is `{ kind: 'online', data }`. When TSDF queues the mutation for offline replay, the result value is `{ kind: 'queued' }`.
 
-A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) or for the entities it depends on (`dependsOn`), or queued mutations that depend on an entity it changes (e.g. a queued subfolder creation and a delete of its folder), are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them (and be overwritten, or reference an entity the server does not have yet), so it joins the queue and is replayed in the order the user made the changes.
+A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) or for the entities it depends on (`dependsOn`), or queued mutations that depend on an entity it changes (e.g. a queued subfolder creation and a delete of its folder), are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them (and be overwritten, or reference an entity the server does not have yet), so it joins the queue and is replayed in the order the user made the changes. The same applies while the creation of an entity of another store the operation declares in `cancelledWith` is still queued (e.g. a comment added to a task whose creation is being replayed).
 
 Queued mutations and pending resolutions are persisted through the store's own `persistentStorage.adapter`, and the cached entries they reference are protected from cache expiry until the queue is replayed or discarded. They are not migrated when a store's adapter changes: let the queue drain first. See [Changing a store's adapter](./persistent-storage.md#changing-a-stores-adapter).
 
@@ -267,7 +267,7 @@ Collection and list-query operations also define:
 
 - `getEntityRefs({ input })` - Returns affected item/entity refs.
 - `dependsOn({ input })` - Optional dependencies on other offline entities of the same store.
-- `cancelledWith({ input })` - Optional entities of other stores whose cancelled creation also drops this work, and whose creation waiting for a resolution holds it. See [Deleting entities created offline](#deleting-entities-created-offline).
+- `cancelledWith({ input })` - Optional entities of other stores whose cancelled creation also drops this work, whose queued creation this work is queued behind, and whose creation waiting for a resolution holds it. See [Deleting entities created offline](#deleting-entities-created-offline).
 
 Optional replay behavior:
 
@@ -393,7 +393,7 @@ addComment: {
 },
 ```
 
-When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. A comment added with a client-generated id instead of a temporary entity is removed the same way when it was never sent, or when it was held behind the task's creation, with the work queued on it and the work of other stores declared as `cancelledWith` it. While the task's creation waits for a resolution, the comments are held behind it like the work of the tasks store (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)). `cancelledWith` does not rewrite the input when the task gets its server id, so it fits entities whose id the app generates on the client best. It only reaches stores that are instantiated in the tab: work is held only when the tab that queues or replays it has the task's store, and the decision about the creation (cancel, discard, retry) only reaches the stores of the tab where it is made. Held work a decision did not reach stays as a resolution of its own, no longer blocked, for the user to retry or discard.
+When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. A comment added with a client-generated id instead of a temporary entity is removed the same way when it was never sent, or when it was held behind the task's creation, with the work queued on it and the work of other stores declared as `cancelledWith` it. While the task's creation is still queued, a comment added online is queued behind it instead of sent directly. While the task's creation waits for a resolution, the comments are held behind it like the work of the tasks store (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)). `cancelledWith` does not rewrite the input when the task gets its server id, so it fits entities whose id the app generates on the client best. It only reaches stores that are instantiated in the tab: work is held only when the tab that queues or replays it has the task's store, and the decision about the creation (cancel, discard, retry) only reaches the stores of the tab where it is made. Held work a decision did not reach stays as a resolution of its own, no longer blocked, for the user to retry or discard.
 
 ## Conflict Resolution
 

@@ -268,6 +268,12 @@ type SessionRegistration = {
    */
   findCreationResolutionId?: (entityRef: ValidPayload) => string | undefined;
   /**
+   * Whether the creation of `entityRef` (an entity payload of the store) is
+   * still queued: the other stores queue their online work declared as
+   * `cancelledWith` that entity behind it.
+   */
+  hasQueuedCreation?: (entityRef: ValidPayload) => boolean;
+  /**
    * Called when another store of the session sent again, or kept, creations
    * that waited for a manual resolution. `releasedEntityKeys` holds their
    * keys in the source store, `getEntityKey` keys an entity payload of that
@@ -1446,6 +1452,17 @@ class SessionOfflineCoordinator {
     return this.#registrations
       .get(storeName)
       ?.findCreationResolutionId?.(entityRef);
+  }
+
+  /**
+   * Whether the creation of `entityRef` is still queued in store `storeName`,
+   * when that store is attached in this tab.
+   */
+  hasQueuedCreation(storeName: string, entityRef: ValidPayload): boolean {
+    return (
+      this.#registrations.get(storeName)?.hasQueuedCreation?.(entityRef) ===
+      true
+    );
   }
 
   /**

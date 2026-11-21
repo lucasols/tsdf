@@ -782,7 +782,8 @@ export function createOfflineStoreController<
    * or depends on (`dependsOn`), or that depend on an entity this mutation
    * affects, are still waiting to reach the server (queued, replaying or
    * unconfirmed), or the creation of one of those entities waits for a manual
-   * resolution.
+   * resolution, or the creation of an entity of another store the mutation
+   * is declared `cancelledWith` is still queued or waits for one.
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
@@ -853,12 +854,37 @@ export function createOfflineStoreController<
       return true;
     }
 
-    return isHeldBehindTempCreateResolution({
-      operation: prepared.operationName,
-      input: prepared.validatedInput,
-      entityRefs,
-      tempIds: prepared.tempIds,
-    });
+    if (
+      isHeldBehindTempCreateResolution({
+        operation: prepared.operationName,
+        input: prepared.validatedInput,
+        entityRefs,
+        tempIds: prepared.tempIds,
+      })
+    ) {
+      return true;
+    }
+
+    // The creation of an entity of another store the mutation belongs to is
+    // still queued (e.g. a comment on a task whose creation is being
+    // replayed): sent on its own, the mutation would reach the server before
+    // that entity exists there. Queued, it is replayed after the creation,
+    // and held behind it if it ends up waiting for a manual resolution.
+    const current = activeSession;
+    return (
+      current !== null &&
+      prepared.operation.cancelledWith !== undefined &&
+      prepared.operation
+        .cancelledWith({ input: prepared.validatedInput })
+        .some(
+          (externalEntityRef) =>
+            externalEntityRef.storeName !== storeName &&
+            current.session.hasQueuedCreation(
+              externalEntityRef.storeName,
+              externalEntityRef.entityRef,
+            ),
+        )
+    );
   }
 
   function getInitialOfflineMutationAction(
@@ -1273,6 +1299,7 @@ export function createOfflineStoreController<
         ? discardWorkCancelledWithExternalTempEntities
         : undefined,
       findCreationResolutionId,
+      hasQueuedCreation,
       onCreationsReleased: hasCancelledWithOperations
         ? requeueWorkHeldBehindExternalCreations
         : undefined,
@@ -3059,6 +3086,24 @@ export function createOfflineStoreController<
     }
 
     return undefined;
+  }
+
+  /**
+   * Whether the creation of an entity of this store is still queued. Lets
+   * the other stores queue their online work declared `cancelledWith` that
+   * entity behind it (see `hasQueuedWorkForSameEntities`).
+   */
+  function hasQueuedCreation(entityRef: ValidPayload): boolean {
+    if (queueEntries.size === 0) return false;
+
+    const entityKey = getEntityKeyOfPayload(entityRef);
+    if (entityKey === undefined) return false;
+
+    for (const entry of queueEntries.values()) {
+      if (getCreatedEntityKeys(entry).includes(entityKey)) return true;
+    }
+
+    return false;
   }
 
   /**

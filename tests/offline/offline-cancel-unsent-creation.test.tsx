@@ -12,6 +12,7 @@ import {
 } from '../utils/genericTestUtils';
 import {
   createStoreManagerForSession,
+  createTasksAndCommentsEnv,
   createTasksEnv,
   network,
   setupCancelUnsentCreationTests,
@@ -20,7 +21,6 @@ import {
 import {
   deleteItemInputSchema,
   getSortedQueueSummary,
-  getSortedSessionQueueSummary,
   userPatchSchema,
 } from './offlineReplayTestShared';
 import {
@@ -1096,241 +1096,6 @@ describe('collection items', () => {
 });
 
 describe('items of other stores', () => {
-  type CommentItem = { text: string; taskId: string };
-  type CommentsOperations = {
-    addComment: CollectionOfflineOperationDefinition<
-      { value: CommentItem },
-      string,
-      CommentItem,
-      unknown,
-      { id: string; text: string; taskId: string }
-    >;
-    editComment: CollectionOfflineOperationDefinition<
-      { value: CommentItem },
-      string,
-      { itemId: string; text: string },
-      unknown
-    >;
-    addCommentWithId: CollectionOfflineOperationDefinition<
-      { value: CommentItem },
-      string,
-      { id: string; text: string; taskId: string },
-      unknown
-    >;
-  };
-  type CommentsEnv = ReturnType<
-    typeof createCollectionStoreTestEnv<CommentItem, CommentsOperations>
-  >;
-
-  const commentInputSchema = rc_object({ text: rc_string, taskId: rc_string });
-  const commentSchema = rc_object({ value: commentInputSchema });
-  const editCommentInputSchema = rc_object({
-    itemId: rc_string,
-    text: rc_string,
-  });
-  const commentWithIdInputSchema = rc_object({
-    id: rc_string,
-    text: rc_string,
-    taskId: rc_string,
-  });
-
-  /**
-   * A task list plus a separate comments collection in the same offline
-   * session. Comments can be added offline (temp items `temp:<text>`), also
-   * to a task that was itself created offline: `cancelledWith` tells the
-   * comments store which task of the tasks store a queued comment belongs to.
-   * `addCommentWithId` adds a comment whose id the app generates on the
-   * client, so it needs no temp item.
-   */
-  function createTasksAndCommentsEnv(sessionKey: string) {
-    const tasksStoreName = `${sessionKey}-tasks`;
-    const commentsStoreName = `${sessionKey}-comments`;
-    const storeManager = createStoreManagerForSession(sessionKey);
-    const tasks = createTasksEnv(sessionKey, tasksStoreName, storeManager);
-    const sentRequests: string[] = [];
-    let nextCommentId = 1;
-
-    const comments: CommentsEnv = createCollectionStoreTestEnv<
-      CommentItem,
-      CommentsOperations
-    >(
-      {},
-      {
-        id: commentsStoreName,
-        getSessionKey: () => sessionKey,
-        storeManager,
-        testScenario: 'loaded',
-        persistentStorage: {
-          adapter: 'local-sync',
-          schema: commentSchema,
-          payloadSchema: rc_string,
-          offline: {
-            operations: {
-              addComment: {
-                inputSchema: commentInputSchema,
-                kind: 'create',
-                getEntityRefs: ({ input }) => [`temp:${input.text}`],
-                cancelledWith: ({ input }) => [
-                  { storeName: tasksStoreName, entityRef: input.taskId },
-                ],
-                tempEntity: {
-                  buildPendingEntity: (input) => ({ value: input }),
-                  reconcileServerEntity: (result) => ({
-                    finalPayload: result.id,
-                    finalData: {
-                      value: { text: result.text, taskId: result.taskId },
-                    },
-                  }),
-                },
-                execute: async ({ input }) => {
-                  sentRequests.push(
-                    `addComment "${input.text}" to ${input.taskId}`,
-                  );
-                  const result = { id: `comments||${nextCommentId}`, ...input };
-                  nextCommentId += 1;
-                  await comments.serverTable.delayedSetItem(result.id, input);
-                  return result;
-                },
-              },
-              editComment: {
-                inputSchema: editCommentInputSchema,
-                kind: 'update',
-                getEntityRefs: ({ input }) => [input.itemId],
-                execute: async ({ input }) => {
-                  sentRequests.push(
-                    `editComment ${input.itemId} to "${input.text}"`,
-                  );
-                  await comments.serverTable.delayedUpdateItem(input.itemId, {
-                    text: input.text,
-                  });
-                  return { text: input.text };
-                },
-                onSuccessExecute: ({ input }) => {
-                  comments.apiStore.updateItemState(input.itemId, (draft) => {
-                    draft.value.text = input.text;
-                  });
-                },
-              },
-              addCommentWithId: {
-                inputSchema: commentWithIdInputSchema,
-                kind: 'create',
-                getEntityRefs: ({ input }) => [input.id],
-                cancelledWith: ({ input }) => [
-                  { storeName: tasksStoreName, entityRef: input.taskId },
-                ],
-                execute: async ({ input: { id, text, taskId } }) => {
-                  sentRequests.push(
-                    `addCommentWithId ${id} "${text}" to ${taskId}`,
-                  );
-                  await comments.serverTable.delayedSetItem(id, {
-                    text,
-                    taskId,
-                  });
-                },
-                onSuccessExecute: () => {},
-              },
-            },
-          },
-        },
-      },
-    );
-
-    function addComment(text: string, taskId: string) {
-      return act(async () => {
-        await comments.apiStore.performMutation(null, {
-          mutation: async () => {
-            const result = { id: 'comments||online', text, taskId };
-            await comments.serverTable.delayedSetItem(result.id, {
-              text,
-              taskId,
-            });
-            return result;
-          },
-          offline: { operation: 'addComment', input: { text, taskId } },
-        });
-      });
-    }
-
-    function addCommentWithId(id: string, text: string, taskId: string) {
-      return act(async () => {
-        await comments.apiStore.performMutation(id, {
-          optimisticUpdate: () => {
-            comments.apiStore.addItemToState(id, { value: { text, taskId } });
-          },
-          mutation: () =>
-            comments.serverTable.delayedSetItem(id, { text, taskId }),
-          offline: {
-            operation: 'addCommentWithId',
-            input: { id, text, taskId },
-          },
-        });
-      });
-    }
-
-    function editComment(itemId: string, text: string) {
-      return act(async () => {
-        await comments.apiStore.performMutation(itemId, {
-          optimisticUpdate: () => {
-            comments.apiStore.updateItemState(itemId, (draft) => {
-              draft.value.text = text;
-            });
-          },
-          mutation: async () => {
-            await comments.serverTable.delayedUpdateItem(itemId, { text });
-            return { text };
-          },
-          offline: { operation: 'editComment', input: { itemId, text } },
-        });
-      });
-    }
-
-    /**
-     * Mounts the task list and tracks, in the timeline of the tasks store,
-     * the visible tasks and the comments the comments store holds locally.
-     */
-    function renderTasksAndComments() {
-      return renderHook(() => {
-        const query = tasks.apiStore.useListQuery(tasksQuery, {
-          itemSelector: (item) => item.name,
-        });
-        const localComments = comments.store.useSelector((state) =>
-          Object.values(state)
-            .map((comment) => comment?.data?.value.text)
-            .filter((text) => text !== undefined)
-            .join(', '),
-        );
-
-        tasks.trackItemUI('tasks', query.items.join(', '));
-        tasks.trackItemUI('comments', localComments || 'no comments');
-        return query;
-      });
-    }
-
-    return {
-      tasks,
-      comments,
-      storeManager,
-      tasksStoreName,
-      commentsStoreName,
-      sentRequests,
-      addComment,
-      addCommentWithId,
-      editComment,
-      renderTasksAndComments,
-      /** Queued mutations of both stores, in replay order. */
-      getSessionQueue: () =>
-        getSortedSessionQueueSummary(sessionKey, ['operation', 'input']),
-      /** Text of the comments that exist locally, by payload. */
-      getLocalComments: (payloads: string[]) =>
-        Object.fromEntries(
-          payloads.map((payload) => [
-            payload,
-            comments.apiStore.getItemState(payload)?.data?.value.text ?? null,
-          ]),
-        ),
-    };
-  }
-
   test('deleting a task created offline also drops the comments queued on it in the comments store', async () => {
     network.setOffline();
     const env = createTasksAndCommentsEnv('cancel-unsent-task-with-comments');
@@ -1801,6 +1566,129 @@ describe('items of other stores', () => {
     expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
       `[]`,
     );
+  });
+
+  test('a comment added online while the creation of its task is still queued is not sent before it: it joins the queue and is sent after the task', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('online-comment-behind-queued-task');
+    const list = env.renderTasksAndComments();
+    await flushAllTimers();
+
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'offline: create task 50',
+    ]);
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+
+    // Back online, the first request of the creation is lost: the creation
+    // stays queued and is sent again after the retry interval (5s).
+    env.tasks.faults.createTaskWithId.push('request-lost');
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'back online: the first request of the task creation is lost',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(1_000);
+
+    // Online, before the creation is sent again, the user comments on the
+    // task. Sent directly (1.2s), the comment would reach the server before
+    // its task exists there.
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'online: comment on the task while its creation waits to be sent again',
+    ]);
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'tasks||50',
+    );
+    await advanceTime(2_000);
+
+    // The comment was queued behind the creation of its task instead: nothing
+    // was sent for it yet.
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { id: 50, name: 'Plan trip' }
+        operation: 'createTaskWithId'
+      - input: { id: 'comments||c1', taskId: 'tasks||50', text: 'Ask Ana about dates' }
+        operation: 'addCommentWithId'
+    `);
+    expect(env.comments.serverTable.getAll()).toMatchInlineSnapshot(`{}`);
+
+    await flushAllTimers();
+
+    // The creation is sent again and succeeds, then the comment is sent by
+    // the replay of the queue.
+    expect([...env.tasks.sentRequests, ...env.sentRequests])
+      .toMatchInlineSnapshot(`
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+      - 'addCommentWithId comments||c1 "Ask Ana about dates" to tasks||50'
+    `);
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.comments.serverTable.getAll()).toMatchInlineSnapshot(
+      `comments||c1: { taskId: 'tasks||50', text: 'Ask Ana about dates' }`,
+    );
+    expect(env.tasks.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | comments            | tasks                                  |
+      0      | no comments         | Write report, Review budget            | [tasks, comments] ui-initialized
+      3.01s  | no comments         | Write report, Review budget            | -- offline: create task 50
+      .      | no comments         | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .      | no comments         | Write report, Review budget, Plan trip | offline:createTaskWithId queued
+      .      | no comments         | Write report, Review budget, Plan trip | -- back online: the first request of the task creation is lost
+      .      | no comments         | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      4.01s  | no comments         | Write report, Review budget, Plan trip | -- online: comment on the task while its creation waits to be sent again
+      .      | Ask Ana about dates | Write report, Review budget, Plan trip | [comments] ui-changed
+      8.01s  | Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      9.21s  | Ask Ana about dates | Write report, Review budget, Plan trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      .      | Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-finished
+      10.42s | Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
+      11.22s | Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":3})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('a comment added online while the creation of its task is still queued waits for the decision about that creation once it fails for good', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('online-comment-held-with-task');
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+
+    // Back online, the creation fails on every attempt (3), 5s apart.
+    env.tasks.faults.createTaskWithId.push(
+      'request-lost',
+      'request-lost',
+      'request-lost',
+    );
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(1_000);
+
+    // Online, between two attempts, the user comments on the task.
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'tasks||50',
+    );
+    await flushAllTimers();
+
+    // The creation now waits for a manual decision. The comment was never
+    // sent: it is held behind the creation, and follows its decision.
+    expect(
+      env.tasks.apiStore
+        .getOfflineResolutions()
+        .map((resolution) => resolution.operation),
+    ).toMatchInlineSnapshot(`['createTaskWithId']`);
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.comments.serverTable.getAll()).toMatchInlineSnapshot(`{}`);
+    expect(
+      env.comments.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`- { blockedBy: 1, op: 'addCommentWithId' }`);
   });
 
   /**

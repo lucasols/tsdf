@@ -1996,7 +1996,8 @@ export type CollectionOfflineOperationDefinition<
    * operation is not sent either: it is held behind that resolution
    * (`blockedResolutionCount > 0`) and follows the decision, sent after the
    * creation on `retry` (default scope), `requeue` or `commit`, dropped on
-   * `discard`. This
+   * `discard`. While that creation is still queued, this operation is queued
+   * behind it even when made online, instead of sent directly. This
    * only covers the stores attached in the tab that replays or queues this
    * operation, and the decision is only followed by the stores attached in
    * the tab where it is made.
@@ -2146,7 +2147,8 @@ export type ListQueryOfflineOperationDefinition<
    * operation is not sent either: it is held behind that resolution
    * (`blockedResolutionCount > 0`) and follows the decision, sent after the
    * creation on `retry` (default scope), `requeue` or `commit`, dropped on
-   * `discard`. This
+   * `discard`. While that creation is still queued, this operation is queued
+   * behind it even when made online, instead of sent directly. This
    * only covers the stores attached in the tab that replays or queues this
    * operation, and the decision is only followed by the stores attached in
    * the tab where it is made.
