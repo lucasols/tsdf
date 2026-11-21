@@ -1874,7 +1874,7 @@ async function readWithEveryImperativeApi(
   };
 }
 
-test('when a fully loaded item is invalidated before going offline, imperative reads of all its fields still resolve with the cached data, and refetch it after recovering', async () => {
+test('when a fully loaded item is invalidated before going offline, imperative reads of all its fields still resolve with the cached data, and get the server copy after recovering', async () => {
   const env = createPartialUsersEnv('offline-invalidated-imperative-reads');
   const usersQuery = { tableId: 'users' };
 
@@ -1907,8 +1907,9 @@ test('when a fully loaded item is invalidated before going offline, imperative r
     getQueryFromStateOrFetch: 'ok [{"id":1,"name":"Ada","age":30,"city":"London"}]'
   `);
 
-  // After recovering, the same reads refetch the invalidated item and get the
-  // server copy (`age: 31`).
+  // After recovering, the await reads (which run first) fetch the server copy
+  // (`age: 31`), and the state-or-fetch reads that follow are answered from
+  // that refreshed cache: nobody is left with the stale `age: 30`.
   act(() => {
     network.goOnline();
   });
