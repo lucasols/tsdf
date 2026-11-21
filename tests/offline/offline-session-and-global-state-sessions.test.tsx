@@ -570,12 +570,17 @@ test('a global offline view sees the same blocked temp item as the store after r
   globalHook.unmount();
 });
 
-test("a temp id saved in one account is no longer resolved to that account's record after switching accounts", async () => {
-  network.setOffline();
+const usersQuery = { tableId: 'users' } as const;
 
-  let currentSessionKey = 'offline-session-temp-id-account-a';
-  const usersQuery = { tableId: 'users' } as const;
-
+/**
+ * A users list where users created offline get a temp id (`temp:<name>`) and
+ * are saved by the server as `users||3`. The session key is read on every
+ * call, so a test can switch accounts.
+ */
+function createTempUserAccountEnv(
+  storeId: string,
+  getCurrentSessionKey: () => string,
+) {
   const env = createListQueryStoreTestEnv<
     { id: number; name: string },
     false,
@@ -589,11 +594,11 @@ test("a temp id saved in one account is no longer resolved to that account's rec
       ],
     },
     {
-      id: 'offline-session-temp-id-store',
-      getSessionKey: () => currentSessionKey,
+      id: storeId,
+      getSessionKey: getCurrentSessionKey,
       storeManager: createStoreManager({
         errorNormalizer: normalizeError,
-        getSessionKey: () => currentSessionKey,
+        getSessionKey: getCurrentSessionKey,
         offlineSession: { network: network.config },
       }),
       testScenario: { loaded: { queries: [usersQuery] } },
@@ -627,8 +632,13 @@ test("a temp id saved in one account is no longer resolved to that account's rec
     },
   );
 
-  // Account A creates Linus while offline, and the creation is saved as
-  // `users||3` once the connection is back
+  return env;
+}
+
+/** Creates Linus while offline, under the temp id `temp:Linus` */
+async function createLinusOffline(
+  env: ReturnType<typeof createTempUserAccountEnv>,
+): Promise<void> {
   await act(async () => {
     await env.apiStore.performMutation('temp:Linus', {
       optimisticUpdate: () => {
@@ -646,6 +656,20 @@ test("a temp id saved in one account is no longer resolved to that account's rec
       offline: { operation: 'createUser', input: { name: 'Linus' } },
     });
   });
+}
+
+test("a temp id saved in one account is no longer resolved to that account's record after switching accounts", async () => {
+  network.setOffline();
+
+  let currentSessionKey = 'offline-session-temp-id-account-a';
+  const env = createTempUserAccountEnv(
+    'offline-session-temp-id-store',
+    () => currentSessionKey,
+  );
+
+  // Account A creates Linus while offline, and the creation is saved as
+  // `users||3` once the connection is back
+  await createLinusOffline(env);
   await act(async () => {
     network.goOnline();
     await Promise.resolve();
@@ -661,6 +685,45 @@ test("a temp id saved in one account is no longer resolved to that account's rec
   // must not lead to a record of account A.
   currentSessionKey = 'offline-session-temp-id-account-b';
 
+  expect(
+    env.apiStore.resolveTempItemPayload('temp:Linus'),
+  ).toMatchInlineSnapshot(`"temp:Linus"`);
+});
+
+test('a creation saved after the user switched accounts is not resolved in the new account', async () => {
+  network.setOffline();
+
+  let currentSessionKey = 'offline-session-late-temp-id-account-a';
+  const env = createTempUserAccountEnv(
+    'offline-session-late-temp-id-store',
+    () => currentSessionKey,
+  );
+
+  // Account A creates Linus while offline. The connection comes back and the
+  // creation request is sent (it takes 1200ms).
+  await createLinusOffline(env);
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(600);
+  // The request is still on its way: the server has not saved Linus yet
+  expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`undefined`);
+
+  // The user switches to account B before the server answers, and code of
+  // account B asks about the same temp id
+  currentSessionKey = 'offline-session-late-temp-id-account-b';
+  expect(
+    env.apiStore.resolveTempItemPayload('temp:Linus'),
+  ).toMatchInlineSnapshot(`"temp:Linus"`);
+
+  // The answer of account A's request arrives. Account B must still not be
+  // led to the record account A created.
+  await flushAllTimers();
+  expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+    id: 3
+    name: 'Linus'
+  `);
   expect(
     env.apiStore.resolveTempItemPayload('temp:Linus'),
   ).toMatchInlineSnapshot(`"temp:Linus"`);

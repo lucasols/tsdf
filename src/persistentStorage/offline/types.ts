@@ -1154,7 +1154,8 @@ type OperationBaseContext<TInput> = {
   updatedAt: number;
   /**
    * Resolves a previously temp-backed entity ref to its latest known final ref
-   * when one has been reconciled.
+   * when one has been reconciled. The mapping is kept in memory for the
+   * session, for the 1000 most recent creations of the store.
    */
   resolveEntityRef: <TEntityRef extends ValidPayload>(
     entityRef: TEntityRef,

@@ -2524,8 +2524,12 @@ export function createOfflineStoreController<
         reconciliation.finalData,
       );
       // Mapped before the store emits `tempEntityReconciled`, so a listener
-      // can already resolve the temp payload, as in the other tabs
-      rememberResolvedEntityRef(tempId, reconciliation.finalPayload);
+      // can already resolve the temp payload, as in the other tabs. Not when
+      // the session changed while the request was running: the mapping
+      // belongs to the session that created the entity.
+      if (isActiveSessionState(args.current)) {
+        rememberResolvedEntityRef(tempId, reconciliation.finalPayload);
+      }
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
         input: args.input,
@@ -2567,10 +2571,12 @@ export function createOfflineStoreController<
         reconciliation.finalPayload,
         reconciliation.finalData,
       );
-      rememberResolvedEntityRef(
-        reconciliation.tempId,
-        reconciliation.finalPayload,
-      );
+      if (isActiveSessionState(args.current)) {
+        rememberResolvedEntityRef(
+          reconciliation.tempId,
+          reconciliation.finalPayload,
+        );
+      }
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
         input: args.input,

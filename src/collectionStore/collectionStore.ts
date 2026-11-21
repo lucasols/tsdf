@@ -739,8 +739,8 @@ export type CollectionStore<
    * saved it (in this tab or another one), for code that still holds its
    * temporary payload. Returns the given payload while it was not replaced,
    * or when it is not a temporary payload. The mapping is kept in memory for
-   * the session; subscribe to `storeEvents` `tempEntityReconciled` to be told
-   * when it happens.
+   * the session (the 1000 most recent creations of the store); subscribe to
+   * `storeEvents` `tempEntityReconciled` to be told when it happens.
    */
   resolveTempItemPayload: (itemPayload: ItemPayload) => ItemPayload;
   /** React hook subscribing to manual offline resolutions for this store. */
