@@ -2736,20 +2736,27 @@ class SessionOfflineCoordinator {
   }
 
   /**
-   * Saves an upload record to the adapter, tracking the save so a removal of
-   * the same id waits for it. The adapter may finish a removal before a save
-   * started earlier, which would store the removed record again.
+   * Saves an upload record to the adapter after the saves of the same id still
+   * in flight, tracking it so a removal of the id waits for it. Overlapping
+   * saves of an id can fail or finish with the older record stored, and the
+   * adapter may finish a removal before a save started earlier, which would
+   * store the removed record again.
    */
   #writeStoredUpload(
     uploadsConfig: OfflineSessionUploadsConfig,
     record: OfflineStoredUploadRecord,
   ): Promise<void> {
     const { id } = record;
-    const write = uploadsConfig.adapter.save(this.sessionKey, id, record);
-    const settled = Promise.allSettled([
-      this.#uploadWrites.get(id),
-      write,
-    ]).then(() => {});
+    const pendingWrite = this.#uploadWrites.get(id);
+    const write = pendingWrite
+      ? pendingWrite.then(() =>
+          uploadsConfig.adapter.save(this.sessionKey, id, record),
+        )
+      : uploadsConfig.adapter.save(this.sessionKey, id, record);
+    const settled = write.then(
+      () => {},
+      () => {},
+    );
     this.#uploadWrites.set(id, settled);
     void settled.then(() => {
       if (this.#uploadWrites.get(id) === settled) {
