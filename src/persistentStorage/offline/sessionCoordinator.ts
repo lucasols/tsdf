@@ -935,6 +935,8 @@ class SessionOfflineCoordinator {
   #releasedUploadRefs = new Map<string, ValidPayload>();
   /** Adapter removals in flight, awaited before the same id is read or saved. */
   #uploadRemovals = new Map<string, Promise<void>>();
+  /** Adapter saves in flight, awaited before the same id is removed. */
+  #uploadWrites = new Map<string, Promise<void>>();
   #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   #uploadOnlineSessionStartedAt: number | null = null;
   #uploadOnlineSessionStabilizationTimer: ReturnType<typeof setTimeout> | null =
@@ -2853,9 +2855,40 @@ class SessionOfflineCoordinator {
     const removal = this.#uploadRemovals.get(record.id);
     if (removal) await removal;
     this.#uploads.set(record.id, record);
-    await this.#uploadsConfig.adapter.save(this.sessionKey, record.id, record);
+    await this.#writeStoredUpload(this.#uploadsConfig, record);
     this.#syncUploadsState();
     void this.#refreshUploadRetention();
+  }
+
+  /**
+   * Saves an upload record to the adapter after the saves of the same id still
+   * in flight, tracking it so a removal of the id waits for it. Overlapping
+   * saves of an id can fail or finish with the older record stored, and the
+   * adapter may finish a removal before a save started earlier, which would
+   * store the removed record again.
+   */
+  #writeStoredUpload(
+    uploadsConfig: OfflineSessionUploadsConfig,
+    record: OfflineStoredUploadRecord,
+  ): Promise<void> {
+    const { id } = record;
+    const pendingWrite = this.#uploadWrites.get(id);
+    const write = pendingWrite
+      ? pendingWrite.then(() =>
+          uploadsConfig.adapter.save(this.sessionKey, id, record),
+        )
+      : uploadsConfig.adapter.save(this.sessionKey, id, record);
+    const settled = write.then(
+      () => {},
+      () => {},
+    );
+    this.#uploadWrites.set(id, settled);
+    void settled.then(() => {
+      if (this.#uploadWrites.get(id) === settled) {
+        this.#uploadWrites.delete(id);
+      }
+    });
+    return write;
   }
 
   #getCurrentUploadOnlineSessionStartedAt(): number | undefined {
@@ -2955,7 +2988,7 @@ class SessionOfflineCoordinator {
     if (stampUpdates.length > 0) {
       await Promise.all(
         stampUpdates.map((record) =>
-          uploadsConfig.adapter.save(this.sessionKey, record.id, record),
+          this.#writeStoredUpload(uploadsConfig, record),
         ),
       );
       didChange = true;
@@ -3077,7 +3110,10 @@ class SessionOfflineCoordinator {
     /** When true, only update in-memory state and UI without persisting to storage. */
     skipPersist?: boolean;
   }): Promise<OfflineStoredUploadRecord | null> {
-    const current = await this.#getUploadRecord(args.id);
+    await this.#getUploadRecord(args.id);
+    // Read after the wait: an upload removed meanwhile must not be written
+    // back, and a record changed meanwhile keeps its newer fields.
+    const current = this.#uploads.get(args.id);
     if (!current) return null;
 
     const nextRecord = this.#buildNextUploadRecord(current, args);
@@ -3307,13 +3343,19 @@ class SessionOfflineCoordinator {
 
   /**
    * Removes an upload from the adapter, tracking the removal so a save or
-   * load of the same id waits for it.
+   * load of the same id waits for it. Runs after the saves of the id still in
+   * flight, which would otherwise store the record again.
    */
   #removeStoredUpload(
     uploadsConfig: OfflineSessionUploadsConfig,
     id: string,
   ): Promise<void> {
-    const removal = uploadsConfig.adapter.remove(this.sessionKey, id);
+    const pendingWrite = this.#uploadWrites.get(id);
+    const removal = pendingWrite
+      ? pendingWrite.then(() =>
+          uploadsConfig.adapter.remove(this.sessionKey, id),
+        )
+      : uploadsConfig.adapter.remove(this.sessionKey, id);
     const settled = removal.then(
       () => {},
       () => {},

@@ -1020,10 +1020,10 @@ test('upload metadata survives an app restart and reaches the transport when upl
     - fileName: 'photo.png'
       id: 'chat-file'
       metadata: { chatId: 'chat-42', kind: 'chat' }
+    - { fileName: 'notes.txt', id: 'plain-file' }
     - fileName: 'invoice.pdf'
       id: 'record-file'
       metadata: { fieldId: 'files', kind: 'record', tableId: 'table-7' }
-    - { fileName: 'notes.txt', id: 'plain-file' }
   `);
 
   // Finishing the upload keeps the metadata on the upload status entry.
