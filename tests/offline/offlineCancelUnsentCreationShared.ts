@@ -197,6 +197,14 @@ export function createTasksEnv(
   sessionKey: string,
   storeName: string,
   storeManager = createStoreManagerForSession(sessionKey),
+  options: {
+    /**
+     * Before sending a delete again after an attempt whose outcome is
+     * unknown, the app asks the server whether the task is already gone
+     * (`shouldSkipSync`), instead of relying on the not-found answer.
+     */
+    deleteChecksServerBeforeRetry?: boolean;
+  } = {},
 ) {
   let nextTaskId = 3;
   const sentRequests: string[] = [];
@@ -371,6 +379,9 @@ export function createTasksEnv(
                 scope: 'same-entity',
                 dropSelfIfTempLifecycleCancelled: true,
               },
+              shouldSkipSync: options.deleteChecksServerBeforeRetry
+                ? ({ input }) => env.serverTable.get(input.itemId) === undefined
+                : undefined,
               execute: async ({ input }) => {
                 sentRequests.push(`deleteTask ${input.itemId}`);
                 const fault = faults.deleteTask.shift();

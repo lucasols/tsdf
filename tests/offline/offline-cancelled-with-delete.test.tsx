@@ -27,6 +27,8 @@ const notesSchema = rc_object({ value: rc_object({ text: rc_string }) });
 
 type NotesItem = { text: string };
 
+type TasksEnvOptions = Parameters<typeof createTasksEnv>[3];
+
 type NotesOperations = {
   saveNotes: CollectionOfflineOperationDefinition<
     { value: NotesItem },
@@ -50,11 +52,19 @@ type NotesEnv = ReturnType<
  *   not-found answer
  * - `notesFaults` makes the next notes saves fail with a server error
  */
-function createTasksAndNotesEnv(sessionKey: string) {
+function createTasksAndNotesEnv(
+  sessionKey: string,
+  tasksOptions?: TasksEnvOptions,
+) {
   const tasksStoreName = `${sessionKey}-tasks`;
   const notesStoreName = `${sessionKey}-notes`;
   const storeManager = createStoreManagerForSession(sessionKey);
-  const tasks = createTasksEnv(sessionKey, tasksStoreName, storeManager);
+  const tasks = createTasksEnv(
+    sessionKey,
+    tasksStoreName,
+    storeManager,
+    tasksOptions,
+  );
   const sentRequests: string[] = [];
   const notesFaults: 'server-error'[] = [];
 
@@ -164,9 +174,12 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
    * for a manual decision: the notes are held behind it. The user then
    * deletes the task, which waits behind its creation too.
    */
-  async function deleteTaskWhoseCreationKeepsFailing(sessionKey: string) {
+  async function deleteTaskWhoseCreationKeepsFailing(
+    sessionKey: string,
+    tasksOptions?: TasksEnvOptions,
+  ) {
     network.setOffline();
-    const env = createTasksAndNotesEnv(sessionKey);
+    const env = createTasksAndNotesEnv(sessionKey, tasksOptions);
     const list = env.renderTasksAndNotes();
     await flushAllTimers();
 
@@ -395,6 +408,83 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
       29.22s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":3})
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | [tasks] ui-changed
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🟠 [tasks||50] <fetch-finished (value: {"id":50,"name":"Plan trip"})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('a delete whose answer was lost drops the notes queued for the task once the server confirms the task is gone', async () => {
+    const { env, list, failedCreation } =
+      await deleteTaskWhoseCreationKeepsFailing(
+        'confirmed-delete-drops-notes',
+        // Before sending a delete again, this app asks the server whether the
+        // task is already gone (`shouldSkipSync`).
+        { deleteChecksServerBeforeRetry: true },
+      );
+
+    // The delete reaches the server, but its answer never arrives.
+    env.tasks.faults.deleteTask.push('response-lost');
+    env.tasks.addTimelineComments('beforeNextAction', [
+      'the user asks to send the task creation again: the answer of the delete is lost',
+    ]);
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // After the 3 failed creation attempts: the creation, then a single
+    // delete request. Before sending it again the app finds the task gone
+    // from the server, which completes the delete without another request.
+    // A delete confirmed this way drops the notes like one that was answered:
+    // they are never sent for the task the server no longer has.
+    expect(env.getSentRequests().slice(3)).toMatchInlineSnapshot(
+      `['createTaskWithId tasks||50', 'deleteTask tasks||50']`,
+    );
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    // Nothing is left for the user to resolve, in either store.
+    expect(env.tasks.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(env.notes.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(env.tasks.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget']`,
+    );
+    expect(env.notes.serverTable.getAll()).toMatchInlineSnapshot(
+      `tasks||1: { text: 'Outline' }`,
+    );
+    expect(env.tasks.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | notes                                             | tasks                                  |
+      0      | tasks||1: Outline                                 | Write report, Review budget            | [tasks, notes] ui-initialized
+      3.01s  | tasks||1: Outline                                 | Write report, Review budget            | -- offline: create task 50 and write its notes
+      .      | tasks||1: Outline                                 | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .      | tasks||1: Outline                                 | Write report, Review budget, Plan trip | offline:createTaskWithId queued
+      4.01s  | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | [notes] ui-changed
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | -- back online: the task creation keeps failing until it needs a decision
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      9.01s  | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      14.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | -- the user deletes the task
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks] ui-changed
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask resolution-required
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask queued
+      15.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user asks to send the task creation again: the answer of the delete is lost
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-started
+      16.21s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-finished
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] >delete-item-started (value: {"id":50,"name":"Plan trip"})
+      17.05s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] <delete-item-persisted (value: {"id":50,"name":"Plan trip"})
+      22.42s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 >list-fetch-started
+      23.22s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
 
