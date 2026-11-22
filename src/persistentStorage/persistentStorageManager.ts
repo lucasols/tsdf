@@ -1130,9 +1130,14 @@ type PersistentStorageNamespaceHandle<
 > = {
   /** The async adapter backing this handle, or `null` for `local-sync`. */
   getAsyncAdapter(): AsyncStorageAdapter | null;
+  /**
+   * Resolves with whether the commit reached storage: `false` when it failed
+   * (reported through `onPersistentStorageError`), or when its upserts were
+   * skipped (no active session, `localStorage` quota writes disabled).
+   */
   commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
-  ): Promise<void>;
+  ): Promise<boolean>;
   /**
    * Async adapters only: removes entries whose metadata still matches through
    * `removeEntries` and resolves with the keys kept because they changed, or
@@ -1160,9 +1165,11 @@ type PersistentStorageNamespaceHandle<
     entryKeys: string[],
     options?: { touch?: AsyncStorageTouchMode },
   ): Promise<Array<T | null>>;
-  save(entryKey: string, data: T): Promise<void>;
+  /** Resolves with whether the entry was written, see `commit` */
+  save(entryKey: string, data: T): Promise<boolean>;
   replaceAll(entries: Array<{ data: T; key: string }>): Promise<void>;
-  remove(entryKey: string): Promise<void>;
+  /** Resolves with whether the removal reached storage, see `commit` */
+  remove(entryKey: string): Promise<boolean>;
   listKeys(): Promise<string[]>;
   listMetadata(args?: {
     order?: AsyncStorageMetadataOrder;
@@ -1298,7 +1305,7 @@ export function createPersistentStorageNamespaceHandle<
 
   async function commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const startTime = import.meta.env.DEV
       ? startPersistentStorageDebugTiming(debugContext)
       : null;
@@ -1323,7 +1330,7 @@ export function createPersistentStorageNamespaceHandle<
               { ...operationDetails, reason: 'inactive-session' },
             );
           }
-          return;
+          return false;
         }
 
         const asyncArgs: AsyncStorageNamespaceCommitArgs<unknown, TMetadata> = {
@@ -1365,7 +1372,7 @@ export function createPersistentStorageNamespaceHandle<
             operationDetails,
           );
         }
-        return;
+        return true;
       }
 
       const prefix = getPrefix();
@@ -1379,7 +1386,7 @@ export function createPersistentStorageNamespaceHandle<
             { ...operationDetails, reason: 'inactive-session' },
           );
         }
-        return;
+        return false;
       }
       const sessionKey = config.getSessionKey();
       if (sessionKey === false) {
@@ -1392,7 +1399,7 @@ export function createPersistentStorageNamespaceHandle<
             { ...operationDetails, reason: 'inactive-session' },
           );
         }
-        return;
+        return false;
       }
       if (isLocalStorageQuotaWritesDisabled()) {
         deliverPendingQuotaWritesDisabledError(onPersistentStorageError);
@@ -1421,7 +1428,8 @@ export function createPersistentStorageNamespaceHandle<
             { ...operationDetails, reason: 'quota-writes-disabled' },
           );
         }
-        return;
+        // Only the upserts were dropped
+        return (args.upserts?.length ?? 0) === 0;
       }
       const now = Date.now();
       const touchTimestamps = new Map(
@@ -1483,6 +1491,7 @@ export function createPersistentStorageNamespaceHandle<
           operationDetails,
         );
       }
+      return true;
     } catch (error) {
       if (import.meta.env.DEV) {
         logPersistentStorageOperation(
@@ -1495,6 +1504,7 @@ export function createPersistentStorageNamespaceHandle<
         );
       }
       onPersistentStorageError?.(error);
+      return false;
     }
   }
 
@@ -1895,8 +1905,8 @@ export function createPersistentStorageNamespaceHandle<
     }
   }
 
-  async function save(entryKey: string, data: T): Promise<void> {
-    await commit({ upserts: [{ data, key: entryKey }] });
+  function save(entryKey: string, data: T): Promise<boolean> {
+    return commit({ upserts: [{ data, key: entryKey }] });
   }
 
   async function replaceAll(
@@ -1919,8 +1929,8 @@ export function createPersistentStorageNamespaceHandle<
     await replaceEntries();
   }
 
-  async function remove(entryKey: string): Promise<void> {
-    await commit({ removes: [entryKey] });
+  function remove(entryKey: string): Promise<boolean> {
+    return commit({ removes: [entryKey] });
   }
 
   async function removeLocalEntriesIfUnchanged(

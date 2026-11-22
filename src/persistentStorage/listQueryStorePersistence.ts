@@ -3236,7 +3236,7 @@ export function setupListQueryPersistence<
     const previousKnownLocalQueryKeys = previousQueryKeys;
 
     if (localStorageAdapter !== null || hasIgnoreItemFilter) {
-      const tasks: Promise<void>[] = [];
+      const tasks: Promise<unknown>[] = [];
       const nextItemKeys = new Set<string>();
       const nextQueryKeys = new Set<string>();
       const removedItemKeys = new Set<string>();
@@ -4092,7 +4092,7 @@ export function setupListQueryPersistence<
     // updated as if they were written
     if (config.getSessionKey() === false) return;
 
-    const commitTasks: Promise<void>[] = [];
+    const commitTasks: Promise<unknown>[] = [];
     if (removedQueryKeys.length > 0 || queryUpserts.size > 0) {
       commitTasks.push(
         queryNamespace.commit({
