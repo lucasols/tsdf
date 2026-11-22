@@ -731,7 +731,10 @@ export function createOfflineStoreController<
     touchedReplacedResolution: boolean;
   };
 
-  /** Reads the session gate (`offlineSession.enabled`). */
+  /**
+   * Reads the session gate (`offlineSession.enabled`). `'replay-only'` keeps it
+   * open: the session disallows the queueing instead.
+   */
   function isSessionEnabled(): boolean {
     return sessionConfig.enabled?.() !== false;
   }
@@ -892,22 +895,20 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     prepared: PreparedQueuedMutation,
   ): PreparedOfflineMutation['initialAction'] {
-    const status = current.session.getStatus();
+    const cause = current.session.getStatus().isOfflineMode
+      ? current.session.getActiveOfflineCause()
+      : null;
+    if (cause !== null && isMutationQueueingAllowed(cause)) return 'queue';
 
-    if (!status.isOfflineMode) {
-      // Sent on its own, an online mutation would reach the server before
-      // the older mutations still queued for the same entities, which would
-      // then overwrite it (or it would target an entity that does not exist
-      // there yet). It joins the queue to keep the order the user made them.
-      return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
-    }
-
-    const cause = current.session.getActiveOfflineCause();
-    if (cause === null) return 'run';
-
-    if (isMutationQueueingAllowed(cause)) return 'queue';
-
-    return 'run';
+    // Sent on its own, a mutation would reach the server before the older
+    // mutations still queued for the same entities, which would then
+    // overwrite it (or it would target an entity that does not exist there
+    // yet). It joins the queue to keep the order the user made them, also
+    // when new offline work is not queued: in offline mode the server may
+    // already be reachable (e.g. an outage that ended before the next
+    // recovery check), and the direct run succeeding would replay the older
+    // work over it.
+    return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
   }
 
   async function clearOfflineStatusOnSuccess(
@@ -2129,12 +2130,33 @@ export function createOfflineStoreController<
   function findAccumulationCandidate(args: {
     operationName: string;
     entityRefs: OfflineEntityRef[];
+    /**
+     * The queue order of the incoming mutation. Entries ordered after it come
+     * from mutations made after it (queued while it was planned), so they are
+     * neither merged into nor block a merge: they are sent after it anyway.
+     */
+    queueOrder: number;
     entries?: Iterable<OfflineQueueEntry>;
   }): OfflineQueueEntry | null {
     const normalizedEntityRefs = normalizeEntityRefs(args.entityRefs);
     let candidate: OfflineQueueEntry | null = null;
+    let newestEntityEntry: OfflineQueueEntry | null = null;
 
     for (const entry of args.entries ?? queueEntries.values()) {
+      if (getQueueOrder(entry) > args.queueOrder) continue;
+
+      if (
+        entry.entityRefs.some((entryRef) =>
+          args.entityRefs.some((entityRef) =>
+            isSameEntityRef(entityRef, entryRef),
+          ),
+        ) &&
+        (!newestEntityEntry ||
+          compareQueueEntries(entry, newestEntityEntry) > 0)
+      ) {
+        newestEntityEntry = entry;
+      }
+
       if (entry.operation !== args.operationName) continue;
       if (!isUnsentQueueEntry(entry)) continue;
       if (entryIdsFromAnotherTab.has(entry.id)) continue;
@@ -2151,7 +2173,14 @@ export function createOfflineStoreController<
       }
     }
 
-    return candidate;
+    // Newer queued work of the entity (of another operation, from another
+    // tab, or not mergeable) is sent after the candidate and could overwrite
+    // the incoming change merged into it, so the mutation is queued after it.
+    return candidate &&
+      (!newestEntityEntry ||
+        compareQueueEntries(newestEntityEntry, candidate) <= 0)
+      ? candidate
+      : null;
   }
 
   /**
@@ -4297,16 +4326,26 @@ export function createOfflineStoreController<
         : findAccumulationCandidate({
             operationName,
             entityRefs,
+            queueOrder,
             entries: workingQueue.values(),
           });
       const existingWork = heldResolution ?? existingEntry;
+      const mergeContext = existingWork && {
+        sessionKey: current.sessionKey,
+        existingInput: existingWork.input,
+        incomingInput: validatedInput,
+      };
 
-      if (existingWork) {
-        const mergedInput = await operation.accumulation.mergeInput({
-          sessionKey: current.sessionKey,
-          existingInput: existingWork.input,
-          incomingInput: validatedInput,
-        });
+      // A refused merge queues the incoming mutation as a separate entry
+      // after the existing work. Refused against held work, it is sent first
+      // unless it is held behind the same creation, like a mutation of an
+      // operation without `accumulation`.
+      if (
+        mergeContext &&
+        operation.accumulation.canMerge?.(mergeContext) !== false
+      ) {
+        const mergedInput =
+          await operation.accumulation.mergeInput(mergeContext);
         const validatedMergedInput = validateWithSchema(
           operation.inputSchema,
           mergedInput,
@@ -4501,6 +4540,9 @@ export function createOfflineStoreController<
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
     }
+    // Reserved right away: a mutation made while this one is planned is
+    // queued after it, in the order the user made them.
+    nextQueueOrder = nextQueueOrderValue;
     let plannedMutation: PlannedQueuedMutation;
     let pendingEntityQueriesLoaded = false;
     for (;;) {
@@ -4527,12 +4569,18 @@ export function createOfflineStoreController<
       // being merged into before it is committed. Merging into it then would
       // drop the incoming input or send the existing one twice, so the
       // mutation is planned again. The same applies to held work merged into
-      // when it changes meanwhile. The check runs with no `await` before the
-      // commit below.
+      // when it changes meanwhile, and to an entry that is no longer the
+      // newest candidate (e.g. an earlier concurrent mutation whose merge was
+      // refused queued a newer one, which merging into the older entry would
+      // send after it). The check runs with no `await` before the commit
+      // below.
       if (
         (!plannedMutation.accumulatedEntry ||
-          queueEntries.get(plannedMutation.accumulatedEntry.id) ===
-            plannedMutation.accumulatedEntry) &&
+          findAccumulationCandidate({
+            operationName: plannedMutation.operationName,
+            entityRefs: plannedMutation.accumulatedEntry.entityRefs,
+            queueOrder,
+          }) === plannedMutation.accumulatedEntry) &&
         (!plannedMutation.accumulatedResolution ||
           resolutions.get(plannedMutation.accumulatedResolution.id) ===
             plannedMutation.accumulatedResolution)
@@ -4561,7 +4609,6 @@ export function createOfflineStoreController<
       validatedInput: unknown;
       pendingEntities: PendingTempEntity[];
     }> = [];
-    const previousNextQueueOrder = nextQueueOrder;
 
     try {
       const appliedMutation: AppliedQueuedMutation = {
@@ -4631,8 +4678,6 @@ export function createOfflineStoreController<
         appliedMutation.removedResolutionsApplied.push(removedResolution);
         await removeResolution(removedResolution.id, current, true);
       }
-
-      nextQueueOrder = nextQueueOrderValue;
 
       if (
         storeAdapter.applyPendingEntity &&
@@ -4723,7 +4768,6 @@ export function createOfflineStoreController<
         }
       }
 
-      nextQueueOrder = previousNextQueueOrder;
       refreshDerivedState(current);
 
       throw error;

@@ -204,6 +204,11 @@ export function createTasksEnv(
      * (`shouldSkipSync`), instead of relying on the not-found answer.
      */
     deleteChecksServerBeforeRetry?: boolean;
+    /**
+     * Keeps moves and renames of a task apart: an edit that moves the task is
+     * not merged with one that only renames it (`accumulation.canMerge`).
+     */
+    keepMovesAndRenamesApart?: boolean;
   } = {},
 ) {
   let nextTaskId = 3;
@@ -431,6 +436,11 @@ export function createTasksEnv(
               dependsOn: ({ input }) =>
                 input.parentId === undefined ? [] : [input.parentId],
               accumulation: {
+                canMerge: options.keepMovesAndRenamesApart
+                  ? ({ existingInput, incomingInput }) =>
+                      (existingInput.parentId === undefined) ===
+                      (incomingInput.parentId === undefined)
+                  : undefined,
                 // The fields the incoming edit does not change keep their
                 // queued value.
                 mergeInput: ({ existingInput, incomingInput }) => ({

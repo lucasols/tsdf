@@ -191,6 +191,12 @@ type AddToValueOperations = {
 };
 
 /**
+ * Sets the document value, like a slider. Several values queued offline are
+ * merged into one request with the last one.
+ */
+type SetValueOperations = { setValue: UpdateValueOperations['updateValue'] };
+
+/**
  * Sets the document value with a file the user staged with
  * `saveOfflineUpload`, like a form whose file input uploads on its own.
  */
@@ -272,6 +278,7 @@ async function openTab(
       number,
       UpdateValueConflictOperations &
         AddToValueOperations &
+        SetValueOperations &
         UpdateWithAttachmentOperations
     >(1, {
       id: storeId,
@@ -339,6 +346,20 @@ async function openTab(
                 return input;
               },
             },
+            setValue: {
+              inputSchema: docMutationInputSchema,
+              kind: 'update',
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute: async ({ input }) => {
+                serverCalls.push(
+                  `tab ${name} sent ${storeId} = ${input.value}`,
+                );
+                await env.serverMock.delayedSetData(input.value);
+                return input;
+              },
+            },
           },
         },
       },
@@ -363,14 +384,21 @@ async function openTab(
     name,
     storeManager,
     getEnv,
-    /** Queues an offline edit the way a user edit in this tab would. */
-    async queueEdit(value: number, storeId = 'doc') {
+    /**
+     * Queues an offline edit the way a user edit in this tab would. A
+     * `setValue` edit (a slider) is merged with the one still queued.
+     */
+    async queueEdit(
+      value: number,
+      storeId = 'doc',
+      operation: 'updateValue' | 'setValue' = 'updateValue',
+    ) {
       await getEnv(storeId).apiStore.performMutation({
         mutation: async () => {
           await getEnv(storeId).serverMock.delayedSetData(value);
           return value;
         },
-        offline: { operation: 'updateValue', input: { value } },
+        offline: { operation, input: { value } },
       });
       await advanceTime(10);
     },
@@ -2024,6 +2052,30 @@ test('"+1" clicks queued at the same moment in two tabs all reach the server', a
       leader: '❌'
       resolutions: []
   `);
+});
+
+test('a value set in a tab after another tab set one is sent last, and the server keeps it', async () => {
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+  await blurWindow();
+
+  // Offline: the user moves the slider in tab A, then in tab B, then in tab A
+  // again. Each tab already knows the values queued by the other one.
+  await tabA.queueEdit(2, 'doc', 'setValue');
+  await tabB.queueEdit(3, 'doc', 'setValue');
+  await tabA.queueEdit(4, 'doc', 'setValue');
+
+  network.goOnline();
+  await advanceTime(5_000);
+
+  // Tab A's last value is not merged into its first one, which would send it
+  // before tab B's value and let that one overwrite it: the values are sent in
+  // the order they were set and the server keeps the last one.
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A sent doc = 2', 'tab A sent doc = 3', 'tab A sent doc = 4']`,
+  );
+  expect(tabA.getEnv().serverMock.current).toBe(4);
 });
 
 test('an edit another tab turned into a conflict keeps showing in the tab that made it', async () => {

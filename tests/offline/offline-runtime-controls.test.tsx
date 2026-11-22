@@ -435,9 +435,11 @@ test('disabling active network mode preserves offline state while future operati
   statusRenders.addMark('Disable runtime network mode');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
 
-  // While network mode is disabled, new offline-enabled mutations should use
-  // the direct path instead of entering the durable queue. In a realistic
-  // browser-offline scenario that direct request still fails normally.
+  // While network mode is disabled, new offline-enabled mutations use the
+  // direct path instead of entering the durable queue, except when older
+  // mutations of the same entity are still queued: sent on its own, the new
+  // mutation could reach the server first and be overwritten by them, so it
+  // joins the queue behind them instead.
   const directMutationWhileDisabled = vi.fn(() =>
     Promise.reject(new Error('disabled-network-direct-error')),
   );
@@ -446,24 +448,13 @@ test('disabling active network mode preserves offline state while future operati
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
-  expect({
-    error: disabledNetworkMutationResult.ok
-      ? null
-      : disabledNetworkMutationResult.error,
-    ok: disabledNetworkMutationResult.ok,
-  }).toMatchInlineSnapshot(`
-    error{Error}:
-      message: 'disabled-network-direct-error'
-      name: 'StoreMutationError'
-      kind: 'error'
-      code: 500
-      id: 'fetch-error'
-      cause:
-        Error#: { message: 'disabled-network-direct-error', name: 'Error' }
-
-    ok: '❌'
+  expect(
+    disabledNetworkMutationResult.ok && disabledNetworkMutationResult.value,
+  ).toMatchInlineSnapshot(`
+    kind: 'queued'
   `);
-  expect(directMutationWhileDisabled).toHaveBeenCalledTimes(1);
+  expect(directMutationWhileDisabled).not.toHaveBeenCalled();
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(2);
 
   // Reads should also bypass offline short-circuiting while runtime network
   // handling is disabled, even if the browser still reports offline.
@@ -493,9 +484,10 @@ test('disabling active network mode preserves offline state while future operati
     requestHistoryBeforeDisabledFetch.length + 1,
   );
 
+  // Nothing is replayed while the browser is still offline
   await advanceTime(250);
   expect(replayedInputs).toMatchInlineSnapshot(`[]`);
-  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(2);
 
   // Re-enabling network mode should restore offline status until connectivity returns.
   offlineSession
@@ -512,7 +504,8 @@ test('disabling active network mode preserves offline state while future operati
   statusRenders.addMark('Re-enable runtime network mode');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
 
-  // Connectivity recovery should finally replay the queued mutation.
+  // Connectivity recovery should finally replay the queued mutations, in the
+  // order they were made.
   act(() => {
     network.goOnline();
   });
@@ -523,6 +516,7 @@ test('disabling active network mode preserves offline state while future operati
 
   expect(replayedInputs).toMatchInlineSnapshot(`
     - value: 2
+    - value: 3
   `);
   expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
     `[]`,
@@ -1373,6 +1367,9 @@ test('runtime mutation queueing overrides are shared across stores in the same s
     .setOfflineRuntimeConfig({ mutationQueueing: { network: 'disallow' } })
     .unwrap();
 
+  // A mutation of the document that still has a queued mutation joins the
+  // queue behind it anyway: sent on its own, it could reach the server first
+  // and be overwritten by the older one.
   const directMutationA = vi.fn(() =>
     navigator.onLine
       ? envA.serverMock.delayedSetData(3).then(() => 3)
@@ -1388,24 +1385,16 @@ test('runtime mutation queueing overrides are shared across stores in the same s
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
-  expect(disallowedResult.ok).toBe(false);
-  expect(disallowedResult.error).toMatchInlineSnapshot(
-    `
-      Error#:
-        message: 'runtime-network-disallowed-direct-error-a'
-        name: 'StoreMutationError'
-        kind: 'error'
-        code: 500
-        id: 'fetch-error'
-        cause:
-          Error#: { message: 'runtime-network-disallowed-direct-error-a', name: 'Error' }
-    `,
-  );
-  expect(directMutationA).toHaveBeenCalledTimes(1);
+  expect(disallowedResult.ok && disallowedResult.value).toMatchInlineSnapshot(`
+    kind: 'queued'
+  `);
+  expect(directMutationA).not.toHaveBeenCalled();
   expect(
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-a'),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
 
+  // The other store has nothing queued, so its mutation is not queued: it
+  // follows the direct path and fails normally while offline.
   const directMutationB = vi.fn(() =>
     navigator.onLine
       ? envB.serverMock.delayedSetData(2).then(() => 2)
@@ -1458,7 +1447,7 @@ test('runtime mutation queueing overrides are shared across stores in the same s
   expect(resetResult.ok).toBe(true);
   expect(
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-a'),
-  ).toHaveLength(2);
+  ).toHaveLength(3);
   expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'allow', outage: 'allow' }
     network: { enabled: '✅' }

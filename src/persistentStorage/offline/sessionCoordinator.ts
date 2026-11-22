@@ -2103,10 +2103,11 @@ class SessionOfflineCoordinator {
 
   /**
    * Reads the session gate (`offlineSession.enabled`): while it is closed the
-   * session behaves as if no offline session existed.
+   * session behaves as if no offline session existed. `'replay-only'` keeps
+   * it open, with mutation queueing disallowed.
    */
   #isSessionEnabled(): boolean {
-    return this.#canonicalConfig.isSessionEnabled?.() ?? true;
+    return this.#canonicalConfig.isSessionEnabled?.() !== false;
   }
 
   #isNetworkEnabled(): boolean {
@@ -2174,6 +2175,11 @@ class SessionOfflineCoordinator {
   #resolveMutationQueueingPolicy(
     cause: 'network' | 'outage',
   ): OfflineMutationQueueingPolicy {
+    // The queued work is replayed, but no new work is queued for the cause
+    if (this.#canonicalConfig.isSessionEnabled?.() === 'replay-only') {
+      return 'disallow';
+    }
+
     return (
       this.#mutationQueueingOverrides?.[cause] ??
       this.#canonicalConfig.mutationQueueingByDefault[cause]
