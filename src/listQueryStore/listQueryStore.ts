@@ -599,6 +599,36 @@ type ListQueryOfflineMutationArgs<
   upload?: OfflineMutationUploadsInput;
 };
 
+/**
+ * {@link ListQueryOfflineMutationArgs} whose `offline` descriptor may be
+ * `undefined`, for calls that only queue offline in some cases.
+ */
+type ListQueryOptionalOfflineMutationArgs<
+  T,
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >,
+> = ListQueryMutationArgsBase<T, ItemState, QueryPayload, ItemPayload> & {
+  /**
+   * Queues this mutation through the store's registered offline operation when
+   * the session is offline or the direct request fails with an offline outage.
+   * `undefined` runs it as a plain online mutation.
+   */
+  offline: TOfflineOperations extends null
+    ? never
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+  /**
+   * Files to attach if this mutation is queued for offline replay. Ignored
+   * when `offline` is `undefined`.
+   */
+  upload?: OfflineMutationUploadsInput;
+};
+
 type ListQueryPerformMutationApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -688,16 +718,59 @@ type ListQueryPerformMutationApi<
       StoreMutationError | MutationSkipped
     >
   >;
+  /**
+   * Runs a list-query mutation for existing item payloads or an item filter,
+   * whose `offline` descriptor may be `undefined`
+   * (`offline: descriptor | undefined`), so one call covers mutations that
+   * only queue offline in some cases.
+   *
+   * The success value is the direct server result when `offline` is
+   * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
+   * `{ kind: 'queued' }`) otherwise.
+   */
   <T>(
-    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args:
       | ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>
-      | ListQueryOfflineMutationArgs<
+      | ListQueryOptionalOfflineMutationArgs<
           T,
           ItemState,
           QueryPayload,
           ItemPayload,
           TOfflineOperations
+        >,
+  ): Promise<
+    ResultType<
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
+  /**
+   * Runs a list-query mutation whose target may be `null` (no current item
+   * target) and whose `offline` descriptor may be `undefined`. Optimistic
+   * updates are not available, since the target may have no payload.
+   *
+   * The success value is the direct server result when `offline` is
+   * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
+   * `{ kind: 'queued' }`) otherwise.
+   */
+  <T>(
+    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    args:
+      | Omit<
+          ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
+          'optimisticUpdate'
+        >
+      | Omit<
+          ListQueryOptionalOfflineMutationArgs<
+            T,
+            ItemState,
+            QueryPayload,
+            ItemPayload,
+            TOfflineOperations
+          >,
+          'optimisticUpdate'
         >,
   ): Promise<
     ResultType<

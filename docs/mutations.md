@@ -113,6 +113,17 @@ When a mutation uses the `offline` option, the success value is `OfflineMutation
 - `{ kind: 'online', data }` when the direct mutation completed.
 - `{ kind: 'queued' }` when TSDF persisted the mutation for offline replay.
 
+When only some calls may be queued, pass `offline: descriptor | undefined` (and `upload: files | undefined`) in a single call instead of writing it twice. `undefined` runs a plain online mutation, and the success value is typed as the union `T | OfflineMutationResult<T>`:
+
+```ts
+const result = await store.performMutation('item-id', {
+  mutation: () => api.renameItem('item-id', name),
+  offline: canQueueOffline
+    ? { operation: 'renameItem', input: { id: 'item-id', name } }
+    : undefined,
+});
+```
+
 ## Optimistic Updates
 
 Optimistic updates let you update the UI immediately before the server responds.

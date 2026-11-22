@@ -1750,6 +1750,14 @@ export function createMutationApi<
     upload?: OfflineMutationUploadsInput;
   };
 
+  type ListQueryOptionalOfflineMutationArgs<T> = ListQueryMutationArgs<T> & {
+    /** Like the offline overload's `offline`, but `undefined` runs online. */
+    offline: TOfflineOperations extends null
+      ? never
+      : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+    upload?: OfflineMutationUploadsInput;
+  };
+
   /**
    * Runs a list-query mutation for one or more existing item payloads, or for a
    * mutation with no current item target.
@@ -1785,7 +1793,9 @@ export function createMutationApi<
   >;
   async function performMutation<T>(
     payload: MutationPayload,
-    args: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
+    args:
+      | ListQueryOnlineMutationArgs<T>
+      | ListQueryOptionalOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>
@@ -1805,7 +1815,7 @@ export function createMutationApi<
       debounce,
       offline,
       upload,
-    }: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
+    }: ListQueryOnlineMutationArgs<T> | ListQueryOptionalOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>

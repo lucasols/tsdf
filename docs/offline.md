@@ -103,7 +103,7 @@ await userStore.performMutation(
 );
 ```
 
-When the online mutation succeeds, the result value is `{ kind: 'online', data }`. When TSDF queues the mutation for offline replay, the result value is `{ kind: 'queued' }`.
+When the online mutation succeeds, the result value is `{ kind: 'online', data }`. When TSDF queues the mutation for offline replay, the result value is `{ kind: 'queued' }`. The descriptor may also be `undefined` for calls that only queue in some cases, see [Mutations - Return Value](./mutations.md#return-value).
 
 A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) or for the entities it depends on (`dependsOn`), or queued mutations that depend on an entity it changes (e.g. a queued subfolder creation and a delete of its folder), are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them (and be overwritten, or reference an entity the server does not have yet), so it joins the queue and is replayed in the order the user made the changes. The same applies while the creation of an entity of another store the operation declares in `cancelledWith` is still queued (e.g. a comment added to a task whose creation is being replayed).
 
