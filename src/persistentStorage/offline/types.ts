@@ -906,7 +906,14 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   saveOfflineUpload: (args: SaveOfflineUploadArgs) => Promise<void>;
   /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
   replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) => Promise<void>;
-  /** Loads a previously stored session-scoped upload. */
+  /**
+   * Loads a previously stored session-scoped upload.
+   *
+   * The file can read from the stored upload, and then stops being readable
+   * once the upload is deleted or replaced: read it into memory
+   * (`new File([await file.arrayBuffer()], file.name, { type: file.type })`)
+   * to keep it longer.
+   */
   loadOfflineUpload: (id: string) => Promise<File | null>;
   /**
    * Deletes a stored upload that no queued work references. Only needed for
@@ -926,6 +933,9 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   /**
    * React hook reading the file of a staged upload while it is staged, and its
    * server ref (`resolvedRef` on `missing`) once it was sent and released.
+   * With an adapter that holds the stored file after writing it (as
+   * `opfsOfflineUploadAdapter` does), a file staged in the current page gives
+   * a new `file` and `url` once its write finishes.
    */
   useOfflineUploadFile: (
     id: string | false | null | undefined,
