@@ -281,8 +281,12 @@ test('a staged file can be rendered again after an app reload, and components sh
     -> component: late ⋅ status: success ⋅ url: blob:staged-1 ⋅ fileName: photo.png
     "
   `);
-  // The restored file carries the original bytes.
-  expect(await lateHook.result.current.file?.text()).toBe('photo bytes');
+  // The restored file carries the original bytes, read from storage.
+  expect(
+    await resolveAfterAllTimers(
+      Promise.resolve(lateHook.result.current.file?.text()),
+    ),
+  ).toBe('photo bytes');
   expect(storage.reads).toMatchInlineSnapshot(`['list']`);
 
   // The URL stays alive while at least one consumer is mounted...
@@ -409,7 +413,11 @@ test('replacing a staged file hands the new file to every consumer and revokes t
     return first;
   });
   await flushAllTimers();
-  expect(await fileHook.result.current.file?.text()).toBe('draft bytes');
+  expect(
+    await resolveAfterAllTimers(
+      Promise.resolve(fileHook.result.current.file?.text()),
+    ),
+  ).toBe('draft bytes');
 
   // The user picks another file for the same attachment.
   renders.addMark('replace the staged file');
@@ -433,7 +441,11 @@ test('replacing a staged file hands the new file to every consumer and revokes t
     -> first: success blob:staged-2 final.png ⋅ second: success blob:staged-2 final.png
     "
   `);
-  expect(await fileHook.result.current.file?.text()).toBe('final bytes');
+  expect(
+    await resolveAfterAllTimers(
+      Promise.resolve(fileHook.result.current.file?.text()),
+    ),
+  ).toBe('final bytes');
   // The URL of the replaced file is revoked; only the new one stays alive.
   expect(objectUrls.events).toMatchInlineSnapshot(`
     - 'create blob:staged-1 (draft.png)'

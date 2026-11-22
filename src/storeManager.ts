@@ -264,7 +264,14 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   replaceOfflineUpload: (
     args: ReplaceOfflineUploadArgs,
   ) => Promise<ResultType<void, Error>>;
-  /** Loads a previously stored session-scoped upload. */
+  /**
+   * Loads a previously stored session-scoped upload.
+   *
+   * The file can read from the stored upload, and then stops being readable
+   * once the upload is deleted or replaced: read it into memory
+   * (`new File([await file.arrayBuffer()], file.name, { type: file.type })`)
+   * to keep it longer.
+   */
   loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
   /**
    * Deletes a stored upload that no queued work references. Only needed for
@@ -291,6 +298,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * deleted or leaves the session. Pass a falsy id to disable the hook (status
    * `idle`), e.g. once the entity holds the uploaded server ref instead of the
    * staged upload id.
+   *
+   * With an adapter that holds the stored file after writing it (as
+   * `opfsOfflineUploadAdapter` does), a file staged in the current page gives
+   * a new `file` and `url` once its write finishes, so a `<video>` or
+   * `<iframe>` preview reloads once and effects keyed on `file` run again.
    *
    * Once an upload that was sent is deleted because the queued work that used
    * it left the queue, the hook reports `missing` with the upload's server ref

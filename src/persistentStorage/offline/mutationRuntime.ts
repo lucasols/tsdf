@@ -73,6 +73,12 @@ export type PreparedOfflineMutation = {
    * excludes the refused optional ones
    */
   handleDirectSuccess: () => Promise<void>;
+  /**
+   * The mutation no longer holds its reserved queue position: it was queued
+   * (the queue write settled), or its direct run succeeded or failed without
+   * being queued
+   */
+  releaseQueueOrder: () => void;
 };
 
 export type OfflineAwareMutationController<
@@ -123,7 +129,11 @@ export async function runHybridOfflineMutation<
   const prepared = await controller.prepareForMutation({ offline, upload });
 
   if (prepared.initialAction === 'queue') {
-    await prepared.queueMutation(false);
+    try {
+      await prepared.queueMutation(false);
+    } finally {
+      prepared.releaseQueueOrder();
+    }
     return { kind: 'queued' };
   }
 
@@ -164,5 +174,7 @@ export async function runHybridOfflineMutation<
     // for the replay.
     await prepared.queueMutation(failedUploadId === undefined);
     return { kind: 'queued' };
+  } finally {
+    prepared.releaseQueueOrder();
   }
 }

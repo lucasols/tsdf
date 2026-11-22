@@ -105,7 +105,9 @@ await userStore.performMutation(
 
 When the online mutation succeeds, the result value is `{ kind: 'online', data }`. When TSDF queues the mutation for offline replay, the result value is `{ kind: 'queued' }`. The descriptor may also be `undefined` for calls that only queue in some cases, see [Mutations - Return Value](./mutations.md#return-value).
 
-A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) or for the entities it depends on (`dependsOn`), or queued mutations that depend on an entity it changes (e.g. a queued subfolder creation and a delete of its folder), are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them (and be overwritten, or reference an entity the server does not have yet), so it joins the queue and is replayed in the order the user made the changes. The same applies while the creation of an entity of another store the operation declares in `cancelledWith` is still queued (e.g. a comment added to a task whose creation is being replayed).
+A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) or for the entities it depends on (`dependsOn`), or queued mutations that depend on an entity it changes (e.g. a queued subfolder creation and a delete of its folder), are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them (and be overwritten, or reference an entity the server does not have yet), so it joins the queue and is replayed in the order the user made the changes. The same applies while the creation of an entity of another store the operation declares in `cancelledWith` is still queued (e.g. a comment added to a task whose creation is being replayed). It also applies in offline mode when new work is not queued (`mutationQueueing` `'disallow'`, a disabled mode, or the [`'replay-only'` gate](#session-gate)): the server may already be reachable, e.g. after an outage that ended before the next recovery check, and the older work replayed after a successful direct run would overwrite it.
+
+A mutation whose online request fails and is then queued keeps the place it had when it was called, in this tab and in the others: mutations queued while its request was in flight (e.g. the connection dropped and the user kept editing) and not sent yet are replayed after it. With `accumulation`, it is not merged into them, and the ones queued in the same tab are not merged into older queued work of the same entities while its request is still in flight. Mutations already sent by then (e.g. replayed after reconnecting while its request was still waiting for a response) reach the server first.
 
 Queued mutations and pending resolutions are persisted through the store's own `persistentStorage.adapter`, and the cached entries they reference are protected from cache expiry until the queue is replayed or discarded. They are not migrated when a store's adapter changes: let the queue drain first. See [Changing a store's adapter](./persistent-storage.md#changing-a-stores-adapter).
 
@@ -287,7 +289,7 @@ Each store attached to the manager revalidates by itself once it recovers, witho
 - its queued mutations finished replaying (data fetched earlier could predate them), and
 - the store has no change left waiting for a manual resolution (a refetch would replace the local changes the user still has to decide on; resolving or discarding them triggers the revalidation).
 
-Mounted data refetches right away, unmounted data on its next mount. Stores with `usesRealTimeUpdates` revalidate with `realtimeUpdate` priority, other stores with `highPriority`. Stores with `usesRealTimeUpdates` first wait one `transportReconnectCooldownMs` (2s by default): the app's transport usually reconnects right after the network comes back, and the `onTransportReconnect()` call in that window runs a single revalidation for both. Without a reconnect, the store revalidates when the cooldown ends, or right away when discarding a change refetches the store in the meantime. Tabs that are not focused revalidate when they get focus. Items that only exist locally (offline creations not sent yet) are skipped by invalidations, since there is nothing to fetch for them.
+Mounted data refetches right away, unmounted data on its next mount. Stores with `usesRealTimeUpdates` revalidate with `realtimeUpdate` priority, other stores with `highPriority`. Stores with `usesRealTimeUpdates` first wait one `transportReconnectCooldownMs` (2s by default): the app's transport usually reconnects right after the network comes back, and the `onTransportReconnect()` call in that window runs a single revalidation for both. Without a reconnect, the store revalidates when the cooldown ends, or right away when discarding a change refetches the store in the meantime. Tabs that are not focused revalidate when they get focus. Items that only exist locally (offline creations the server has not confirmed yet, of a temp entity or of an item with an id the app generated) are skipped by invalidations, since there is nothing to fetch for them.
 
 ## Operation Definitions
 
@@ -309,12 +311,35 @@ Optional replay behavior:
 - `getServerSnapshot(ctx)` - Loads fresh server state before replay checks.
 - `shouldSkipSync(ctx)` - Drops queued work when the server already reflects it.
 - `conflictHandling` - Detects conflicts and creates manual resolution records.
-- `accumulation` - Merges newer queued inputs into an existing queued mutation.
+- `accumulation` - Merges newer queued inputs into an existing queued mutation. See [Accumulating queued mutations](#accumulating-queued-mutations).
 - `supersedes` - Prunes older queued work for the same entity.
 
 Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up and sends or resolves them. Apps are expected to reload tabs running an old deploy: TSDF doesn't coordinate the order of offline work between deploys, so an old tab can send its own edits around the work it keeps. Records of an operation removed from the app for good also stay in storage until the session's storage is cleared (`clearSessionStorage`), so keep an operation defined until its queued work is likely gone.
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
+
+### Accumulating Queued Mutations
+
+With `accumulation`, a mutation is merged into the newest queued mutation of the same operation and entity refs that was never sent, so the server receives one request instead of one per edit. When newer queued work of the entity follows that mutation (a mutation of another operation, or one queued by another tab), the incoming mutation is queued after it instead, since the newer work is sent after the merged one and could overwrite it. `mergeInput` combines the inputs, and the optional `canMerge` refuses a merge, which queues the incoming mutation as a separate entry sent after the existing one. Use it when some edits must reach the server as separate requests, e.g. edits of a record made with different permission contexts:
+
+```ts
+updateRecord: {
+  inputSchema: updateRecordInputSchema,
+  kind: 'update',
+  getEntityRefs: ({ input }) => [input.recordId],
+  accumulation: {
+    canMerge: ({ existingInput, incomingInput }) =>
+      existingInput.permissionCtx === incomingInput.permissionCtx,
+    mergeInput: ({ existingInput, incomingInput }) => ({
+      ...incomingInput,
+      fields: { ...existingInput.fields, ...incomingInput.fields },
+    }),
+  },
+  execute: ({ input }) => api.updateRecord(input),
+},
+```
+
+Only the newest queued mutation is a merge candidate. When it is refused, the incoming mutation is not merged into an older one either, since that would send it before the newer work: a table edit, an app block edit and another table edit are sent as three requests, in that order. Later mutations can merge into the separate entry. A refused merge into a mutation held behind the creation of an entity that waits for a resolution is the exception: the incoming mutation is sent first, the held one is sent after it and overwrites the fields both changed, and later mutations keep merging into the held one (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)).
 
 ### Temp Entities in List Queries
 
@@ -463,7 +488,7 @@ While the creation of an entity made offline waits for a resolution, the server 
 
 They follow the decision about the creation: `retry` (default scope) sends the creation again and then the blocked mutations with the server id, `discard` drops them with the creation. For a creation that hit a conflict, `requeue` sends them after the new creation, and `commit` sends them with the ref of the entity the result keeps. A `requeue` that creates other items than the original creation (e.g. a new client-generated id after an "id already taken" conflict) does not send them: they stay as resolutions of their own for the user to decide. This includes a delete with `dropSelfIfTempLifecycleCancelled`: the creation may have reached the server, so it is not cancelled locally; the delete is sent after the creation is retried, or dropped when it is discarded.
 
-A blocked mutation was never sent, so a later mutation of the same entity treats it like an unsent queued one: an `accumulation` operation merges into it, and a `supersedes` operation prunes it. This keeps the order the user made the changes in, e.g. moving a task under the waiting entity and then back under a server task sends only the second move, and retrying the creation does not move the task again. When the merged input no longer depends on the waiting entity, it is queued and sent right away. To make this possible, an online mutation of such an operation for an entity with blocked work is queued instead of sent directly. A mutation of an operation with neither `accumulation` nor `supersedes` does not touch the blocked one: it is sent first, and the blocked one is sent after it once the creation is retried.
+A blocked mutation was never sent, so a later mutation of the same entity treats it like an unsent queued one: an `accumulation` operation merges into it, and a `supersedes` operation prunes it. This keeps the order the user made the changes in, e.g. moving a task under the waiting entity and then back under a server task sends only the second move, and retrying the creation does not move the task again. When the merged input no longer depends on the waiting entity, it is queued and sent right away. To make this possible, an online mutation of such an operation for an entity with blocked work is queued instead of sent directly. A mutation of an operation with neither `accumulation` nor `supersedes` does not touch the blocked one: it is sent first, and the blocked one is sent after it once the creation is retried. The same applies when `canMerge` refuses to merge into the blocked one, unless the incoming mutation depends on the waiting entity too, in which case it is held behind it as well.
 
 When the merged input still depends on the waiting entity, the changes merged into it go with the decision about the creation too: discarding the creation also drops them, e.g. a rename of a server task merged into its held move under the waiting entity.
 
@@ -629,6 +654,14 @@ Mutations already queued when the gate closes are neither deleted nor replayed. 
 
 The callback is read before every fetch and every mutation with an `offline` descriptor, on browser `online` / `offline` events, before each recovery check and before each queued mutation is replayed, so it must be synchronous and cheap (read a variable or a store, no I/O). The app does not have to call anything for a flip to apply to the next fetch or mutation. To apply it right away — clear the offline status in the UI as soon as the gate closes, or start replaying the queue as soon as it reopens on an idle screen — call `storeManager.setOfflineRuntimeConfig({})` after changing the value: every runtime config update re-reads the gate. Runtime overrides and the upload helpers are not affected by the gate.
 
+To stop queueing new work but still send the work already queued, e.g. when a workspace loses offline mode with changes still waiting, return `'replay-only'` instead of `false`:
+
+```ts
+enabled: () => (workspace.hasOfflineMode ? true : 'replay-only'),
+```
+
+The session then works as with the gate open — the offline status follows the connection, the queued work is replayed once online and pauses when the connection drops, and its resolutions can be resolved — except that mutations with an `offline` descriptor are not queued because the session is offline, as with `mutationQueueing: { network: 'disallow', outage: 'disallow' }` (`getOfflineRuntimeConfig()` reports it): they run as online mutations and fail with their normal errors. A mutation of an entity with queued work still joins the queue behind it, also while the session is offline, so the older work does not overwrite it. Unlike a closed gate, fetches made while the session is offline are still answered from the cache.
+
 The tabs of a session key share its offline status and its replay, so `enabled()` must return the same value in every tab of that session key. A tab with the gate closed would clear an offline mode another tab still relies on, and a leading tab with the gate closed holds back the replay of every tab. To gate per workspace, include the workspace in the session key.
 
 ### Forced offline mode
@@ -644,7 +677,7 @@ await storeManager.setForcedOfflineMode(false);
 ```
 
 - While forced, the session's network detection reports offline regardless of `navigator.onLine` / `network.getIsOffline`: fetches are served from cache, offline-enabled mutations are queued, and neither replay nor recovery checks run. Successful requests and browser `online` events cannot end it.
-- Only the offline session goes offline: the real connection stays up, so requests that do not go through the session still reach the server and succeed. That includes fetches of stores without `persistentStorage.offline`, mutations without an `offline` descriptor, offline-enabled mutations while `mutationQueueing.network` is `'disallow'`, and the app's own requests. Cut the connection (e.g. Playwright's `context.setOffline(true)`) to test how those fail.
+- Only the offline session goes offline: the real connection stays up, so requests that do not go through the session still reach the server and succeed. That includes fetches of stores without `persistentStorage.offline`, mutations without an `offline` descriptor, offline-enabled mutations while `mutationQueueing.network` is `'disallow'` (unless older work of the same entity is still queued), and the app's own requests. Cut the connection (e.g. Playwright's `context.setOffline(true)`) to test how those fail.
 - The flag is persisted per session key in `localStorage` and read synchronously when the session boots, so it survives reloads and the first fetches after a reload are already offline. It stays on until it is turned off.
 - It is shared with the other tabs of the same session: open tabs follow the toggle, tabs opened later boot with it.
 - Turning it off hands control back to the real network detection. If the network is up, the session recovers and replays queued work exactly like a normal reconnect; if the detection (`navigator.onLine` / `network.getIsOffline`) still reports offline, the session stays offline.
@@ -862,7 +895,8 @@ await storeManager.saveOfflineUpload({
 - It is persisted with the upload record, so it survives reloads, is passed to the `upload` transport both on replay and on `resolveOfflineUpload(s)`, and is exposed as `metadata` on the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()`.
 - Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata reach the transport with `metadata: undefined`, so handle that case explicitly. This includes the ones persisted by older versions and files attached directly to a mutation with its `upload` option, which can't carry metadata.
 - `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed. Both fail while that upload is queued or being sent.
-- Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` and `storeName` fields together with the rest of the record. `storeName` marks which store queued a file attached to a mutation. That file is removed once nothing in that store's queue uses it, and only while that store is created in the tab, so a store created later (for example on a code-split screen) still finds its files.
+- `opfsOfflineUploadAdapter` restores staged files without reading them into memory: listing the uploads after a reload only reads their metadata, and a file's bytes are read from OPFS when it is uploaded or rendered. State changes of an upload rewrite its metadata, not its file. Once a file is written, including one staged in the current page, the session holds a file of the stored bytes, so a file returned by `loadOfflineUpload` / `useOfflineUploadFile` can stop being readable once its upload is deleted or replaced. Read it into memory (`new File([await file.arrayBuffer()], file.name, { type: file.type })`) to keep it longer, for example to undo a replacement. Staging it, or a file built from it, under any id while its upload is unchanged is safe. Where OPFS is unavailable (no `navigator.storage.getDirectory`, or it rejects, as in Firefox private windows), it restores no uploads instead of reporting a storage error on every load, and staging a file fails.
+- Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` and `storeName` fields together with the rest of the record. An adapter whose restored files read from storage can resolve `save` with a file read from what it just stored, which the session then holds instead of the saved file (see the `save` JSDoc). `storeName` marks which store queued a file attached to a mutation. That file is removed once nothing in that store's queue uses it, and only while that store is created in the tab, so a store created later (for example on a code-split screen) still finds its files.
 
 ### Upload lifecycle
 
@@ -919,6 +953,7 @@ Caching and URL lifetime:
 - A staged file the session already holds is returned on the first render, with no `loading` state. `loading` only shows while the session is still restoring its uploads (right after a reload) or reading an upload it does not hold yet.
 - The URL exists while at least one component uses the id. It is revoked about one second after the last one stops using it (unmount or falsy id), so remounts and React StrictMode keep the same URL.
 - `replaceOfflineUpload` gives every consumer in the tab a new `url` / `file` and revokes the previous URL. Staging or replacing the id from another tab does not update a file this tab already read until the tab reloads; deletions from another tab apply right away.
+- With an adapter that holds the stored file after writing it (as `opfsOfflineUploadAdapter` does), a file staged in the current page changes once more when its write finishes: consumers get the stored `file` and a new `url`. A `<video>` or `<iframe>` preview reloads once, and effects keyed on `file` run again.
 - When the upload leaves the session (`deleteOfflineUpload`, retention expiry, or a mutation-attached file being consumed) the status becomes `missing` and the URL is revoked. Staging the same id again makes it available again.
 - Use `url` directly in render (`<img src>`, `<a href>`). Do not revoke it, do not keep it outside of render, and do not create extra object URLs from `file`.
 

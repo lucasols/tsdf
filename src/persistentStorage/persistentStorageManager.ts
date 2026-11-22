@@ -2631,17 +2631,27 @@ export async function clearSessionStorage(
   await clearRegisteredOfflineUploadStorage(sessionKey);
 }
 
-/** Clears all persistent storage entries for a given session key across built-in adapters. */
+/**
+ * Clears all persistent storage entries for a given session key across
+ * built-in adapters, including the files staged with the built-in
+ * `opfsOfflineUploadAdapter`.
+ */
 export async function clearAllSessionStorage(
   sessionKey: string,
 ): Promise<void> {
-  const { indexedDbPersistentStorage, opfsPersistentStorage } =
-    await import('./asyncStorageAdapters');
+  const {
+    indexedDbPersistentStorage,
+    opfsOfflineUploadAdapter,
+    opfsPersistentStorage,
+  } = await import('./asyncStorageAdapters');
 
   await Promise.all([
     clearSessionStorage(sessionKey, 'local-sync'),
     clearSessionStorage(sessionKey, opfsPersistentStorage),
     clearSessionStorage(sessionKey, indexedDbPersistentStorage),
+    // `clearSessionStorage` only reaches the upload adapters of sessions
+    // whose offline session was created since the page loaded
+    opfsOfflineUploadAdapter.clearSession(sessionKey),
   ]);
 }
 

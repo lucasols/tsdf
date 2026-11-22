@@ -2143,10 +2143,11 @@ class SessionOfflineCoordinator {
 
   /**
    * Reads the session gate (`offlineSession.enabled`): while it is closed the
-   * session behaves as if no offline session existed.
+   * session behaves as if no offline session existed. `'replay-only'` keeps
+   * it open, with mutation queueing disallowed.
    */
   #isSessionEnabled(): boolean {
-    return this.#canonicalConfig.isSessionEnabled?.() ?? true;
+    return this.#canonicalConfig.isSessionEnabled?.() !== false;
   }
 
   #isNetworkEnabled(): boolean {
@@ -2214,6 +2215,11 @@ class SessionOfflineCoordinator {
   #resolveMutationQueueingPolicy(
     cause: 'network' | 'outage',
   ): OfflineMutationQueueingPolicy {
+    // The queued work is replayed, but no new work is queued for the cause
+    if (this.#canonicalConfig.isSessionEnabled?.() === 'replay-only') {
+      return 'disallow';
+    }
+
     return (
       this.#mutationQueueingOverrides?.[cause] ??
       this.#canonicalConfig.mutationQueueingByDefault[cause]
@@ -3091,11 +3097,15 @@ class SessionOfflineCoordinator {
   ): Promise<void> {
     const { id } = record;
     const pendingWrite = this.#uploadWrites.get(id);
-    const write = pendingWrite
-      ? pendingWrite.then(() =>
-          uploadsConfig.adapter.save(this.sessionKey, id, record),
-        )
-      : uploadsConfig.adapter.save(this.sessionKey, id, record);
+    const save = async (): Promise<void> => {
+      const storedFile = await uploadsConfig.adapter.save(
+        this.sessionKey,
+        id,
+        record,
+      );
+      if (storedFile) this.#useStoredUploadFile(record, storedFile);
+    };
+    const write = pendingWrite ? pendingWrite.then(save) : save();
     const settled = write.then(
       () => {},
       () => {},
@@ -3107,6 +3117,24 @@ class SessionOfflineCoordinator {
       }
     });
     return write;
+  }
+
+  /**
+   * Holds the file the adapter read back from what it stored for a saved
+   * record. The saved file can read from storage that is removed or replaced
+   * later (a file restored for another upload, or built from one).
+   */
+  #useStoredUploadFile(
+    savedRecord: OfflineStoredUploadRecord,
+    storedFile: File,
+  ): void {
+    const current = this.#uploads.get(savedRecord.id);
+    // A file staged after this save keeps its own file
+    if (!current || current.file !== savedRecord.file) return;
+
+    this.#uploads.set(current.id, { ...current, file: storedFile });
+    const entry = this.#uploadFiles.get(current.id);
+    if (entry) this.#syncUploadFile(current.id, entry);
   }
 
   #getCurrentUploadOnlineSessionStartedAt(): number | undefined {

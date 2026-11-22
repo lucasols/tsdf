@@ -77,6 +77,10 @@ export type ReplaceOfflineUploadArgs = {
  * (e.g. `<img src={url}>`), never revoke it, and do not keep it outside of
  * render: always use the latest value returned by the hook.
  *
+ * `file` can read from the stored upload, and then stops being readable once
+ * the upload is deleted or replaced: read it into memory to keep it longer
+ * (for example to undo a replacement).
+ *
  * Narrow on `status`:
  *
  * - `idle`: the hook was called with a falsy id.
@@ -212,18 +216,38 @@ export type OfflineStoredUploadRecord<
 
 /** Storage backend contract for session-scoped offline upload files. */
 export type OfflineUploadAdapter = {
-  /** Saves or replaces one staged upload record. */
+  /**
+   * Saves or replaces one staged upload record.
+   *
+   * TSDF saves the record again on every state change of the upload, with the
+   * same `file` object it holds for it (the one it saved, or the one `load` /
+   * `list` returned), so an adapter can skip rewriting a file it already
+   * stores. An adapter whose listed files read from storage must do so: a
+   * file is usually not readable from a snapshot of storage it is replacing.
+   *
+   * After writing a new file, such an adapter can resolve with a file read
+   * from what it stored. TSDF then holds that file for the upload instead of
+   * the saved one, which may read from storage that is later removed or
+   * replaced: a file restored for another upload, or built from one.
+   */
   save<TResolvedRef extends ValidPayload>(
     sessionKey: string,
     id: string,
     record: OfflineStoredUploadRecord<TResolvedRef>,
-  ): Promise<void>;
+  ): Promise<File | void>;
   /** Loads one staged upload record by id. */
   load<TResolvedRef extends ValidPayload>(
     sessionKey: string,
     id: string,
   ): Promise<OfflineStoredUploadRecord<TResolvedRef> | null>;
-  /** Lists all staged upload records for a session. */
+  /**
+   * Lists all staged upload records for a session.
+   *
+   * The `file` of each record doesn't have to be read into memory: TSDF only
+   * reads it when the upload is sent or its file is rendered, so a file
+   * backed by storage (like a `File` from OPFS `getFile()`) keeps listing
+   * cheap with many large files staged.
+   */
   list<TResolvedRef extends ValidPayload>(
     sessionKey: string,
   ): Promise<OfflineStoredUploadRecord<TResolvedRef>[]>;

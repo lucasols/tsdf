@@ -1161,7 +1161,7 @@ test('upload metadata survives an app restart and reaches the transport when upl
       'tsdf-uploads/offline-upload-metadata-restart-session/plain-file/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689612000
+    c: 1735689600030
     i: 'plain-file'
     k: 'offline-upload-metadata-restart-session'
     l: 1
@@ -1169,7 +1169,7 @@ test('upload metadata survives an app restart and reaches the transport when upl
     n: 'notes.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689612000
+    u: 1735689600030
     z: 16
   `);
 
@@ -1227,10 +1227,10 @@ test('upload metadata survives an app restart and reaches the transport when upl
     - fileName: 'photo.png'
       id: 'chat-file'
       metadata: { chatId: 'chat-42', kind: 'chat' }
-    - { fileName: 'notes.txt', id: 'plain-file' }
     - fileName: 'invoice.pdf'
       id: 'record-file'
       metadata: { fieldId: 'files', kind: 'record', tableId: 'table-7' }
+    - { fileName: 'notes.txt', id: 'plain-file' }
   `);
 
   // Finishing the upload keeps the metadata on the upload status entry.
@@ -1367,7 +1367,7 @@ test('replacing a staged upload keeps its metadata unless new metadata is provid
     n: 'moved.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689612018
+    u: 1735689612028
     z: 13
   `);
 

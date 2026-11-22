@@ -5,6 +5,7 @@ import { rc_number, rc_object, rc_string } from 'runcheck';
 import { expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
+  clearAllSessionStorage,
   clearSessionStorage,
   createStoreManager,
   opfsOfflineUploadAdapter,
@@ -23,6 +24,10 @@ import {
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
+// `clearAllSessionStorage` loads the built-in async adapters with a dynamic
+// import, which can't finish while the fake timers are advanced unless the
+// module is already loaded.
+import '../../src/persistentStorage/asyncStorageAdapters';
 import { docSchema } from './offlineTestShared';
 import {
   getOfflineUploadOpfsPath,
@@ -290,7 +295,7 @@ test('manual uploads expire only after one week in the current online session', 
   `);
   expect(retentionStartedMetadata).toMatchInlineSnapshot(`
     c: 1735689612000
-    g: 1736380817009
+    g: 1736380817015
     i: 'stale-manual-upload'
     k: 'offline-upload-retention-session'
     l: 1
@@ -298,7 +303,7 @@ test('manual uploads expire only after one week in the current online session', 
     n: 'retention.txt'
     o: 'manual'
     t: 'pending'
-    u: 1736380817009
+    u: 1736380817015
     z: 14
   `);
 
@@ -713,7 +718,7 @@ test('queued direct uploads keep same logical field names isolated per mutation'
         ├ offline-direct-upload-collision-doc:1735689612000:eeeeeeee:avatar (0.74 kb)
         │ ├ binary.blob (0.06 kb)
         │ └ metadata.json (0.56 kb)
-        └ offline-direct-upload-collision-doc:1735689612009:i:avatar (0.72 kb)
+        └ offline-direct-upload-collision-doc:1735689612015:i:avatar (0.72 kb)
           ├ binary.blob (0.06 kb)
           └ metadata.json (0.54 kb)"
     `);
@@ -795,6 +800,167 @@ test('clearSessionStorage removes registered offline uploads for local-sync sess
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
 
+test.each([
+  { browser: 'without OPFS', storage: {} },
+  {
+    // Like Firefox private windows
+    browser: 'that rejects opening OPFS',
+    storage: {
+      getDirectory: () =>
+        Promise.reject(
+          new DOMException(
+            'Security error when calling GetDirectory',
+            'SecurityError',
+          ),
+        ),
+    },
+  },
+])(
+  'in a browser $browser, the app loads with no staged uploads and no storage error, and staging a file still fails',
+  async ({ storage }) => {
+    Object.defineProperty(globalThis.navigator, 'storage', {
+      value: storage,
+      writable: true,
+      configurable: true,
+    });
+    const storageErrors: string[] = [];
+    const session = createStoreManager({
+      getSessionKey: () => 'offline-upload-opfs-unavailable-session',
+      errorNormalizer: normalizeError,
+      onPersistentStorageError: (error) => {
+        storageErrors.push(error instanceof Error ? error.message : 'unknown');
+      },
+      offlineSession: {
+        // Offline support is turned off for this user, the uploads config is
+        // still set up
+        enabled: () => false,
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id }) => Promise.resolve(`server:${id}`),
+        },
+      },
+    });
+    // A store with offline operations, as in the app
+    createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(1, {
+      id: 'offline-upload-opfs-unavailable-doc',
+      storeManager: session,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: rc_object({ value: rc_number }),
+              kind: 'update',
+              execute: ({ input }) => Promise.resolve(input),
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    });
+
+    // --- App load: a screen lists the staged uploads ---
+    const uploadsHook = renderHook(() => session.useOfflineUploads());
+    await flushAllTimers();
+
+    // Nothing can be staged without OPFS, so there is nothing to restore and
+    // nothing to report on every load.
+    expect(uploadsHook.result.current).toMatchInlineSnapshot(`[]`);
+    expect(storageErrors).toMatchInlineSnapshot(`[]`);
+
+    // --- Action: the user attaches a file anyway ---
+    const saveResult = await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'avatar',
+        file: new File(['avatar bytes'], 'avatar.png', {
+          type: 'image/png',
+          lastModified: 1,
+        }),
+      }),
+    );
+
+    // The file can't be kept, so staging it fails instead of pretending it
+    // was saved.
+    expect(saveResult.ok).toBe(false);
+  },
+);
+
+test('clearAllSessionStorage on logout removes the staged uploads of a session not opened since the page loaded', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const openedOrg = 'offline-upload-logout-opened-org';
+  const otherOrg = 'offline-upload-logout-other-org';
+  const keptOrg = 'offline-upload-logout-kept-org';
+
+  function createOrgSession(sessionKey: string) {
+    return createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id }) => Promise.resolve(`server:${id}`),
+        },
+      },
+    });
+  }
+
+  async function stagePhoto(
+    session: ReturnType<typeof createOrgSession>,
+  ): Promise<void> {
+    (
+      await resolveAfterAllTimers(
+        session.saveOfflineUpload({
+          id: 'photo',
+          file: new File(['photo bytes'], 'photo.jpg', {
+            type: 'image/jpeg',
+            lastModified: 1,
+          }),
+        }),
+      )
+    ).unwrap();
+  }
+
+  // --- Setup: in an earlier page load the user staged a photo in each org ---
+  for (const sessionKey of [openedOrg, otherOrg, keptOrg]) {
+    await stagePhoto(createOrgSession(sessionKey));
+  }
+
+  // --- Reload: only one of the orgs is opened in this page ---
+  resetSessionForTests();
+  const openedSession = createOrgSession(openedOrg);
+  // A screen of the opened org lists its staged photo
+  const openedUploads = renderHook(() =>
+    openedSession.useOfflineUploads().map(({ id }) => id),
+  );
+  // Not long enough for the one-week retention to delete the photo
+  await advanceTime(1_000);
+  expect(openedUploads.result.current).toMatchInlineSnapshot(`['photo']`);
+
+  // --- Action: logout clears the storage of the opened org and of an org
+  // the user didn't open since the page loaded ---
+  await resolveAfterAllTimers(
+    Promise.all([
+      clearAllSessionStorage(openedOrg),
+      clearAllSessionStorage(otherOrg),
+    ]),
+  );
+
+  // The staged photos of both cleared orgs are gone, including the one of the
+  // org no offline session was created for in this page. The org that was not
+  // cleared keeps its own.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
+    "tsdf-uploads (0.47 kb)
+    └ offline-upload-logout-kept-org (0.45 kb)
+      └ photo (0.39 kb)
+        ├ binary.blob (0.04 kb)
+        └ metadata.json (0.34 kb)"
+  `);
+});
+
 test('uploads named metadata.json still rehydrate their original bytes after restart', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'offline-upload-metadata-filename-session';
@@ -846,7 +1012,9 @@ test('uploads named metadata.json still rehydrate their original bytes after res
     )
   ).unwrap();
   expect(restoredFile?.name).toBe('metadata.json');
-  expect(await restoredFile?.text()).toBe('real file bytes');
+  expect(
+    await resolveAfterAllTimers(Promise.resolve(restoredFile?.text())),
+  ).toBe('real file bytes');
 });
 
 function createOpfsUploadSession(sessionKey: string) {
@@ -1130,11 +1298,11 @@ test('replacing a file while the session is still restoring stored uploads updat
       updatedAt: new Date(upload.updatedAt).toISOString(),
     })),
   ).toMatchInlineSnapshot(`
-    - createdAt: '2025-01-01T00:00:00.003Z'
+    - createdAt: '2025-01-01T00:00:00.002Z'
       fileName: 'final.txt'
       id: 'attachment'
       state: 'pending'
-      updatedAt: '2025-01-01T01:00:12.013Z'
+      updatedAt: '2025-01-01T01:00:12.011Z'
   `);
   expect(
     getParsedOpfsFileData(
@@ -1143,6 +1311,297 @@ test('replacing a file while the session is still restoring stored uploads updat
   ).toMatchInlineSnapshot(`"final version"`);
 
   uploadHook.unmount();
+});
+
+test('undoing a file replacement by staging the previous file again keeps that file after a reload', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-undo-replace-session';
+
+  // --- Setup: offline, the user attaches a photo ---
+  network.setOffline();
+  const session = createOpfsUploadSession(sessionKey);
+  await flushAllTimers();
+  const originalPhoto = textFile('original photo', 'original.jpg', 1);
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({ id: 'photo', file: originalPhoto }),
+    )
+  ).unwrap();
+
+  // --- Action: they replace it with an edited photo, then undo the edit,
+  // which stages the same original `File` again ---
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({
+        id: 'photo',
+        file: textFile('edited photo, longer', 'edited.jpg', 2),
+      }),
+    )
+  ).unwrap();
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({ id: 'photo', file: originalPhoto }),
+    )
+  ).unwrap();
+
+  // --- Reload: the restored upload is the original photo, with its own
+  // bytes, not the edited photo's bytes under the original name ---
+  resetSessionForTests();
+  const reloadedSession = createOpfsUploadSession(sessionKey);
+  const restoredFile = (
+    await resolveAfterAllTimers(reloadedSession.loadOfflineUpload('photo'))
+  ).unwrap();
+
+  expect({
+    name: restoredFile?.name,
+    text: await resolveAfterAllTimers(Promise.resolve(restoredFile?.text())),
+  }).toMatchInlineSnapshot(`
+    name: 'original.jpg'
+    text: 'original photo'
+  `);
+});
+
+test('a replacement whose metadata write fails is never restored as the new file under the previous file name', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-replace-metadata-failure-session';
+
+  // --- Setup: offline, the user attaches a photo ---
+  network.setOffline();
+  const session = createOpfsUploadSession(sessionKey);
+  await flushAllTimers();
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'photo',
+        file: textFile('original photo', 'original.jpg', 1),
+      }),
+    )
+  ).unwrap();
+
+  // --- Action: they replace it, and storage runs out right after the new
+  // photo's bytes were written, so its metadata can't be saved ---
+  mockBrowserOpfs.failWrite(
+    getOfflineUploadOpfsPath(sessionKey, 'photo', 'metadata.json'),
+  );
+  const replaceResult = await resolveAfterAllTimers(
+    session.replaceOfflineUpload({
+      id: 'photo',
+      file: textFile('edited photo, longer', 'edited.jpg', 2),
+    }),
+  );
+
+  // The failure is reported to the app
+  expect(replaceResult.ok).toBe(false);
+
+  // The edited photo's bytes don't stay behind without metadata, where
+  // nothing could list or remove them, holding the space storage ran out of
+  expect(
+    mockBrowserOpfs.fileExists(
+      getOfflineUploadOpfsPath(sessionKey, 'photo', 'binary.blob'),
+    ),
+  ).toBe(false);
+
+  // --- Reload: the previous metadata isn't paired with the edited photo's
+  // bytes, which would restore a record whose name, type, size and upload
+  // state don't match its file. The upload is not restored at all ---
+  resetSessionForTests();
+  const reloadedSession = createOpfsUploadSession(sessionKey);
+  const restoredFile = (
+    await resolveAfterAllTimers(reloadedSession.loadOfflineUpload('photo'))
+  ).unwrap();
+
+  expect(restoredFile).toBeNull();
+});
+
+test('undoing a failed replacement of a restored upload sends its original file', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-restored-replace-failure-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  // --- Setup: the user took a photo offline in a previous app run ---
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    photo: textFile('original photo', 'original.jpg', 1),
+  });
+
+  // --- Reload: the editor loads the stored photo, backed by its stored bytes,
+  // and keeps it to undo an edit ---
+  const session = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file }) => {
+          transportCalls.push({ id, fileText: await file.text() });
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+  const restoredPhoto = (
+    await resolveAfterAllTimers(session.loadOfflineUpload('photo'))
+  ).unwrap();
+  if (!restoredPhoto) throw new Error('Expected the restored photo');
+
+  // --- Action: they edit it, but storage is full, so the edited photo's bytes
+  // can't be written and the stored photo stays as it was ---
+  mockBrowserOpfs.failWrite(
+    getOfflineUploadOpfsPath(sessionKey, 'photo', 'binary.blob'),
+  );
+  const replaceResult = await resolveAfterAllTimers(
+    session.replaceOfflineUpload({
+      id: 'photo',
+      file: textFile('edited photo', 'edited.jpg', 2),
+    }),
+  );
+  expect(replaceResult.ok).toBe(false);
+
+  // ...so they undo the edit, staging the photo they loaded again. Its stored
+  // bytes still hold it, so they must not be written over with the photo
+  // itself, which would leave it unreadable
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({ id: 'photo', file: restoredPhoto }),
+    )
+  ).unwrap();
+
+  // --- Back online, the original photo is sent ---
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (await resolveAfterAllTimers(session.resolveOfflineUpload('photo'))).unwrap();
+
+  expect(transportCalls).toMatchInlineSnapshot(
+    `- { fileText: 'original photo', id: 'photo' }`,
+  );
+});
+
+/**
+ * Session whose `upload` transport records the name and content of each file
+ * it sends.
+ */
+function createRecordingOpfsUploadSession(
+  sessionKey: string,
+  transportCalls: Array<Record<string, unknown>>,
+) {
+  return createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file }) => {
+          transportCalls.push({
+            id,
+            fileName: file.name,
+            fileText: await file.text(),
+          });
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+}
+
+test('a restored upload copied to another id is still sent after the original upload is deleted', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-restored-copy-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  // --- Setup: the user drafted a photo offline in a previous app run ---
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    draft: textFile('draft photo', 'draft.jpg', 1),
+  });
+
+  // --- Reload: the app loads the stored draft, a file backed by the draft's
+  // stored bytes ---
+  const session = createRecordingOpfsUploadSession(sessionKey, transportCalls);
+  const restoredDraft = (
+    await resolveAfterAllTimers(session.loadOfflineUpload('draft'))
+  ).unwrap();
+  if (!restoredDraft) throw new Error('Expected the restored draft');
+
+  // --- Action: the user publishes the draft, which the app stages as the
+  // final photo before deleting the draft ---
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({ id: 'final', file: restoredDraft }),
+    )
+  ).unwrap();
+  (await resolveAfterAllTimers(session.deleteOfflineUpload('draft'))).unwrap();
+
+  // The final photo can still be read and rendered: the session holds the
+  // file of its own stored bytes, not the deleted draft's file
+  const finalFile = (
+    await resolveAfterAllTimers(session.loadOfflineUpload('final'))
+  ).unwrap();
+  expect(await resolveAfterAllTimers(Promise.resolve(finalFile?.text()))).toBe(
+    'draft photo',
+  );
+
+  // --- Back online, the final photo is sent ---
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (await resolveAfterAllTimers(session.resolveOfflineUpload('final'))).unwrap();
+
+  expect(transportCalls).toMatchInlineSnapshot(
+    `- { fileName: 'draft.jpg', fileText: 'draft photo', id: 'final' }`,
+  );
+});
+
+test('renaming a restored upload by staging a file built from it sends the renamed file', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-restored-rename-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  // --- Setup: the user took a photo offline in a previous app run ---
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    photo: textFile('original photo', 'IMG_0001.jpg', 1),
+  });
+
+  // --- Reload: the app loads the stored photo, a file backed by its stored
+  // bytes ---
+  const session = createRecordingOpfsUploadSession(sessionKey, transportCalls);
+  const restoredPhoto = (
+    await resolveAfterAllTimers(session.loadOfflineUpload('photo'))
+  ).unwrap();
+  if (!restoredPhoto) throw new Error('Expected the restored photo');
+
+  // --- Action: the user renames the photo. The app stages a new file built
+  // from the restored one, which still reads the stored bytes it replaces ---
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({
+        id: 'photo',
+        file: new File([restoredPhoto], 'beach.jpg', {
+          type: restoredPhoto.type,
+        }),
+      }),
+    )
+  ).unwrap();
+
+  // --- Back online, the renamed photo is sent with its content: the session
+  // doesn't keep a file that read the bytes the rename wrote over ---
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (await resolveAfterAllTimers(session.resolveOfflineUpload('photo'))).unwrap();
+
+  expect(transportCalls).toMatchInlineSnapshot(
+    `- { fileName: 'beach.jpg', fileText: 'original photo', id: 'photo' }`,
+  );
 });
 
 test('replacing an upload right after a restart keeps the metadata saved before the restart', async () => {
@@ -1230,6 +1689,97 @@ test('replacing an upload right after a restart keeps the metadata saved before 
       id: 'attachment'
       metadata: { chatId: 'chat-42', kind: 'chat' }
   `);
+});
+
+test('restoring staged uploads after a reload reads only their metadata, and a restored file is read from storage when it is sent', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-lazy-restore-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  function getOpfsOperationPaths(type: 'readFile' | 'writeFile'): string[] {
+    return mockBrowserOpfs.operations.flatMap((operation) =>
+      operation.type === type
+        ? [operation.path.replace(`tsdf-uploads/${sessionKey}/`, '')]
+        : [],
+    );
+  }
+
+  // --- Setup: the user took two videos offline in a previous app run ---
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    'video-1': new File(['first video bytes'], 'video-1.mp4', {
+      type: 'video/mp4',
+      lastModified: 1,
+    }),
+    'video-2': new File(['second video bytes'], 'video-2.mp4', {
+      type: 'video/mp4',
+      lastModified: 2,
+    }),
+  });
+  mockBrowserOpfs.clearInstrumentation();
+
+  // --- Reload: a screen lists the staged uploads ---
+  const session = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file }) => {
+          transportCalls.push({
+            id,
+            fileName: file.name,
+            type: file.type,
+            fileText: await file.text(),
+          });
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+  const uploadsHook = renderHook(() =>
+    session.useOfflineUploads().map((upload) => upload.id),
+  );
+  await flushAllTimers();
+
+  expect(uploadsHook.result.current).toMatchInlineSnapshot(
+    `['video-1', 'video-2']`,
+  );
+  // Listing the uploads doesn't load the staged files into memory: with many
+  // large videos staged, reading them all on every load could crash the tab.
+  expect(getOpfsOperationPaths('readFile')).toMatchInlineSnapshot(
+    `['video-1/metadata.json', 'video-2/metadata.json']`,
+  );
+
+  // --- Action: back online, the first video is sent ---
+  mockBrowserOpfs.clearInstrumentation();
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (
+    await resolveAfterAllTimers(session.resolveOfflineUpload('video-1'))
+  ).unwrap();
+
+  // The transport receives the restored file with its original name, type and
+  // bytes, read from storage only now.
+  expect(transportCalls).toMatchInlineSnapshot(`
+    - fileName: 'video-1.mp4'
+      fileText: 'first video bytes'
+      id: 'video-1'
+      type: 'video/mp4'
+  `);
+  // Sending it is the first read of the staged video's bytes.
+  expect(getOpfsOperationPaths('readFile')).toMatchInlineSnapshot(
+    `['video-1/binary.blob']`,
+  );
+  // Each state change of the upload (uploading, uploaded) only rewrites its
+  // metadata: the staged video is never copied again.
+  expect(getOpfsOperationPaths('writeFile')).toMatchInlineSnapshot(
+    `['video-1/metadata.json', 'video-1/metadata.json']`,
+  );
 });
 
 test('saving a new file over an upload that is still being sent is rejected, so the new file is never marked as uploaded with the previous file ref', async () => {

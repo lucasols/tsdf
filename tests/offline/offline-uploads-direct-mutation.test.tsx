@@ -270,10 +270,10 @@ test('a mutation that runs online gets the declared uploads already uploaded and
     "
     time    | ui                                            |
     12.1s   | -                                             | -- timeline-cleared
-    12.109s | "upload:uploading | op:none | session:online" | ui-changed
-    12.318s | "upload:uploaded | op:none | session:online"  | ui-changed
-    13.518s | "upload:uploaded | op:none | session:online"  | server-data-changed (value: 3)
-    13.52s  | "upload:none | op:none | session:online"      | ui-changed
+    12.108s | "upload:uploading | op:none | session:online" | ui-changed
+    12.316s | "upload:uploaded | op:none | session:online"  | ui-changed
+    13.516s | "upload:uploaded | op:none | session:online"  | server-data-changed (value: 3)
+    13.518s | "upload:none | op:none | session:online"      | ui-changed
     "
   `);
 
@@ -402,9 +402,9 @@ test('a direct request that fails offline after the upload is queued with its up
     "
     time    | ui                                               |
     12.1s   | -                                                | -- timeline-cleared
-    12.109s | "upload:uploading | op:none | session:online"    | ui-changed
-    12.318s | "upload:uploaded | op:none | session:online"     | ui-changed
-    13.518s | "upload:uploaded | op:none | session:offline"    | ui-changed
+    12.108s | "upload:uploading | op:none | session:online"    | ui-changed
+    12.316s | "upload:uploaded | op:none | session:online"     | ui-changed
+    13.516s | "upload:uploaded | op:none | session:offline"    | ui-changed
     .       | "upload:uploaded | op:pending | session:offline" | ui-changed
     .       | "upload:uploaded | op:pending | session:offline" | offline:updateWithAttachment queued
     14.1s   | "upload:uploaded | op:pending | session:offline" | -- the network comes back
@@ -480,21 +480,21 @@ test('an upload that fails offline during a direct run queues the mutation witho
     "
     time    | ui                                                                              |
     12.1s   | -                                                                               | -- timeline-cleared
-    12.109s | "upload:uploading | op:none | session:online"                                   | ui-changed
-    12.318s | "upload:pending (Upload failed: Network error) | op:none | session:online"      | ui-changed
+    12.108s | "upload:uploading | op:none | session:online"                                   | ui-changed
+    12.316s | "upload:pending (Upload failed: Network error) | op:none | session:online"      | ui-changed
     .       | "upload:pending (Upload failed: Network error) | op:none | session:offline"     | ui-changed
     .       | "upload:pending (Upload failed: Network error) | op:pending | session:offline"  | ui-changed
     .       | "upload:pending (Upload failed: Network error) | op:pending | session:offline"  | offline:updateWithAttachment queued
     14.1s   | "upload:pending (Upload failed: Network error) | op:pending | session:offline"  | -- the network comes back
     .       | "upload:pending (Upload failed: Network error) | op:pending | session:online"   | ui-changed
     .       | "upload:pending (Upload failed: Network error) | op:syncing | session:online"   | ui-changed
-    14.109s | "upload:uploading (Upload failed: Network error) | op:syncing | session:online" | ui-changed
-    14.318s | "upload:uploaded | op:syncing | session:online"                                 | ui-changed
+    14.108s | "upload:uploading (Upload failed: Network error) | op:syncing | session:online" | ui-changed
+    14.316s | "upload:uploaded | op:syncing | session:online"                                 | ui-changed
     .       | "upload:uploaded | op:syncing | session:online"                                 | offline:updateWithAttachment replay-started
-    15.518s | "upload:uploaded | op:syncing | session:online"                                 | server-data-changed (value: 3)
+    15.516s | "upload:uploaded | op:syncing | session:online"                                 | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"                                 | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"                                    | ui-changed
-    15.52s  | "upload:none | op:none | session:online"                                        | ui-changed
+    15.518s | "upload:none | op:none | session:online"                                        | ui-changed
     "
   `);
 

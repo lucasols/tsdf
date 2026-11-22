@@ -130,6 +130,50 @@ async function normalizeWritableData(
   return { bytes, raw: bytesToString(bytes) };
 }
 
+const NativeFile = globalThis.File;
+
+/**
+ * Files returned by a mocked `getFile()`, and files built from one, whose reads
+ * go through the instrumented reads of the snapshot.
+ */
+const opfsSnapshotFiles = new WeakSet<Blob>();
+
+/**
+ * In browsers a `File` built from an OPFS file snapshot stays backed by the
+ * stored file: reading it reads storage and fails once the file changed.
+ * happy-dom copies the bytes of blob parts instead, so a file built from a
+ * single snapshot forwards its reads to it.
+ */
+class MockOpfsBackedFile extends NativeFile {
+  readonly #snapshot: Blob | undefined;
+
+  // Files created before the mock was installed are still files
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return value instanceof NativeFile;
+  }
+
+  constructor(parts: BlobPart[], name: string, options?: FilePropertyBag) {
+    super(parts, name, options);
+    const [part] = parts;
+    if (
+      parts.length === 1 &&
+      part instanceof Blob &&
+      opfsSnapshotFiles.has(part)
+    ) {
+      this.#snapshot = part;
+      opfsSnapshotFiles.add(this);
+    }
+  }
+
+  override arrayBuffer(): Promise<ArrayBuffer> {
+    return this.#snapshot ? this.#snapshot.arrayBuffer() : super.arrayBuffer();
+  }
+
+  override text(): Promise<string> {
+    return this.#snapshot ? this.#snapshot.text() : super.text();
+  }
+}
+
 function createDomException(name: string, message: string): DOMException {
   return new DOMException(message, name);
 }
@@ -208,6 +252,7 @@ export class MockBrowserOpfsEnvironment {
   readonly operations: MockBrowserOpfsOperation[] = [];
 
   readonly #removeEntryFailures = new Map<string, number>();
+  readonly #writeFailures = new Map<string, number>();
   readonly #handlePaths = new WeakMap<FileSystemHandle, string[]>();
   readonly #pendingLatencies = new Set<Promise<void>>();
   readonly #root = createDirectoryNode('');
@@ -270,6 +315,20 @@ export class MockBrowserOpfsEnvironment {
     }
 
     this.#removeEntryFailures.set(normalizedPath, times);
+  }
+
+  /**
+   * Fails the next `times` writes of the file at `path` when the writable is
+   * closed, like a write over the storage quota, keeping the previous content.
+   */
+  failWrite(path: string, times = 1): void {
+    const normalizedPath = normalizePath(path);
+    if (times <= 0) {
+      this.#writeFailures.delete(normalizedPath);
+      return;
+    }
+
+    this.#writeFailures.set(normalizedPath, times);
   }
 
   ensureDir(path: string): void {
@@ -724,6 +783,7 @@ export class MockBrowserOpfsEnvironment {
     readyAtRef: ReadyAtRef,
   ): FileSystemFileHandle {
     const operations = this.operations;
+    const writeFailures = this.#writeFailures;
     const waitLatency = this.#waitLatency.bind(this);
     const getReadDelay = this.#getReadDelay.bind(this);
     const handlePaths = this.#handlePaths;
@@ -782,11 +842,17 @@ export class MockBrowserOpfsEnvironment {
           }
         }
 
-        return __LEGIT_CAST__<File, unknown>({
-          name: node.name,
-          lastModified: Date.now(),
-          size: snapshotBytes.byteLength,
-          type: '',
+        // A real `File`, like the browser returns, so it can be used as a
+        // part of other blobs. Reads through `arrayBuffer` / `text`, also of
+        // files built from it, are instrumented and fail once the snapshot is
+        // stale, as in browsers.
+        const snapshotFile = new NativeFile(
+          [snapshotBytes.slice()],
+          node.name,
+          { lastModified: Date.now() },
+        );
+        opfsSnapshotFiles.add(snapshotFile);
+        return Object.assign(snapshotFile, {
           async arrayBuffer(): Promise<ArrayBuffer> {
             let { completionTime: arrayBufferCompletionTime } =
               await waitLatency({
@@ -895,6 +961,15 @@ export class MockBrowserOpfsEnvironment {
             readyAtRef.value = streamReadyAtRef.value;
             let liveNode: MockFileNode;
             try {
+              const remainingFailures = writeFailures.get(path) ?? 0;
+              if (remainingFailures > 0) {
+                if (remainingFailures === 1) writeFailures.delete(path);
+                else writeFailures.set(path, remainingFailures - 1);
+                throw createDomException(
+                  'QuotaExceededError',
+                  'The quota has been exceeded.',
+                );
+              }
               liveNode = getCurrentFileNode();
             } catch (error) {
               operations.push({
@@ -959,6 +1034,11 @@ export async function flushMockBrowserOpfsLatenciesForTests(): Promise<void> {
 }
 
 function installMockBrowserOpfsForTests(): void {
+  Object.defineProperty(globalThis, 'File', {
+    value: MockOpfsBackedFile,
+    writable: true,
+    configurable: true,
+  });
   Object.defineProperty(globalThis.navigator, 'storage', {
     value: {
       getDirectory: async () =>
