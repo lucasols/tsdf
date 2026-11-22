@@ -169,6 +169,10 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    *
    * It rejects only when `classifyFailure` or `network.getIsOffline` throws
    * (or returns a promise that rejects).
+   *
+   * The session leaves the mode through its usual recovery checks, which run
+   * while an offline-enabled store is in use in the tab: a mode entered from a
+   * screen that uses none stays on until one is used.
    */
   reportOfflineFailure: (
     error: unknown,
