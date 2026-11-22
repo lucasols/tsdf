@@ -507,8 +507,9 @@ export type GlobalOfflineStatus = {
   isForcedOffline: boolean;
   /**
    * Whether this tab's network detection (`network.getIsOffline`, or
-   * `navigator.onLine` by default, and forced offline mode) last reported the
-   * device offline. Unlike `network.active`, it is not gated: it is reported
+   * `navigator.onLine` by default, and forced offline mode while network mode
+   * is enabled and the session gate is open) last reported the device
+   * offline. Unlike `network.active`, it is not gated: it is reported
    * while the session gate (`offlineSession.enabled`) is closed or network
    * mode is disabled, so an app can show a "no connection" state to users
    * without offline mode. Failure classification and health checks do not

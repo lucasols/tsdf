@@ -509,7 +509,7 @@ List-query stores additionally expose `usePendingOfflineItems(...)`, which retur
 
 ### Connection state
 
-`status.isOfflineMode` tells whether the session is in offline mode, and `status.network.active` / `status.outage.active` which cause put it there. `status.isNetworkDetectedOffline` is what the network detection (`network.getIsOffline`, or `navigator.onLine` by default, and [forced offline mode](#forced-offline-mode)) last reported, whether or not the session follows it. It is also reported while the [session gate](#session-gate) is closed or network mode is disabled, so the same status can drive both the offline mode UI and a "no connection" banner for users without offline mode:
+`status.isOfflineMode` tells whether the session is in offline mode, and `status.network.active` / `status.outage.active` which cause put it there. `status.isNetworkDetectedOffline` is what the network detection (`network.getIsOffline`, or `navigator.onLine` by default, and [forced offline mode](#forced-offline-mode)) last reported, whether or not the session follows it (forced offline mode only counts while network mode is enabled and the session gate is open). It is also reported while the [session gate](#session-gate) is closed or network mode is disabled, so the same status can drive both the offline mode UI and a "no connection" banner for users without offline mode:
 
 ```tsx
 const status = storeManager.useOfflineStatus();
