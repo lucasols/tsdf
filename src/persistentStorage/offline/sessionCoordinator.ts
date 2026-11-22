@@ -3341,11 +3341,11 @@ class SessionOfflineCoordinator {
 
         // Waiting for its turn, the upload may now belong to a session the
         // app switched away from: it is not sent from the new one
-        if (canSend?.() === false) {
-          throw new Error(
+        const notSentError = (): Error =>
+          new Error(
             `[tsdf] Offline upload "${id}" was not sent: session "${this.sessionKey}" is no longer active`,
           );
-        }
+        if (canSend?.() === false) throw notSentError();
 
         const file = queuedRecord.file;
         await this.#updateUploadState({
@@ -3357,6 +3357,17 @@ class SessionOfflineCoordinator {
             progress: 0,
           },
         });
+
+        // The session can also switch while that state is written: the
+        // upload goes back to how it was, without counting a failure
+        if (canSend?.() === false) {
+          await this.#updateUploadState({
+            id,
+            state: queuedRecord.state,
+            progress: queuedRecord.progress,
+          });
+          throw notSentError();
+        }
 
         try {
           const resolvedRef = await uploadsConfig.upload({
