@@ -65,6 +65,7 @@ import type {
   OfflineMutationUploadsInput,
 } from '../persistentStorage/offlineUploadTypes';
 import type { ParsedPersistedListQueryData } from '../persistentStorage/parsePersistedData';
+import { getPersistenceSessionKeyGetter } from '../persistentStorage/persistenceUtils';
 import {
   createProtectedStorageKey,
   isOfflineNetworkModeActiveSync,
@@ -1623,7 +1624,10 @@ export function createListQueryStore<
           : undefined,
         debugLogger: storeManager.debugLogger,
         logger: storeManager.logger,
-        getSessionKey: getSessionKeyForRuntime,
+        getSessionKey: getPersistenceSessionKeyGetter(
+          getSessionKeyForRuntime,
+          persistentStorageConfig.enabled,
+        ),
         storeName: id,
       })
     : null;

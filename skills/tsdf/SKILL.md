@@ -179,6 +179,7 @@ persistentStorage: {
   adapter: 'local-sync',     // or async adapters from 'tsdf/opfs-storage' / 'tsdf/indexed-db-storage'
   schema: stateSchema,        // PersistentStorageSchema or ConvertedPersistentStorageDataSchema
   version: 1,                 // bump to invalidate older entries
+  enabled: () => !isPublicSession, // optional runtime switch: false skips all reads/writes of this store
   // Collection / ListQuery: payloadSchema, itemPayloadSchema, queryPayloadSchema, maxBytes/maxItemBytes/maxQueryBytes, maxQuerySize, pinnedItems, pinnedQueries, ignoreItems
   // optional: offline: { operations: { ... } }
   onPersistentStorageError: (err) => log(err), // overrides the manager fallback; use null to disable it

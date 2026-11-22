@@ -3161,6 +3161,10 @@ export function setupListQueryPersistence<
 
   async function flushPersistedState(): Promise<void> {
     if (!storeRef) return;
+    // Without a session (or while persistence is disabled) nothing is written,
+    // so what is known to be persisted must not be updated either: entries
+    // skipped now would be taken as saved once storage is written again
+    if (config.getSessionKey() === false) return;
 
     const state = storeRef.state;
     syncMaintenanceRegistration();

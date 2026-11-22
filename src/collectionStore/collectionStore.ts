@@ -65,6 +65,7 @@ import type {
   OfflineDirectMutationContext,
   OfflineMutationUploadsInput,
 } from '../persistentStorage/offlineUploadTypes';
+import { getPersistenceSessionKeyGetter } from '../persistentStorage/persistenceUtils';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionOfflineOperationsConfig,
@@ -1097,7 +1098,10 @@ export function createCollectionStore<
           : undefined,
         debugLogger: storeManager.debugLogger,
         logger: storeManager.logger,
-        getSessionKey: getSessionKeyForRuntime,
+        getSessionKey: getPersistenceSessionKeyGetter(
+          getSessionKeyForRuntime,
+          persistentStorageConfig.enabled,
+        ),
         storeName: id,
       })
     : null;

@@ -395,7 +395,17 @@ export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
 type StorePersistentStorageBaseConfig<TFinal, TStorage = unknown> = Omit<
   PersistentStorageBaseConfig<TFinal, TStorage>,
   'getSessionKey' | 'storeName'
->;
+> & {
+  /**
+   * Runtime switch for this store's persistence, read every time the store
+   * would read or write storage. While it returns `false`, the store's items,
+   * queries and documents are neither restored from nor saved to storage,
+   * like while the session key is not ready. Data saved before stays in
+   * storage, and the offline queue is not affected. Defaults to always
+   * enabled.
+   */
+  enabled?: () => boolean;
+};
 
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
