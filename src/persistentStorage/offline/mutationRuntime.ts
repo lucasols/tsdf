@@ -14,7 +14,8 @@ import type {
  * `online` means the direct request completed and returned the server payload.
  * `queued` means the mutation was queued for offline replay. It is normally
  * persisted, but if the queue write failed (reported through
- * `onPersistentStorageError`) it is only kept in memory until the page reloads.
+ * `onPersistentStorageError`) it is only kept in memory (`inMemoryOnly`) until
+ * the page reloads.
  */
 export type OfflineMutationResult<T> =
   | {
@@ -30,6 +31,15 @@ export type OfflineMutationResult<T> =
        * memory until the page reloads.
        */
       kind: 'queued';
+      /**
+       * Set (to `true`) when the queue write failed, so the mutation is only
+       * kept in memory: it is still synced, but reloading or closing the tab
+       * before that loses it. Only describes the moment the mutation was
+       * queued: follow `inMemoryOnlyMutations` in the offline status (or
+       * `isInMemoryOnly` on the offline entities) to know when a later write
+       * stored it or it synced.
+       */
+      inMemoryOnly?: true;
     };
 
 /** Outcome of resolving the dependency uploads of a direct run. */
@@ -39,8 +49,11 @@ type DirectMutationUploadsResolution =
 
 export type PreparedOfflineMutation = {
   initialAction: 'run' | 'queue';
-  /** `afterDirectAttempt`: the direct request failed, so it may have been applied */
-  queueMutation: (afterDirectAttempt: boolean) => Promise<void>;
+  /**
+   * `afterDirectAttempt`: the direct request failed, so it may have been
+   * applied. Resolves with whether the queued work is only held in memory.
+   */
+  queueMutation: (afterDirectAttempt: boolean) => Promise<boolean>;
   /** `uploadId`: the failure came from resolving that dependency upload */
   classifyError: (
     error: unknown,
@@ -114,11 +127,10 @@ export async function runHybridOfflineMutation<
 
   if (prepared.initialAction === 'queue') {
     try {
-      await prepared.queueMutation(false);
+      return toQueuedResult(await prepared.queueMutation(false));
     } finally {
       prepared.releaseQueueOrder();
     }
-    return { kind: 'queued' };
   }
 
   // Set when resolving a dependency upload failed, which means the direct
@@ -150,9 +162,19 @@ export async function runHybridOfflineMutation<
 
     // The queued mutation keeps declaring its uploads, so they stay staged
     // for the replay.
-    await prepared.queueMutation(failedUploadId === undefined);
-    return { kind: 'queued' };
+    return toQueuedResult(
+      await prepared.queueMutation(failedUploadId === undefined),
+    );
   } finally {
     prepared.releaseQueueOrder();
   }
+}
+
+function toQueuedResult(inMemoryOnly: boolean): {
+  kind: 'queued';
+  inMemoryOnly?: true;
+} {
+  return inMemoryOnly
+    ? { kind: 'queued', inMemoryOnly: true }
+    : { kind: 'queued' };
 }

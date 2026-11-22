@@ -111,7 +111,7 @@ if (result.ok) {
 When a mutation uses the `offline` option, the success value is `OfflineMutationResult<T>`:
 
 - `{ kind: 'online', data }` when the direct mutation completed.
-- `{ kind: 'queued' }` when TSDF persisted the mutation for offline replay.
+- `{ kind: 'queued' }` when TSDF persisted the mutation for offline replay, or `{ kind: 'queued', inMemoryOnly: true }` when writing it to storage failed, so it is only kept in memory until it syncs (see [Offline - Changes not stored on the device](./offline.md#changes-not-stored-on-the-device)).
 
 The `mutation` callback of such a call also gets the uploads the offline operation declares, already uploaded: as `uploads` in the document store context, and in a second `{ uploads }` argument for collection and list query stores. See [Offline - Direct runs](./offline.md#direct-runs).
 
@@ -293,6 +293,8 @@ const store = createDocumentStore({
 ```
 
 Pass `null` to disable this behavior.
+
+The same handler is also held while queued offline mutations could not be written to storage and only exist in memory, since closing the tab would lose them (see [Offline - Changes not stored on the device](./offline.md#changes-not-stored-on-the-device)). Several blocks can be held at the same time, so `unblock` must only release its own block (like the listener-per-call example above).
 
 ## Mutation Events
 

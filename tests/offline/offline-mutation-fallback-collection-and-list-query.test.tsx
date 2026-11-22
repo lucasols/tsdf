@@ -630,6 +630,7 @@ describe('collection', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -1066,6 +1067,7 @@ describe('list-query', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'

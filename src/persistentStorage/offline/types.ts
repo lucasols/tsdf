@@ -581,6 +581,23 @@ export type GlobalOfflineStatus = {
    * to the tab: it is not persisted nor shared with other tabs.
    */
   isNetworkDetectedOffline: boolean;
+  /**
+   * Number of offline records this tab holds only in memory because writing
+   * them to persistent storage failed (the failure went to
+   * `onPersistentStorageError`): queued mutations (a mutation merged into a
+   * queued one by `accumulation` counts once with it) and mutations waiting
+   * for a manual resolution. They are still synced, but reloading or closing
+   * the tab loses them, so the store manager's `blockWindowClose` stays held
+   * while this is not `0`.
+   *
+   * It goes back down when a later write stores them (TSDF writes them again
+   * after any successful write of their store's offline records) or when
+   * they leave the queue (synced, discarded, or the session key changed). The
+   * affected entities have {@link GlobalOfflineEntity.isInMemoryOnly} set.
+   *
+   * Local to the tab: it is not persisted nor shared with other tabs.
+   */
+  inMemoryOnlyMutations: number;
   /** Whether this tab currently acts as leader for this session. */
   isLeader: boolean;
   /** Timestamp when this status entry was last updated. */
@@ -695,6 +712,15 @@ export type GlobalOfflineEntity = {
   updatedAt: number;
   /** Optional temporary ID for optimistic create flows. */
   tempId?: ValidPayload;
+  /**
+   * Set (to `true`) while some of the entity's offline work could not be
+   * written to persistent storage (the failure went to
+   * `onPersistentStorageError`): the tab holding it keeps it in memory and
+   * still syncs it, but reloading or closing that tab loses it. Removed once
+   * a later write stores it or the work leaves the queue (synced, discarded).
+   * See {@link GlobalOfflineStatus.inMemoryOnlyMutations}.
+   */
+  isInMemoryOnly?: true;
 };
 
 /**

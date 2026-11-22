@@ -2601,6 +2601,7 @@ export function createListQueryStore<
       __LEGIT_CAST__<ResolvedOfflineOperations, Record<string, unknown>>(
         offlineOperationsForRuntime,
       ),
+      blockWindowClose,
     );
   }
 

@@ -19,6 +19,7 @@ import type {
   ItemLoadedFields,
   ListQueryAddItemToQueries,
 } from '../../listQueryStore/types';
+import type { BlockWindowCloseHandler } from '../../utils/performMutation';
 import type { ValidPayload } from '../../utils/storeShared';
 import {
   getNavigatorLockManager,
@@ -614,6 +615,7 @@ export function createOfflineStoreController<
   storeAdapter: OfflineStoreAdapter<TQueryPayload>,
   offlineSession: OfflineSession,
   operations: TOperations,
+  blockWindowClose: BlockWindowCloseHandler | null,
 ): OfflineStoreController<TOperations> {
   const sessionConfig = offlineSession.getConfig();
   const appVersion = getOfflineSessionAppVersion(offlineSession);
@@ -675,6 +677,11 @@ export function createOfflineStoreController<
   // called. Queued, they go at that position, so no newer mutation is merged
   // into older work across them.
   const reservedMutations = new Map<number, PreparedQueuedMutation>();
+  // Queue entries (`q:` keys) and resolution records (`r:` keys) whose last
+  // write failed: this tab only holds them in memory, so a reload loses them.
+  const inMemoryOnlyRecordKeys = new Set<string>();
+  let unblockWindowCloseForInMemoryOnlyRecords: (() => void) | null = null;
+  let isRetryingInMemoryOnlyRecords = false;
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -1068,6 +1075,9 @@ export function createOfflineStoreController<
     queueEntries.clear();
     entryIdsFromAnotherTab.clear();
     resolutions.clear();
+    // Work only held in memory is dropped with the session's records
+    inMemoryOnlyRecordKeys.clear();
+    syncInMemoryOnlyWindowCloseBlock();
     unknownOperationUploadIds.clear();
     nextQueueOrder = 0;
     publishedCreationResolutionIds = '';
@@ -1353,6 +1363,12 @@ export function createOfflineStoreController<
           trackUnknownOperationUploads(`q:${entryId}`, null);
           queueEntries.delete(entryId);
           entryIdsFromAnotherTab.delete(entryId);
+          // This tab may be writing it again (see
+          // `persistInMemoryOnlyRecords`): removed after that write, so an
+          // entry another tab replayed is not stored again.
+          if (forgetInMemoryOnlyRecord(`q:${entryId}`)) {
+            void queueNamespace.remove(entryId);
+          }
           countedReplayFailures.delete(entryId);
           if (queueEntries.size === 0) clearReplayRetryTimer();
         });
@@ -1367,6 +1383,10 @@ export function createOfflineStoreController<
             resolutions.set(resolutionId, parsedResolution);
           } else {
             resolutions.delete(resolutionId);
+            // See the queue entries above
+            if (forgetInMemoryOnlyRecord(`r:${resolutionId}`)) {
+              void resolutionNamespace.remove(resolutionId);
+            }
           }
           // One a newer deploy wrote keeps its uploads
           trackUnknownOperationUploads(
@@ -1431,6 +1451,8 @@ export function createOfflineStoreController<
       queueEntries.clear();
       entryIdsFromAnotherTab.clear();
       resolutions.clear();
+      inMemoryOnlyRecordKeys.clear();
+      syncInMemoryOnlyWindowCloseBlock();
       unknownOperationUploadIds.clear();
       // Records of an operation this deploy doesn't define were written by a
       // newer deploy: they stay in storage, with their uploads, for a deploy
@@ -1838,6 +1860,7 @@ export function createOfflineStoreController<
     // creation starts being sent.
     const attemptedCreationEntityKeys = new Set<string>();
     let creationResolutionIds = '';
+    const hasInMemoryOnlyRecords = inMemoryOnlyRecordKeys.size > 0;
 
     function createEntityBase(
       ref: OfflineEntityRef,
@@ -1880,6 +1903,10 @@ export function createOfflineStoreController<
         const isClientIdCreation = clientIdCreatedEntityKeys.includes(
           ref.entityKey,
         );
+        const isInMemoryOnly =
+          existing?.isInMemoryOnly ??
+          (hasInMemoryOnlyRecords &&
+            inMemoryOnlyRecordKeys.has(`q:${entry.id}`));
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
@@ -1908,6 +1935,7 @@ export function createOfflineStoreController<
           ...(isClientIdCreation || existing?.isClientIdCreation
             ? { isClientIdCreation: true }
             : {}),
+          ...(isInMemoryOnly ? { isInMemoryOnly: true } : {}),
         });
 
         if (
@@ -1946,6 +1974,10 @@ export function createOfflineStoreController<
         const isClientIdCreation = clientIdCreatedEntityKeys.includes(
           ref.entityKey,
         );
+        const isInMemoryOnly =
+          existing?.isInMemoryOnly ??
+          (hasInMemoryOnlyRecords &&
+            inMemoryOnlyRecordKeys.has(`r:${resolution.id}`));
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
@@ -1969,6 +2001,7 @@ export function createOfflineStoreController<
           ...(isClientIdCreation || existing?.isClientIdCreation
             ? { isClientIdCreation: true }
             : {}),
+          ...(isInMemoryOnly ? { isInMemoryOnly: true } : {}),
         });
 
         // A creation held for a manual resolution cannot be cancelled
@@ -2026,6 +2059,7 @@ export function createOfflineStoreController<
         resolutions: derivedResolutions,
         referencedUploadIds,
         protectedKeys,
+        inMemoryOnlyRecordCount: inMemoryOnlyRecordKeys.size,
         replayHead:
           nextReplayEntry === null
             ? null
@@ -2848,6 +2882,86 @@ export function createOfflineStoreController<
     return storeAdapter.loadTempEntities?.([], addToQueries)?.catch(() => {});
   }
 
+  /**
+   * Records whether the last write of a queue entry (`q:` key) or resolution
+   * record (`r:` key) reached storage. One whose write failed is only held in
+   * memory, and keeps the window close blocked, until a later write of it
+   * succeeds or it leaves this tab's records.
+   */
+  function setRecordPersisted(
+    recordKey: string,
+    persisted: boolean,
+    isStillHeld: boolean,
+  ): void {
+    if (persisted || !isStillHeld) {
+      inMemoryOnlyRecordKeys.delete(recordKey);
+    } else {
+      inMemoryOnlyRecordKeys.add(recordKey);
+    }
+    syncInMemoryOnlyWindowCloseBlock();
+  }
+
+  /** Returns whether the record was only held in memory */
+  function forgetInMemoryOnlyRecord(recordKey: string): boolean {
+    if (!inMemoryOnlyRecordKeys.delete(recordKey)) return false;
+    syncInMemoryOnlyWindowCloseBlock();
+    return true;
+  }
+
+  function syncInMemoryOnlyWindowCloseBlock(): void {
+    if (inMemoryOnlyRecordKeys.size > 0) {
+      unblockWindowCloseForInMemoryOnlyRecords ??=
+        blockWindowClose?.().unblock ?? null;
+      return;
+    }
+
+    const unblock = unblockWindowCloseForInMemoryOnlyRecords;
+    unblockWindowCloseForInMemoryOnlyRecords = null;
+    unblock?.();
+  }
+
+  /**
+   * Writes the records only held in memory again after a write of this
+   * store's records succeeded: storage works again (e.g. the browser accepted
+   * a new IndexedDB connection), so they can survive a reload too.
+   */
+  function persistInMemoryOnlyRecords(current: ActiveSessionState): void {
+    if (isRetryingInMemoryOnlyRecords || inMemoryOnlyRecordKeys.size === 0) {
+      return;
+    }
+    isRetryingInMemoryOnlyRecords = true;
+
+    let persistedAny = false;
+    const writes = [...inMemoryOnlyRecordKeys].map(async (recordKey) => {
+      const recordId = recordKey.slice(2);
+      const isQueueEntry = recordKey.startsWith('q:');
+      const records = isQueueEntry ? queueEntries : resolutions;
+      let write: Promise<boolean> | undefined;
+      if (isQueueEntry) {
+        const entry = queueEntries.get(recordId);
+        if (entry) write = current.queueNamespace.save(recordId, entry);
+      } else {
+        const resolution = resolutions.get(recordId);
+        if (resolution) {
+          write = current.resolutionNamespace.save(recordId, resolution);
+        }
+      }
+      if (!write) return;
+
+      const persisted = await write;
+      if (!isActiveSessionState(current)) return;
+      if (persisted) persistedAny = true;
+      setRecordPersisted(recordKey, persisted, records.has(recordId));
+    });
+
+    void Promise.all(writes).finally(() => {
+      isRetryingInMemoryOnlyRecords = false;
+      if (persistedAny && isActiveSessionState(current)) {
+        refreshDerivedState(current);
+      }
+    });
+  }
+
   async function persistEntry(
     entry: OfflineQueueEntry,
     current?: ActiveSessionState,
@@ -2858,11 +2972,12 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       queueEntries.set(entry.id, entry);
     }
-    await session.queueNamespace.save(entry.id, entry);
+    const persisted = await session.queueNamespace.save(entry.id, entry);
     session.session.publishQueueEntryChange(storeName, entry.id, entry);
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    if (!isActiveSessionState(session)) return;
+    setRecordPersisted(`q:${entry.id}`, persisted, queueEntries.has(entry.id));
+    if (persisted) persistInMemoryOnlyRecords(session);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   function runSuccessfulExecuteSync(args: {
@@ -2892,6 +3007,7 @@ export function createOfflineStoreController<
       queueEntries.delete(entryId);
       entryIdsFromAnotherTab.delete(entryId);
       countedReplayFailures.delete(entryId);
+      forgetInMemoryOnlyRecord(`q:${entryId}`);
       if (queueEntries.size === 0) {
         clearReplayRetryTimer();
       }
@@ -2899,10 +3015,10 @@ export function createOfflineStoreController<
     // Announced before the storage write: an entry that was replayed must
     // leave the other tabs' queues as early as possible.
     session.session.publishQueueEntryChange(storeName, entryId, null);
-    await session.queueNamespace.remove(entryId);
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    const removed = await session.queueNamespace.remove(entryId);
+    if (!isActiveSessionState(session)) return;
+    if (removed) persistInMemoryOnlyRecords(session);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   async function persistResolution(
@@ -2915,15 +3031,23 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       resolutions.set(resolution.id, resolution);
     }
-    await session.resolutionNamespace.save(resolution.id, resolution);
+    const persisted = await session.resolutionNamespace.save(
+      resolution.id,
+      resolution,
+    );
     session.session.publishResolutionChange(
       storeName,
       resolution.id,
       resolution,
     );
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    if (!isActiveSessionState(session)) return;
+    setRecordPersisted(
+      `r:${resolution.id}`,
+      persisted,
+      resolutions.has(resolution.id),
+    );
+    if (persisted) persistInMemoryOnlyRecords(session);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   async function removeResolution(
@@ -2935,12 +3059,13 @@ export function createOfflineStoreController<
     if (!session) return;
     if (isActiveSessionState(session)) {
       resolutions.delete(resolutionId);
+      forgetInMemoryOnlyRecord(`r:${resolutionId}`);
     }
-    await session.resolutionNamespace.remove(resolutionId);
+    const removed = await session.resolutionNamespace.remove(resolutionId);
     session.session.publishResolutionChange(storeName, resolutionId, null);
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    if (!isActiveSessionState(session)) return;
+    if (removed) persistInMemoryOnlyRecords(session);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   /**
@@ -4586,10 +4711,14 @@ export function createOfflineStoreController<
     };
   }
 
+  /**
+   * Resolves with whether the work the mutation was queued in is only held in
+   * memory, because writing it to storage failed.
+   */
   async function queuePreparedMutations(
     preparedMutation: PreparedQueuedMutation,
     replacedResolutionId?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const current = ensureActiveSession();
     if (!current || current.sessionKey !== preparedMutation.currentSessionKey) {
       throw new OfflineSessionUnavailableError();
@@ -4868,6 +4997,16 @@ export function createOfflineStoreController<
       await deleteOrphanedDependencyUploads(current, supersededWork);
     }
     await ensureReplayScheduled();
+
+    const { nextEntry, replacedResolution } = plannedMutation;
+    return (
+      (nextEntry !== undefined &&
+        inMemoryOnlyRecordKeys.has(
+          blockedResolution ? `r:${blockedResolution.id}` : `q:${nextEntry.id}`,
+        )) ||
+      (replacedResolution !== undefined &&
+        inMemoryOnlyRecordKeys.has(`r:${replacedResolution.id}`))
+    );
   }
 
   async function ensureReplayScheduled(): Promise<void> {

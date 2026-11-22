@@ -293,6 +293,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -363,6 +364,7 @@ describe('document', () => {
     await advanceTime(25);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -393,6 +395,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -463,6 +466,7 @@ describe('document', () => {
     await advanceTime(25);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -493,6 +497,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -578,6 +583,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -733,6 +739,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'
@@ -1007,6 +1014,7 @@ describe('document', () => {
       ),
     ).toMatchInlineSnapshot(`[]`);
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      inMemoryOnlyMutations: 0
       isForcedOffline: '❌'
       isLeader: '✅'
       isNetworkDetectedOffline: '❌'

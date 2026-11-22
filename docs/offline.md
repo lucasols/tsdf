@@ -111,7 +111,7 @@ A mutation whose online request fails and is then queued keeps the place it had 
 
 Queued mutations and pending resolutions are persisted through the store's own `persistentStorage.adapter`, and the cached entries they reference are protected from cache expiry until the queue is replayed or discarded. They are not migrated when a store's adapter changes: let the queue drain first. See [Changing a store's adapter](./persistent-storage.md#changing-a-stores-adapter).
 
-The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the result is still `{ kind: 'queued' }`: the mutation stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded first. Treat an `onPersistentStorageError` call while offline as "pending changes may not survive a reload".
+The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the mutation is still queued: it stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded or closed first. See [Changes not stored on the device](#changes-not-stored-on-the-device) for how the app can tell.
 
 Without an active offline session — `getSessionKey()` returns `false`, or the [session gate](#session-gate) is closed — the same call runs as a plain online mutation: `mutation` is called, a success resolves with `{ kind: 'online', data }`, and a failure goes through the normal error handling (optimistic update rolled back, `onMutationError` called). Nothing is queued.
 
@@ -583,6 +583,32 @@ const showNoConnection =
 - It is updated on the browser `online` / `offline` events (unless `network.listenToBrowserEvents` is `false`) and before fetches and mutations.
 - A failure classified as `network` (by `classifyFailure` or the [health check](#health-check)) does not change it: it only activates `network.active`.
 - It is local to the tab: it is not persisted nor shared with the other tabs of the session.
+
+### Changes not stored on the device
+
+When writing a queued mutation to persistent storage fails (see [Queuing Mutations](#queuing-mutations)), the tab keeps it in memory and still sends it, but a reload or closing the tab loses it. TSDF tracks those changes so the app does not have to:
+
+- `status.inMemoryOnlyMutations` counts the offline records this tab holds only in memory: queued mutations (a mutation merged into a queued one by `accumulation` counts once with it) and mutations waiting for a manual resolution.
+- The affected entities of `useOfflineEntities()` have `isInMemoryOnly: true`.
+- The result of the `performMutation(...)` call that hit the failure is `{ kind: 'queued', inMemoryOnly: true }`.
+- While `inMemoryOnlyMutations` is not `0`, the store manager's [`blockWindowClose`](./mutations.md#window-close-blocking) stays held (once per store holding such changes), so the browser asks before closing or reloading the tab.
+
+```tsx
+const { inMemoryOnlyMutations } = storeManager.useOfflineStatus();
+
+const storageWarning =
+  inMemoryOnlyMutations > 0
+    ? `${inMemoryOnlyMutations} changes are not stored on this device`
+    : null;
+```
+
+The count goes back to `0`, and the window close is released, once those changes are stored or leave the queue:
+
+- After any successful write of a store's offline records (e.g. the browser accepts a new IndexedDB connection and the user makes another change), TSDF writes that store's in-memory changes again.
+- A change that is synced, discarded or superseded leaves the queue, in this tab or because another tab sent it.
+- Changing the session key drops this tab's in-memory records of the previous session, including these changes.
+
+The count and the flags describe this tab: they are not persisted, and the status of the other tabs does not include them. Another open tab of the session also holds the change in memory (it can send it as the leading tab), but it does not count it. An entity flagged by another tab for a store this tab has not attached keeps the flag in this tab too.
 
 ### Per-item state
 
