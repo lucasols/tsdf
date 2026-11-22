@@ -950,6 +950,13 @@ class SessionOfflineCoordinator {
    * for the rest of the session instead of failing.
    */
   #releasedUploadRefs = new Map<string, ValidPayload>();
+  /**
+   * Errors of the optional uploads the server refused, by id, so later work
+   * declaring them as optional leaves them out without sending the file
+   * again. Only honored while the record is still `failed`: staging the id
+   * again, an upload that succeeded, or a removed record ends the refusal.
+   */
+  #refusedUploadErrors = new Map<string, unknown>();
   /** Adapter removals in flight, awaited before the same id is read or saved. */
   #uploadRemovals = new Map<string, Promise<void>>();
   /** Adapter saves in flight, awaited before the same id is removed. */
@@ -1930,6 +1937,8 @@ class SessionOfflineCoordinator {
   ): Promise<Record<string, ValidPayload>> {
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
+        // Resolving an id on purpose sends it again even if it was refused.
+        this.#refusedUploadErrors.delete(id);
         const resolvedRef = await this.#ensureUploadResolved(
           id,
           false,
@@ -2028,6 +2037,36 @@ class SessionOfflineCoordinator {
     await Promise.all(
       settledIds.map((id) => this.#markUploadFailed(id).catch(reportError)),
     );
+  }
+
+  /**
+   * Marks optional uploads the server refused as `failed` (like
+   * `markUploadsFailed`) and keeps their errors, so later work that declares
+   * them as optional leaves them out instead of sending the file again.
+   */
+  async markUploadsRefused(errorsById: Map<string, unknown>): Promise<void> {
+    for (const [id, error] of errorsById) {
+      this.#refusedUploadErrors.set(id, error);
+    }
+    await this.markUploadsFailed([...errorsById.keys()]);
+  }
+
+  hasRefusedUploads(): boolean {
+    return this.#refusedUploadErrors.size > 0;
+  }
+
+  /**
+   * The error the server refused optional upload `id` with, while its record
+   * is still `failed`. `undefined` when it was not refused, or was staged
+   * again, uploaded or removed since.
+   */
+  getRefusedUploadError(id: string): { error: unknown } | undefined {
+    if (!this.#refusedUploadErrors.has(id)) return undefined;
+    if (this.#uploads.get(id)?.state !== 'failed') {
+      this.#refusedUploadErrors.delete(id);
+      return undefined;
+    }
+    return { error: this.#refusedUploadErrors.get(id) };
   }
 
   async #markUploadFailed(id: string): Promise<void> {

@@ -364,6 +364,9 @@ export type OfflineAttachedUploadIds = Record<string, string>;
  *   (or the direct `mutation`) runs with the other uploads, the id is missing
  *   from `resolvedRefsById` and listed in `refusedUploadErrorsById`. Upload
  *   failures that are offline or retryable are handled as for a required id.
+ *   For the rest of the session, later work declaring a refused id as
+ *   optional leaves it out the same way without sending the file again,
+ *   until `resolveOfflineUpload(id)` is called or the id is staged again.
  *
  * An id returned both as required and as optional is required.
  */
@@ -388,8 +391,9 @@ export type OfflineOperationUploadsContext<
    * by id, with the error the `upload` transport threw. The operation is sent
    * without them: keep the local reference in the data you send (or drop it).
    * The staged file is kept as a `failed` upload, so it can still be rendered
-   * and retried, until `deleteOfflineUpload(id)` or the retention window
-   * removes it. Empty when nothing was refused.
+   * and retried with `resolveOfflineUpload(id)`, until `deleteOfflineUpload(id)`
+   * or the retention window removes it. Also lists ids refused earlier in the
+   * session, which are not sent again. Empty when nothing was refused.
    */
   refusedUploadErrorsById: Record<string, unknown>;
 };
@@ -413,8 +417,10 @@ export type OfflineDirectMutationUploadsContext<
   resolvedRefsById: Record<string, TResolvedRef>;
   /**
    * Uploads declared with `{ id, optional: true }` that the server refused,
-   * by id, with the error the `upload` transport threw, as on replay. They
-   * are not deleted when `mutation` succeeds. Empty when nothing was refused.
+   * by id, with the error the `upload` transport threw, as on replay
+   * (including ids refused earlier in the session, which are not sent
+   * again). They are not deleted when `mutation` succeeds. Empty when
+   * nothing was refused.
    */
   refusedUploadErrorsById: Record<string, unknown>;
 };

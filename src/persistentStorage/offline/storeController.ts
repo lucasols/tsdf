@@ -1757,16 +1757,30 @@ export function createOfflineStoreController<
       }
   > {
     const canSendUploads = () => isSessionStillActive(current);
+    let optionalIds: Set<string> | undefined;
+    const refusedUploadErrors = new Map<string, unknown>();
+
+    // Optional uploads the server already refused in this session are left
+    // out without sending the file again.
+    if (current.session.hasRefusedUploads()) {
+      optionalIds = getOptionalDependencyUploadIds(operationName, input);
+      for (const id of uploadIds) {
+        if (!optionalIds.has(id)) continue;
+        const refused = current.session.getRefusedUploadError(id);
+        if (refused) refusedUploadErrors.set(id, refused.error);
+      }
+    }
+
     // Shared by the calls below, so an upload is sent once per resolution.
     const attempts = new Map<string, Promise<ValidPayload>>();
     let resolution = await current.session.resolveReplayUploadIds(
-      uploadIds,
+      refusedUploadErrors.size > 0
+        ? uploadIds.filter((id) => !refusedUploadErrors.has(id))
+        : uploadIds,
       canSendUploads,
       keptRefs,
       attempts,
     );
-    let optionalIds: Set<string> | undefined;
-    const refusedUploadErrors = new Map<string, unknown>();
 
     while (resolution.failedUploadId !== undefined) {
       const { failedUploadId, error } = resolution;
@@ -1795,9 +1809,10 @@ export function createOfflineStoreController<
       );
     }
 
-    // Nothing retries a refused upload on its own.
+    // Nothing retries a refused upload on its own, and later work declaring
+    // it as optional leaves it out too.
     if (refusedUploadErrors.size > 0) {
-      await current.session.markUploadsFailed([...refusedUploadErrors.keys()]);
+      await current.session.markUploadsRefused(refusedUploadErrors);
     }
 
     return {

@@ -477,6 +477,103 @@ test('a change saved online is sent without an optional image the server refuses
   `);
 });
 
+test('later saves of the document do not upload a refused optional image again until the app resolves it', async () => {
+  createMockBrowserOpfs();
+  const { env, storeManager, requests, getUploads, ...actions } =
+    createDocWithImagesEnv({
+      sessionKey: 'optional-upload-refused-not-resent',
+      uploadOutcomes: { 'img-2': [new UploadError('refused', 'Storage full')] },
+    });
+  await flushAllTimers();
+
+  // --- Setup: the first save is sent without the refused image ---
+  await actions.stageFiles();
+  expect((await actions.saveDoc()).ok).toBe(true);
+
+  // --- Action: the editor saves the same document again, still holding the
+  // local id of the refused image in its body ---
+  expect((await actions.saveDoc()).ok).toBe(true);
+
+  // The second save is sent right away without uploading the refused image
+  // again (an autosave does not resend a file the server rejected), and still
+  // learns it was left out and why. The cover and the other image resolve to
+  // the refs they got on the first save.
+  expect(requests.slice(4)).toMatchInlineSnapshot(`
+    - 'direct saveDoc with refs {"cover":"server:cover","img-1":"server:img-1"}, without img-2 (Storage full)'
+  `);
+
+  // --- Action: the app retries the image on purpose (e.g. after the user
+  // freed some storage) ---
+  expect(
+    (
+      await resolveWithin(storeManager.resolveOfflineUpload('img-2'), 300)
+    ).unwrap(),
+  ).toBe('server:img-2');
+
+  // The next save sends the document with the image's ref.
+  expect((await actions.saveDoc()).ok).toBe(true);
+  expect(requests.slice(5)).toMatchInlineSnapshot(`
+    - 'upload img-2 -> server:img-2'
+    - 'direct saveDoc with refs {"cover":"server:cover","img-1":"server:img-1","img-2":"server:img-2"}'
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getUploads()).toMatchInlineSnapshot(`[]`);
+});
+
+test('an optional image refused on replay is not uploaded again by a later save, but is once the file is staged again', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  const { requests, getUploads, storeManager, ...actions } =
+    createDocWithImagesEnv({
+      sessionKey: 'optional-upload-refused-replay-not-resent',
+      uploadOutcomes: {
+        'img-1': [
+          new UploadError('refused', 'Storage full'),
+          new UploadError('refused', 'Still too large'),
+        ],
+      },
+    });
+  await flushAllTimers();
+
+  // --- Setup: a change saved offline replays without the refused image ---
+  await actions.stageFiles();
+  await actions.saveDoc();
+  await reconnect();
+  expect(requests).toHaveLength(4);
+
+  // --- Action: the document is saved again online ---
+  expect((await actions.saveDoc()).ok).toBe(true);
+
+  // The refused image is left out without being uploaded again.
+  expect(requests.slice(4)).toMatchInlineSnapshot(`
+    - 'direct saveDoc with refs {"cover":"server:cover","img-2":"server:img-2"}, without img-1 (Storage full)'
+  `);
+
+  // --- Action: the user replaces the image with a new file under the same
+  // id, then saves ---
+  (
+    await resolveWithin(
+      storeManager.saveOfflineUpload({
+        id: 'img-1',
+        file: new File(['smaller img-1'], 'img-1.png', { lastModified: 2 }),
+      }),
+    )
+  ).unwrap();
+  expect((await actions.saveDoc()).ok).toBe(true);
+
+  // A file staged again is a new upload, so it is sent (and here refused
+  // again, with the server's new answer).
+  expect(requests.slice(5)).toMatchInlineSnapshot(`
+    - 'upload img-1 -> Still too large'
+    - 'direct saveDoc with refs {"cover":"server:cover","img-2":"server:img-2"}, without img-1 (Still too large)'
+  `);
+  expect(getUploads()).toMatchInlineSnapshot(`
+    - id: 'img-1'
+      lastError: { message: 'Still too large' }
+      state: 'failed'
+  `);
+});
+
 test('an optional image failing with a retryable error during an online save fails the save instead of dropping the image', async () => {
   createMockBrowserOpfs();
   const { env, requests, getUploads, ...actions } = createDocWithImagesEnv({
