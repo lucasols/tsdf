@@ -1556,7 +1556,8 @@ describe('direct mutation that falls back to the queue after later edits were qu
     );
   });
 
-  test('with accumulation two overlapping direct edits that fall back keep their call order', async () => {
+  /** A field patch operation with `accumulation`: the newer edit's fields win */
+  function createPatchEnv() {
     type PatchItemOperations = {
       patchItem: CollectionOfflineOperationDefinition<
         { value: { name: string; city: string } },
@@ -1647,6 +1648,12 @@ describe('direct mutation that falls back to the queue after later edits were qu
       return { result, fail: (error: Error) => fail(error) };
     }
 
+    return { env, replayedInputs, startDirectEdit };
+  }
+
+  test('with accumulation two overlapping direct edits that fall back keep their call order', async () => {
+    const { env, replayedInputs, startDirectEdit } = createPatchEnv();
+
     // Edits 1 and 2 of the name start online as direct requests
     const edit1 = startDirectEdit({ name: 'Edit 1' });
     await advanceTime(100);
@@ -1689,6 +1696,69 @@ describe('direct mutation that falls back to the queue after later edits were qu
       - name: 'Edit 1'
       - name: 'Edit 2'
       - city: 'Paris'
+    `);
+    expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('with accumulation an edit queued while an older direct edit is in flight is not merged before it', async () => {
+    const { env, replayedInputs, startDirectEdit } = createPatchEnv();
+
+    // Edits 1 and 2 of the name start online as direct requests
+    const edit1 = startDirectEdit({ name: 'Edit 1' });
+    await advanceTime(100);
+    const edit2 = startDirectEdit({ name: 'Edit 2' });
+    await advanceTime(100);
+
+    // The connection drops and edit 1 fails first, falling back to the queue
+    act(() => {
+      network.goOffline();
+    });
+    await advanceTime(100);
+    edit1.fail(new Error('Network request failed'));
+    await edit1.result;
+
+    // While edit 2 is still in flight, the user edits the name again. Merged
+    // into edit 1's entry, edit 3 would be replayed at edit 1's place, before
+    // edit 2, which would then overwrite it
+    await env.apiStore.performMutation('users||1', {
+      mutation: () => Promise.reject(new Error('never sent directly')),
+      offline: {
+        operation: 'patchItem',
+        input: { id: 'users||1', name: 'Edit 3' },
+      },
+    });
+    await advanceTime(100);
+
+    // Edit 2 fails later and falls back to the queue
+    edit2.fail(new Error('Network request failed'));
+    await edit2.result;
+
+    // Each edit keeps its own entry, in call order
+    expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+      - input: { id: 'users||1', name: 'Edit 1' }
+        operation: 'patchItem'
+      - input: { id: 'users||1', name: 'Edit 2' }
+        operation: 'patchItem'
+      - input: { id: 'users||1', name: 'Edit 3' }
+        operation: 'patchItem'
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Edit 3 is the latest edit, so its name is the one the server keeps
+    expect(replayedInputs).toMatchInlineSnapshot(`
+      - name: 'Edit 1'
+      - name: 'Edit 2'
+      - name: 'Edit 3'
+    `);
+    expect(env.serverTable.get('users||1')).toMatchInlineSnapshot(`
+      city: 'Lisbon'
+      name: 'Edit 3'
     `);
     expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,

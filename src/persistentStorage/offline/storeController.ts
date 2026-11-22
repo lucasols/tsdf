@@ -664,6 +664,10 @@ export function createOfflineStoreController<
   // the same moment, so this tab never accumulates into them: both merges
   // would save the same entry id and one tab's input would be lost.
   const entryIdsFromAnotherTab = new Set<string>();
+  // Direct requests in flight in this tab, by the queue position reserved when
+  // they were called. One that falls back to the queue goes at that position,
+  // so no newer mutation is merged into older work across it.
+  const directRunsInFlight = new Map<number, PreparedQueuedMutation>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -2157,6 +2161,27 @@ export function createOfflineStoreController<
    */
   function isUnsentQueueEntry(entry: OfflineQueueEntry): boolean {
     return entry.syncState === 'pending' && entry.attempts === 0;
+  }
+
+  function hasDirectRunInFlightBetween(
+    afterQueueOrder: number,
+    beforeQueueOrder: number,
+    entityRefs: OfflineEntityRef[],
+  ): boolean {
+    for (const [queueOrder, prepared] of directRunsInFlight) {
+      if (queueOrder <= afterQueueOrder || queueOrder >= beforeQueueOrder) {
+        continue;
+      }
+      const runEntityRefs = getPreparedEntityRefs(prepared);
+      if (
+        entityRefs.some((ref) =>
+          runEntityRefs.some((runRef) => isSameEntityRef(ref, runRef)),
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function isSameEntityRef(
@@ -4296,13 +4321,23 @@ export function createOfflineStoreController<
             entityRefs,
             entries: workingQueue.values(),
           });
-      // A direct request that fell back to the queue is older than the entries
-      // queued while it was in flight. Merged into the newest one, its input
-      // would be replayed at that entry's place, after the work queued in
-      // between (e.g. another direct request that fell back), so it keeps its
-      // own entry instead.
+      // Merged, the input is replayed at the candidate's place. A direct
+      // request that fell back to the queue is older than the entries queued
+      // while it was in flight, and a direct request still in flight between
+      // the candidate and this mutation would be replayed after it if it falls
+      // back: either way the work would reach the server out of call order,
+      // so the mutation keeps its own entry instead.
+      const candidateQueueOrder = candidateEntry
+        ? getQueueOrder(candidateEntry)
+        : undefined;
       const existingEntry =
-        candidateEntry && getQueueOrder(candidateEntry) < queueOrder
+        candidateQueueOrder !== undefined &&
+        candidateQueueOrder < queueOrder &&
+        !hasDirectRunInFlightBetween(
+          candidateQueueOrder,
+          queueOrder,
+          entityRefs,
+        )
           ? candidateEntry
           : undefined;
       const existingWork = heldResolution ?? existingEntry;
@@ -5239,9 +5274,19 @@ export function createOfflineStoreController<
     await current.session.refreshNetworkState();
 
     const { dependencyUploadIds } = prepared;
+    const initialAction = getInitialOfflineMutationAction(current, prepared);
+    const reservedQueueOrder = prepared.queueOrder;
+    if (initialAction === 'run' && reservedQueueOrder !== undefined) {
+      directRunsInFlight.set(reservedQueueOrder, prepared);
+    }
 
     return {
-      initialAction: getInitialOfflineMutationAction(current, prepared),
+      initialAction,
+      finishDirectRun: () => {
+        if (reservedQueueOrder !== undefined) {
+          directRunsInFlight.delete(reservedQueueOrder);
+        }
+      },
       queueMutation: (afterDirectAttempt) =>
         queuePreparedMutations(
           afterDirectAttempt

@@ -58,6 +58,11 @@ export type PreparedOfflineMutation = {
   markUploadsFailed: () => Promise<void>;
   /** Also releases the dependency uploads the direct request consumed */
   handleDirectSuccess: () => Promise<void>;
+  /**
+   * The direct run ended: it succeeded, failed, or fell back to the queue and
+   * the queue write settled
+   */
+  finishDirectRun: () => void;
 };
 
 export type OfflineAwareMutationController<
@@ -142,5 +147,7 @@ export async function runHybridOfflineMutation<
     // for the replay.
     await prepared.queueMutation(failedUploadId === undefined);
     return { kind: 'queued' };
+  } finally {
+    prepared.finishDirectRun();
   }
 }
