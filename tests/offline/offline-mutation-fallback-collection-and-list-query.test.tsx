@@ -14,6 +14,7 @@ import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
+  pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import {
@@ -348,6 +349,8 @@ describe('collection', () => {
     const storeName = 'hybrid-collection-debounced-temp-rename-store';
     // The ids the renames sent directly (not replayed) were sent for
     const directRenames: string[] = [];
+    // The ids the `onSuccess` of the renames was called with
+    const onSuccessPayloads: unknown[] = [];
     const renameItemExecute = vi.fn(
       async ({ input }: { input: { id: string; name: string } }) => {
         await env.serverTable.delayedUpdateItem(input.id, { name: input.name });
@@ -437,6 +440,15 @@ describe('collection', () => {
     // reconnects: the creation is sent (1.2s) and saved during the debounce
     const rename = env.apiStore.performMutation('temp:Grace', {
       debounce: { context: 'rename', payload: 'temp:Grace', ms: 1500 },
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('temp:Grace', () => ({
+          value: { name: 'Grace Hopper' },
+        }));
+      },
+      revalidateOnSuccess: true,
+      onSuccess: (_data, itemId) => {
+        onSuccessPayloads.push(itemId);
+      },
       // Sends the rename for the item it is called with
       mutation: async (itemId) => {
         if (typeof itemId !== 'string') throw new Error('expected an id');
@@ -470,6 +482,22 @@ describe('collection', () => {
       `name: 'Grace Hopper'`,
     );
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    // The success handling targets the saved item too: `onSuccess` gets its
+    // id, and the saved Grace, which shows the name the creation saved, is
+    // invalidated so it is refetched with the rename
+    expect(onSuccessPayloads).toMatchInlineSnapshot(`['users||2']`);
+    expect(
+      pick(env.store.state[getCompositeKey('users||2')], [
+        'data',
+        'refetchOnMount',
+      ]),
+    ).toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Grace' }
+
+      refetchOnMount: 'highPriority'
+    `);
   });
 
   type InvalidBatchTempCollectionOperations = {

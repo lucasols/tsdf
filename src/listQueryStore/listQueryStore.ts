@@ -573,7 +573,10 @@ type ListQueryMutationArgsBase<
    * matching queries, or `{ queries, items }` to choose both explicitly.
    */
   revalidateOnSuccess?: ListQueryRevalidateOnSuccessOption<QueryPayload>;
-  /** Called after a successful online mutation. */
+  /**
+   * Called after a successful online mutation, with the same final payload as
+   * `mutation` for an item whose creation was saved since the call.
+   */
   onSuccess?: (
     response: UnwrapTSDFResult<Awaited<T>>,
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,

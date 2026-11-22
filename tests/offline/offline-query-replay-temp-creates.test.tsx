@@ -1139,6 +1139,8 @@ describe('an edit of a row created offline that is not queued yet when the creat
     }> = [];
     // The ids the renames sent directly (not replayed) were sent for
     const directRenames: Array<{ itemId: string; name: string }> = [];
+    // The ids the `onSuccess` of the renames was called with
+    const onSuccessPayloads: unknown[] = [];
     // The app checks the connection with a ping. A latency pushed here is
     // used by the next check, the other checks answer right away.
     const connectionCheckLatencies: number[] = [];
@@ -1283,6 +1285,15 @@ describe('an edit of a row created offline that is not queued yet when the creat
                 (item: { id: number; name: string }) => ({ ...item, name }),
               );
             },
+            // Applies the saved name to the row it is called with
+            onSuccess: (_data, itemId) => {
+              onSuccessPayloads.push(itemId);
+              if (typeof itemId !== 'string') return;
+              env.apiStore.updateItemState(
+                itemId,
+                (item: { id: number; name: string }) => ({ ...item, name }),
+              );
+            },
             // Sends the rename for the row it is called with
             mutation: async (itemId) => {
               if (typeof itemId !== 'string') throw new Error('expected an id');
@@ -1311,6 +1322,7 @@ describe('an edit of a row created offline that is not queued yet when the creat
       hook,
       replayedOperations,
       directRenames,
+      onSuccessPayloads,
       renameResults,
       renameLinus,
       connectionCheckLatencies,
@@ -1326,6 +1338,7 @@ describe('an edit of a row created offline that is not queued yet when the creat
       hook,
       replayedOperations,
       directRenames,
+      onSuccessPayloads,
       renameResults,
       renameLinus,
     } = await setupQueuedTempCreate({ sessionKey, storeName });
@@ -1350,6 +1363,8 @@ describe('an edit of a row created offline that is not queued yet when the creat
     expect(directRenames).toMatchInlineSnapshot(`
       - { itemId: 'users||3', name: 'Linus edited' }
     `);
+    // `onSuccess` gets the saved user too, so the name it applies shows
+    expect(onSuccessPayloads).toMatchInlineSnapshot(`['users||3']`);
     expect(replayedOperations).toMatchInlineSnapshot(`
       - input: { name: 'Linus' }
         operation: 'createUser'
@@ -1378,9 +1393,9 @@ describe('an edit of a row created offline that is not queued yet when the creat
       .     | Ada, Grace, Linus edited | offline:createUser replay-finished
       .     | Ada, Grace, Linus        | [query-items, query-items] ui-changed
       5.71s | Ada, Grace, Linus        | [users||3] server-data-changed (value: {"name":"Linus edited"})
-      5.72s | Ada, Grace, Linus        | 🔴 >list-fetch-started
-      6.52s | Ada, Grace, Linus        | 🔴 <list-fetch-finished (value: {"count":3})
       .     | Ada, Grace, Linus edited | [query-items] ui-changed
+      5.72s | Ada, Grace, Linus edited | 🔴 >list-fetch-started
+      6.52s | Ada, Grace, Linus edited | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
 

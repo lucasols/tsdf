@@ -2131,6 +2131,11 @@ export function createMutationApi<
               )
             : [];
 
+        // The temp item of a creation saved since the call was replaced by
+        // the saved one, which is the item the server changed
+        const finalPayload = offline
+          ? resolveSavedTempPayloads(payloadToUse)
+          : payloadToUse;
         if (
           result.kind === 'online' &&
           (normalizedRevalidateOnSuccess.shouldRevalidate ||
@@ -2141,7 +2146,7 @@ export function createMutationApi<
               !normalizedRevalidateOnSuccess.includeItems ||
               affectedItems.length === 0
                 ? false
-                : payloadToUse,
+                : finalPayload,
             queryPayload:
               successInvalidationQueryPayloads.length > 0
                 ? successInvalidationQueryPayloads
@@ -2150,7 +2155,7 @@ export function createMutationApi<
         }
 
         if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, payloadToUse);
+          onSuccess(result.data, finalPayload);
         }
       },
       debounce,

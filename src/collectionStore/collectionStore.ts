@@ -471,7 +471,10 @@ type CollectionMutationArgsBase<
     payload: CollectionMutationPayloadToUse<ItemPayload>,
     ...args: TMutationExtraArgs
   ) => Promise<T>;
-  /** Called after a successful online mutation. */
+  /**
+   * Called after a successful online mutation, with the same final payload as
+   * `mutation` for an item whose creation was saved since the call.
+   */
   onSuccess?: (
     response: UnwrapTSDFResult<Awaited<T>>,
     payload: CollectionMutationPayloadToUse<ItemPayload>,
@@ -3032,12 +3035,17 @@ export function createCollectionStore<
         : undefined,
       (result) => {
         accepted = true;
+        // The temp item of a creation saved since the call was replaced by
+        // the saved one, which is the item the server changed
+        const finalPayload = offline
+          ? resolveSavedTempPayloads(payloadToUse)
+          : payloadToUse;
         if (revalidateOnSuccess && affectedItems.length > 0) {
-          invalidateItem(payloadToUse);
+          invalidateItem(finalPayload);
         }
 
         if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, payloadToUse);
+          onSuccess(result.data, finalPayload);
         }
       },
       _debounce,
