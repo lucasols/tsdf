@@ -394,13 +394,26 @@ type DocumentOptionalOfflineMutationArgs<
   State extends ValidStoreState,
   T,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
-> = DocumentMutationArgsBase<State, T> & {
+> = DocumentMutationArgsBase<
+  State,
+  T,
+  DocumentMutationContext<State> &
+    Partial<
+      OfflineDirectMutationContext<
+        OfflineOperationsUploadRef<TOfflineOperations>
+      >
+    >
+> & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
    * `undefined` runs it as a plain online mutation.
+   *
+   * When it is set and the mutation runs directly, `mutation` gets `uploads`
+   * as with a required `offline` descriptor. `uploads` is `undefined` when
+   * `offline` is `undefined`.
    */
-  offline: TOfflineOperations extends null
+  offline?: TOfflineOperations extends null
     ? never
     : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
   /**
@@ -452,9 +465,7 @@ type DocumentPerformMutation<
    * `{ kind: 'queued' }`) otherwise.
    */
   <T>(
-    args:
-      | DocumentOnlineMutationArgs<State, T>
-      | DocumentOptionalOfflineMutationArgs<State, T, TOfflineOperations>,
+    args: DocumentOptionalOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>
@@ -1450,6 +1461,7 @@ export function createDocumentStore<
   async function performMutation<T>(
     args:
       | DocumentOnlineMutationArgs<State, T>
+      | DocumentOfflineMutationArgs<State, T, TOfflineOperations>
       | DocumentOptionalOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
     ResultType<
@@ -1468,6 +1480,7 @@ export function createDocumentStore<
     upload,
   }:
     | DocumentOnlineMutationArgs<State, T>
+    | DocumentOfflineMutationArgs<State, T, TOfflineOperations>
     | DocumentOptionalOfflineMutationArgs<
         State,
         T,

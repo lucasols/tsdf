@@ -711,6 +711,7 @@ await userStore.performMutation(
 - When the direct request fails and the mutation is queued instead, the queued mutation declares the uploads, so they are kept. They are already uploaded, so the replay sends the same refs without uploading again.
 - When the request fails with its own error, the uploads are kept as they are, for the next attempt.
 - With the [session gate](#session-gate) closed the uploads are resolved and released the same way. Nothing is queued then.
+- With `offline: descriptor | undefined`, `uploads` (the second argument for collection and list query stores) is optional in the `mutation` type: it is set when the descriptor is, and `undefined` when the call runs as a plain online mutation.
 - A failed upload is handled as described in [Dependency uploads of a direct run](#dependency-uploads-of-a-direct-run). `mutation` is not called.
 - Don't resolve or delete these uploads yourself with `resolveOfflineUpload(s)` / `deleteOfflineUpload`: an upload deleted before the request is sent is gone when the mutation falls back to the queue, and its replay fails.
 

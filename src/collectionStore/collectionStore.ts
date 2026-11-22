@@ -524,13 +524,25 @@ type CollectionOptionalOfflineMutationArgs<
     ItemState,
     ItemPayload
   >,
-> = CollectionMutationArgsBase<T, ItemPayload> & {
+> = CollectionMutationArgsBase<
+  T,
+  ItemPayload,
+  [
+    ctx?: OfflineDirectMutationContext<
+      OfflineOperationsUploadRef<TOfflineOperations>
+    >,
+  ]
+> & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
    * `undefined` runs it as a plain online mutation.
+   *
+   * When it is set and the mutation runs directly, `mutation` gets the uploads
+   * context as its second argument, as with a required `offline` descriptor.
+   * The second argument is `undefined` when `offline` is `undefined`.
    */
-  offline: TOfflineOperations extends null
+  offline?: TOfflineOperations extends null
     ? never
     : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
   /**
@@ -636,14 +648,12 @@ type CollectionPerformMutation<
    */
   <T>(
     payload: CollectionMutationTarget<ItemPayload>,
-    args:
-      | CollectionOnlineMutationArgs<T, ItemPayload>
-      | CollectionOptionalOfflineMutationArgs<
-          T,
-          ItemState,
-          ItemPayload,
-          TOfflineOperations
-        >,
+    args: CollectionOptionalOfflineMutationArgs<
+      T,
+      ItemState,
+      ItemPayload,
+      TOfflineOperations
+    >,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>
@@ -662,17 +672,15 @@ type CollectionPerformMutation<
    */
   <T>(
     payload: CollectionMutationPayload<ItemPayload>,
-    args:
-      | Omit<CollectionOnlineMutationArgs<T, ItemPayload>, 'optimisticUpdate'>
-      | Omit<
-          CollectionOptionalOfflineMutationArgs<
-            T,
-            ItemState,
-            ItemPayload,
-            TOfflineOperations
-          >,
-          'optimisticUpdate'
-        >,
+    args: Omit<
+      CollectionOptionalOfflineMutationArgs<
+        T,
+        ItemState,
+        ItemPayload,
+        TOfflineOperations
+      >,
+      'optimisticUpdate'
+    >,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>
@@ -2548,6 +2556,12 @@ export function createCollectionStore<
     payload: CollectionMutationPayload<ItemPayload>,
     args:
       | CollectionOnlineMutationArgs<T, ItemPayload>
+      | CollectionOfflineMutationArgs<
+          T,
+          ItemState,
+          ItemPayload,
+          TOfflineOperations
+        >
       | CollectionOptionalOfflineMutationArgs<
           T,
           ItemState,
@@ -2574,6 +2588,12 @@ export function createCollectionStore<
       upload,
     }:
       | CollectionOnlineMutationArgs<T, ItemPayload>
+      | CollectionOfflineMutationArgs<
+          T,
+          ItemState,
+          ItemPayload,
+          TOfflineOperations
+        >
       | CollectionOptionalOfflineMutationArgs<
           T,
           ItemState,

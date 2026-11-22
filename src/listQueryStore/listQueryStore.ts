@@ -637,13 +637,27 @@ type ListQueryOptionalOfflineMutationArgs<
     QueryPayload,
     ItemPayload
   >,
-> = ListQueryMutationArgsBase<T, ItemState, QueryPayload, ItemPayload> & {
+> = ListQueryMutationArgsBase<
+  T,
+  ItemState,
+  QueryPayload,
+  ItemPayload,
+  [
+    ctx?: OfflineDirectMutationContext<
+      OfflineOperationsUploadRef<TOfflineOperations>
+    >,
+  ]
+> & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
    * `undefined` runs it as a plain online mutation.
+   *
+   * When it is set and the mutation runs directly, `mutation` gets the uploads
+   * context as its second argument, as with a required `offline` descriptor.
+   * The second argument is `undefined` when `offline` is `undefined`.
    */
-  offline: TOfflineOperations extends null
+  offline?: TOfflineOperations extends null
     ? never
     : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
   /**
@@ -754,15 +768,13 @@ type ListQueryPerformMutationApi<
    */
   <T>(
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
-    args:
-      | ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>
-      | ListQueryOptionalOfflineMutationArgs<
-          T,
-          ItemState,
-          QueryPayload,
-          ItemPayload,
-          TOfflineOperations
-        >,
+    args: ListQueryOptionalOfflineMutationArgs<
+      T,
+      ItemState,
+      QueryPayload,
+      ItemPayload,
+      TOfflineOperations
+    >,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>
@@ -781,21 +793,16 @@ type ListQueryPerformMutationApi<
    */
   <T>(
     payload: ListQueryMutationPayload<ItemState, ItemPayload>,
-    args:
-      | Omit<
-          ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
-          'optimisticUpdate'
-        >
-      | Omit<
-          ListQueryOptionalOfflineMutationArgs<
-            T,
-            ItemState,
-            QueryPayload,
-            ItemPayload,
-            TOfflineOperations
-          >,
-          'optimisticUpdate'
-        >,
+    args: Omit<
+      ListQueryOptionalOfflineMutationArgs<
+        T,
+        ItemState,
+        QueryPayload,
+        ItemPayload,
+        TOfflineOperations
+      >,
+      'optimisticUpdate'
+    >,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>

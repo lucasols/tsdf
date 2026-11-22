@@ -1,3 +1,4 @@
+import { typingTest } from '@ls-stack/utils/typingTestUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
@@ -6,6 +7,7 @@ import type {
   CollectionOfflineOperationDefinition,
   DocumentOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
+  OfflineDirectMutationUploadsContext,
   OfflineSessionConfig,
 } from '../../src/main';
 import { createStoreManager, opfsOfflineUploadAdapter } from '../../src/main';
@@ -279,6 +281,70 @@ test('a mutation that runs online gets the declared uploads already uploaded and
     ).unwrap(),
   ).toMatchInlineSnapshot(`"server:asset-1"`);
   expect(requests).toHaveLength(2);
+
+  unmount();
+});
+
+test('a call whose offline descriptor is only sometimes set gets the declared uploads when it is set', async () => {
+  createMockBrowserOpfs();
+  const { env, requests, unmount, ...actions } = createDirectUploadTestEnv({
+    sessionKey: 'direct-upload-optional-descriptor',
+  });
+  await flushAllTimers();
+
+  await actions.stageUpload();
+
+  // The app's single save helper: only some saves may be queued offline, so
+  // it passes `offline: descriptor | undefined` in one call. `uploads` is
+  // then only there when the descriptor is set.
+  function saveAttachment(canQueueOffline: boolean) {
+    return act(() =>
+      resolveWithin(
+        env.apiStore.performMutation({
+          mutation: async ({ uploads }) => {
+            typingTest.expectTypesAreEqual<
+              typeof uploads,
+              OfflineDirectMutationUploadsContext | undefined
+            >();
+            requests.push(
+              `direct request with ${JSON.stringify(uploads?.resolvedRefsById['asset-1'] ?? 'no uploads')}`,
+            );
+            await env.serverMock.delayedSetData(3);
+            return { value: 3 };
+          },
+          offline: canQueueOffline
+            ? {
+                operation: 'updateWithAttachment',
+                input: { attachmentId: 'asset-1', value: 3 },
+              }
+            : undefined,
+        }),
+        2_000,
+      ),
+    );
+  }
+
+  // Without a descriptor it is a plain online mutation: nothing is uploaded
+  // and the staged file stays for another call.
+  expect((await saveAttachment(false)).unwrap()).toMatchInlineSnapshot(
+    `value: 3`,
+  );
+  expect(actions.getUploads()).toMatchInlineSnapshot(
+    `- { id: 'asset-1', state: 'pending' }`,
+  );
+
+  // With a descriptor, the upload runs first and the request gets its server
+  // ref, then the staged file is released, as with a required descriptor.
+  expect((await saveAttachment(true)).unwrap()).toMatchInlineSnapshot(`
+    data: { value: 3 }
+    kind: 'online'
+  `);
+  expect(requests).toMatchInlineSnapshot(`
+    - 'direct request with "no uploads"'
+    - 'upload asset-1 -> server:asset-1'
+    - 'direct request with "server:asset-1"'
+  `);
+  expect(actions.getUploads()).toMatchInlineSnapshot(`[]`);
 
   unmount();
 });
