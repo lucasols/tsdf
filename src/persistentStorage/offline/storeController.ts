@@ -164,6 +164,12 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
     entities: InternalGlobalOfflineEntity[];
   }) => void;
   /**
+   * The server saved these items created with a client-generated id. Called
+   * before the creation's `onSuccessExecute`, so that invalidations it makes
+   * refetch them: the entities are only synced again after it.
+   */
+  confirmClientIdCreations?: (entityKeys: string[]) => void;
+  /**
    * A queued mutation for these entities was discarded. Its optimistic
    * changes are still applied to the store and no baseline exists to roll
    * them back to, so the store refetches the entities from the server.
@@ -5114,6 +5120,12 @@ export function createOfflineStoreController<
         }
 
         await removeEntry(entryToUse.id, current, true);
+
+        const clientIdCreatedEntityKeys =
+          getClientIdCreatedEntityKeys(entryToUse);
+        if (clientIdCreatedEntityKeys.length > 0) {
+          storeAdapter.confirmClientIdCreations?.(clientIdCreatedEntityKeys);
+        }
 
         const successfulExecuteSync = runSuccessfulExecuteSync({
           operation,

@@ -1363,6 +1363,11 @@ export function createCollectionStore<
                 }
               });
             },
+            confirmClientIdCreations: (entityKeys) => {
+              for (const entityKey of entityKeys) {
+                unsentCreationItemKeys.delete(entityKey);
+              }
+            },
           },
           resolvedOfflineConfig.session,
           // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.

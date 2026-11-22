@@ -2544,6 +2544,11 @@ export function createListQueryStore<
             }
           });
         },
+        confirmClientIdCreations: (entityKeys) => {
+          for (const entityKey of entityKeys) {
+            unsentCreationItemKeys.delete(entityKey);
+          }
+        },
       },
       resolvedOfflineConfig.session,
       // WORKAROUND: The list-query persistent config keeps operations behind a
