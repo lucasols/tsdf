@@ -411,7 +411,13 @@ export type OffsetPaginationConfig = {
 
 /** Partial-resource helpers used to merge and select field subsets. */
 export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
-  /** Merges a partial fetch result into an existing item snapshot. */
+  /**
+   * Merges a partial fetch result into an existing item snapshot.
+   *
+   * For an item with an offline change waiting for a manual resolution, it is
+   * called with the fetched item as `prev` and the local item as `fetched`, so
+   * the local values win.
+   */
   mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState;
   /** Returns an item containing only the requested fields. */
   selectFields: (fields: string[], item: ItemState) => ItemState;

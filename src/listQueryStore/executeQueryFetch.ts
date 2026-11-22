@@ -38,7 +38,6 @@ function applyFetchedItems<
   getItemKey: (params: ItemPayload) => string,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
   appendToExisting: boolean,
-  isLoadMore: boolean,
   resolutionItemKeys: ReadonlySet<string>,
 ) {
   const query = draft.queries[queryKey];
@@ -53,9 +52,10 @@ function applyFetchedItems<
   const keepsLocalMembership =
     resolutionItemKeys.size > 0 && query.wasLoaded && !appendToExisting;
   let keptPositions: Map<string, number> | null = null;
-  // A load more replacing the list returns the part loaded before first, then
-  // the new rows, placed where the server lists them
-  const newRowsStart = isLoadMore ? query.items.length : Infinity;
+  // A fetch of a list with more rows to load (a load more replacing the list,
+  // or a refetch with a larger size) returns the part loaded before first,
+  // then the new rows, placed where the server lists them
+  const newRowsStart = query.hasMore ? query.items.length : Infinity;
 
   query.status = 'success';
   query.wasLoaded = true;
@@ -355,7 +355,6 @@ export async function executeQueryFetch<
               getItemKey,
               partialResources,
               appendToExisting,
-              fetchPayload.type === 'loadMore',
               resolutionItemKeys,
             );
           },

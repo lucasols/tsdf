@@ -1756,6 +1756,155 @@ test('a row waiting for a decision shows up when loading more of a list brings i
   hook.unmount();
 });
 
+test('a row waiting for a decision shows up when the list is refetched with a larger size that brings it in', async () => {
+  const sessionKey = 'recovery-revalidation-larger-size-session';
+
+  type UserRow = { id: number; name: string };
+
+  type RenameOperations = {
+    rename: ListQueryOfflineOperationDefinition<
+      UserRow,
+      ListQueryParams,
+      string,
+      { itemId: string; name: string },
+      { reason: string }
+    >;
+  };
+
+  const usersQuery: ListQueryParams = { tableId: 'users' };
+
+  const env = createListQueryStoreTestEnv<
+    UserRow,
+    false,
+    false,
+    RenameOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+        { id: 3, name: 'Linus' },
+        { id: 4, name: 'Ken' },
+      ],
+    },
+    {
+      id: 'recovery-revalidation-larger-size-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      // The list shows two users per page
+      defaultQuerySize: 2,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: rc_object({ id: rc_number, name: rc_string }),
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            rename: {
+              inputSchema: rc_object({ itemId: rc_string, name: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () => ({ reason: 'renamed by someone else' }),
+              },
+              // Never runs: the change always conflicts
+              execute: async () => {},
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const users = env.apiStore.useListQuery(usersQuery, {
+      itemSelector: (item) => item.name,
+    });
+    // A detail panel showing Ken, who is not on the list's first page
+    const ken = env.apiStore.useItem('users||4');
+    env.trackItemUI('users', users.items.join(', '));
+    env.trackItemUI('ken', ken.data ? ken.data.name : '-');
+  });
+  await flushAllTimers();
+
+  // Offline, the user renames Ken from his detail panel. Meanwhile someone
+  // else renames him too, so the change conflicts and waits for a decision.
+  env.addTimelineComments('beforeNextAction', ['offline: Ken is renamed']);
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(100);
+  await act(async () => {
+    await env.apiStore.performMutation('users||4', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||4', (item) => ({
+          ...item,
+          name: 'Ken local',
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'rename',
+        input: { itemId: 'users||4', name: 'Ken local' },
+      },
+    });
+  });
+  env.serverTable.updateItem('users||4', { name: 'Ken by Bob' });
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the rename conflicts',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // The user switches the list to show four users at once: the refetch with
+  // the larger size brings Ken in, and he is shown with his local name where
+  // the server lists him, instead of being left out of a list that now
+  // reports there is nothing more to load.
+  env.addTimelineComments('beforeNextAction', [
+    'the list is refetched with four users: Ken shows up with his local name',
+  ]);
+  act(() => {
+    env.apiStore.scheduleListQueryFetch('highPriority', usersQuery, 4);
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ken       | users                        |
+    0     | -         |                              | [users, ken] ui-initialized
+    10ms  | -         |                              | 🔴 >list-fetch-started
+    .     | -         |                              | 🟠 [users||4] >fetch-started
+    810ms | -         |                              | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | -         | Ada, Grace                   | [users] ui-changed
+    .     | -         | Ada, Grace                   | 🟠 [users||4] <fetch-finished (value: {"id":4,"name":"Ken"})
+    .     | Ken       | Ada, Grace                   | [ken] ui-changed
+    1.91s | Ken       | Ada, Grace                   | -- offline: Ken is renamed
+    .     | Ken local | Ada, Grace                   | [ken] ui-changed
+    .     | Ken local | Ada, Grace                   | offline:rename queued
+    .     | Ken local | Ada, Grace                   | [users||4] server-data-changed (value: {"name":"Ken by Bob"})
+    .     | Ken local | Ada, Grace                   | -- back online: the rename conflicts
+    .     | Ken local | Ada, Grace                   | offline:rename resolution-required
+    1.92s | Ken local | Ada, Grace                   | 🟡 >list-fetch-started
+    2.72s | Ken local | Ada, Grace                   | 🟡 <list-fetch-finished (value: {"count":2})
+    3.73s | Ken local | Ada, Grace                   | -- the list is refetched with four users: Ken shows up with his local name
+    .     | Ken local | Ada, Grace                   | 🟢 >list-fetch-started
+    4.53s | Ken local | Ada, Grace                   | 🟢 <list-fetch-finished (value: {"count":4})
+    .     | Ken local | Ada, Grace, Linus, Ken local | [users] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('a collection change waiting for a decision only holds back its own item: the other replayed items are revalidated after recovering', async () => {
   network.setOffline();
   const sessionKey = 'recovery-revalidation-collection-session';
