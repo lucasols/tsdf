@@ -60,11 +60,17 @@ export type OfflineEntityMutationKind =
   | 'update'
   | 'delete';
 
+/** Runtime schema of a persisted upload ref. */
+/** @internal */
+export const persistedUploadRefSchema = rc_union(
+  rc_string,
+  rc_number,
+  rc_record(rc_unknown),
+);
+
 /** Runtime schema of persisted upload refs, by upload id. */
 /** @internal */
-export const persistedUploadRefsSchema = rc_record(
-  rc_union(rc_string, rc_number, rc_record(rc_unknown)),
-);
+export const persistedUploadRefsSchema = rc_record(persistedUploadRefSchema);
 
 /** Runtime schema for validating serialized offline item entity references. */
 /** @internal */

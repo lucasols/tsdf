@@ -55,6 +55,7 @@ import {
   OfflineResolutionConflictParseError,
   offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
+  persistedUploadRefSchema,
   persistedUploadRefsSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
@@ -1710,6 +1711,12 @@ export function createOfflineStoreController<
     const refs: [string, ValidPayload][] = [];
     for (const id of uploadIds) {
       let ref = current.session.getReleasedUploadRef(id);
+      // The transport's ref is not checked on its way in: one that would not
+      // parse back would make the whole entry unreadable after a reload, so
+      // it is not kept (the entry then fails to resolve the id instead).
+      if (ref !== undefined && !rc_parse(ref, persistedUploadRefSchema).ok) {
+        ref = undefined;
+      }
       for (const kept of keptRefs) {
         if (ref !== undefined) break;
         if (kept && Object.hasOwn(kept, id)) ref = kept[id];
@@ -1840,7 +1847,8 @@ export function createOfflineStoreController<
 
     return {
       classification,
-      sessionEnabled,
+      // Also when the gate closed while the retry classifier answered.
+      sessionEnabled: sessionEnabled && isSessionEnabled(),
       allowReplayRetry: retriable === true,
       overtaken:
         failureClassification === 'overtaken' || retriable === 'overtaken',
