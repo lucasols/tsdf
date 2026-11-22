@@ -1870,6 +1870,18 @@ export function createMutationApi<
     upload?: OfflineMutationUploadsInput;
   };
 
+  /** Replaces the temp payloads of saved creations by their final payloads */
+  function resolveSavedTempPayloads(
+    payload: MutationPayloadToUse,
+  ): MutationPayloadToUse {
+    if (!offlineController || typeof payload === 'function') return payload;
+    return Array.isArray(payload)
+      ? payload.map((itemPayload) =>
+          offlineController.resolveEntityRef(itemPayload),
+        )
+      : offlineController.resolveEntityRef(payload);
+  }
+
   /**
    * Runs a list-query mutation for one or more existing item payloads, or for a
    * mutation with no current item target.
@@ -1973,10 +1985,14 @@ export function createMutationApi<
       ) => Promise<T>,
       unknown
     >(mutation);
-    // A plain online mutation is called with the payload only
+    // A plain online mutation is called with the payload only. An
+    // offline-enabled one is called with the final payload of an item whose
+    // creation was saved since the call (e.g. during the debounce window).
     const directMutation = async (ctx?: OfflineDirectMutationContext) =>
       unwrapTSDFResult(
-        await (ctx ? mutationFn(payloadToUse, ctx) : mutationFn(payloadToUse)),
+        await (ctx
+          ? mutationFn(resolveSavedTempPayloads(payloadToUse), ctx)
+          : mutationFn(payloadToUse)),
       );
     const runOnlineMutation = async () => ({
       kind: 'online' as const,

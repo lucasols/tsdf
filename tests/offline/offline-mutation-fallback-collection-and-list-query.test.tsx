@@ -342,6 +342,136 @@ describe('collection', () => {
     ).toMatchInlineSnapshot(`value: { name: 'Grace rebound' }`);
   });
 
+  test('a debounced rename of an item created offline whose creation is saved during the debounce is sent for the saved item', async () => {
+    network.setOffline();
+    const sessionKey = 'hybrid-collection-debounced-temp-rename-session';
+    const storeName = 'hybrid-collection-debounced-temp-rename-store';
+    // The ids the renames sent directly (not replayed) were sent for
+    const directRenames: string[] = [];
+    const renameItemExecute = vi.fn(
+      async ({ input }: { input: { id: string; name: string } }) => {
+        await env.serverTable.delayedUpdateItem(input.id, { name: input.name });
+        return { value: { name: input.name } };
+      },
+    );
+    const env: ReturnType<
+      typeof createCollectionStoreTestEnv<
+        { name: string },
+        BatchCollectionCreateOperations
+      >
+    > = createCollectionStoreTestEnv<
+      { name: string },
+      BatchCollectionCreateOperations
+    >(
+      { 'users||1': { name: 'Ada' } },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offline: {
+            operations: {
+              renameItem: {
+                inputSchema: renameCollectionInputSchema,
+                kind: 'update',
+                getEntityRefs: ({ input }) => [input.id],
+                execute: renameItemExecute,
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.id, () => ({
+                    value: { name: input.name },
+                  }));
+                },
+              },
+              createItems: {
+                inputSchema: batchCollectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) =>
+                  input.map((item) => `temp:${item.name}`),
+                tempEntities: {
+                  buildPendingEntities: (input, tempIds) =>
+                    input.map((item, index) => ({
+                      tempId: tempIds[index] ?? '',
+                      pendingEntity: { value: { name: item.name } },
+                    })),
+                  reconcileServerEntities: (result, tempIds) =>
+                    result.map((item, index) => ({
+                      tempId: tempIds[index] ?? '',
+                      finalPayload: item.id,
+                      finalData: { value: { name: item.name } },
+                    })),
+                },
+                execute: async ({ input }) => {
+                  const results = input.map((item) => ({
+                    id: 'users||2',
+                    name: item.name,
+                  }));
+                  for (const result of results) {
+                    await env.serverTable.delayedSetItem(result.id, {
+                      name: result.name,
+                    });
+                  }
+                  return results;
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    // Grace is created offline under a temp id
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('never sent directly')),
+      offline: { operation: 'createItems', input: [{ name: 'Grace' }] },
+    });
+
+    // The user renames Grace in a cell that waits 1.5s for more typing, and
+    // reconnects: the creation is sent (1.2s) and saved during the debounce
+    const rename = env.apiStore.performMutation('temp:Grace', {
+      debounce: { context: 'rename', payload: 'temp:Grace', ms: 1500 },
+      // Sends the rename for the item it is called with
+      mutation: async (itemId) => {
+        if (typeof itemId !== 'string') throw new Error('expected an id');
+        directRenames.push(itemId);
+        await env.serverTable.delayedUpdateItem(itemId, {
+          name: 'Grace Hopper',
+        });
+        return { value: { name: 'Grace Hopper' } };
+      },
+      offline: {
+        operation: 'renameItem',
+        input: { id: 'temp:Grace', name: 'Grace Hopper' },
+      },
+    });
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is left to replay, so the rename is sent directly, and for the
+    // saved item instead of the temp id the server does not know
+    expect((await rename).unwrap()).toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Grace Hopper' }
+
+      kind: 'online'
+    `);
+    expect(directRenames).toMatchInlineSnapshot(`['users||2']`);
+    expect(renameItemExecute).not.toHaveBeenCalled();
+    expect(env.serverTable.get('users||2')).toMatchInlineSnapshot(
+      `name: 'Grace Hopper'`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  });
+
   type InvalidBatchTempCollectionOperations = {
     createItems: CollectionOfflineOperationDefinition<
       { value: { name: string } },

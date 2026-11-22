@@ -461,7 +461,12 @@ type CollectionMutationArgsBase<
   optimisticUpdate?: (
     payload: CollectionMutationPayloadToUse<ItemPayload>,
   ) => void | boolean;
-  /** Performs the server mutation for the affected item payloads. */
+  /**
+   * Performs the server mutation for the affected item payloads. With an
+   * `offline` descriptor, an item created offline whose creation was saved
+   * since the call (e.g. while the mutation was prepared) is passed with its
+   * final payload, so build the request from this argument.
+   */
   mutation: (
     payload: CollectionMutationPayloadToUse<ItemPayload>,
     ...args: TMutationExtraArgs
@@ -2637,6 +2642,18 @@ export function createCollectionStore<
   >();
   const optimisticMutations = createOptimisticMutationTracker();
 
+  /** Replaces the temp payloads of saved creations by their final payloads */
+  function resolveSavedTempPayloads(
+    payload: CollectionMutationPayloadToUse<ItemPayload>,
+  ): CollectionMutationPayloadToUse<ItemPayload> {
+    if (!offlineController) return payload;
+    return Array.isArray(payload)
+      ? payload.map((itemPayload) =>
+          offlineController.resolveEntityRef(itemPayload),
+        )
+      : offlineController.resolveEntityRef(payload);
+  }
+
   /**
    * Runs a collection mutation for one or more existing item payloads, or for a
    * mutation with no current item target.
@@ -2750,10 +2767,14 @@ export function createCollectionStore<
       ) => Promise<T>,
       unknown
     >(mutation);
-    // A plain online mutation is called with the payload only
+    // A plain online mutation is called with the payload only. An
+    // offline-enabled one is called with the final payload of an item whose
+    // creation was saved since the call (e.g. while it was prepared).
     const directMutation = async (ctx?: OfflineDirectMutationContext) =>
       unwrapTSDFResult(
-        await (ctx ? mutationFn(payloadToUse, ctx) : mutationFn(payloadToUse)),
+        await (ctx
+          ? mutationFn(resolveSavedTempPayloads(payloadToUse), ctx)
+          : mutationFn(payloadToUse)),
       );
     const runOnlineMutation = async () => ({
       kind: 'online' as const,

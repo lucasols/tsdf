@@ -1022,6 +1022,7 @@ export function createOfflineStoreController<
   const resolveEntityRef = <TRef extends ValidPayload>(
     entityRef: TRef,
   ): TRef => {
+    if (resolvedEntityRefBySerializedRef.size === 0) return entityRef;
     let currentRef: ValidPayload = entityRef;
     const seen = new Set<string>();
 
@@ -4523,7 +4524,7 @@ export function createOfflineStoreController<
       throw new Error(`Invalid offline operation input for "${operationName}"`);
     }
 
-    return {
+    const prepared: PreparedQueuedMutation = {
       currentSessionKey: current.sessionKey,
       operationName,
       operation,
@@ -4538,6 +4539,66 @@ export function createOfflineStoreController<
       tempIds: args.tempIds,
       entityRefs: args.entityRefs,
     };
+    resolveSavedTempEntityRefs(prepared);
+    return prepared;
+  }
+
+  /**
+   * Rewrites the temp payloads of saved creations that the mutation input
+   * still references to their final payloads, as the queued work is rewritten
+   * when the creation is saved (`rebindQueuedEntriesAfterTempReconciliation`).
+   * A mutation is not queued yet while it waits for its debounce window or is
+   * prepared, so it is rewritten when it is prepared and again before it is
+   * queued. Only the payloads the operation declares (`getEntityRefs` and
+   * `dependsOn`) are looked up, so this costs nothing until a creation of the
+   * session was saved.
+   */
+  function resolveSavedTempEntityRefs(prepared: PreparedQueuedMutation): void {
+    if (resolvedEntityRefBySerializedRef.size === 0) return;
+
+    const { operation, operationName } = prepared;
+    const input = prepared.validatedInput;
+    const rawEntityRefs = [
+      // The entities a creation creates are its own temp payloads
+      ...(operation.tempEntity || operation.tempEntities
+        ? []
+        : getOperationRawEntityRefs(operation, operationName, input)),
+      ...(operation.dependsOn?.({ input }) ?? []),
+    ];
+
+    let rewrittenInput = input;
+    for (const rawEntityRef of rawEntityRefs) {
+      if (
+        typeof rawEntityRef !== 'string' &&
+        typeof rawEntityRef !== 'number' &&
+        !isObject(rawEntityRef)
+      ) {
+        continue;
+      }
+      const finalRef = resolveEntityRef(rawEntityRef);
+      if (finalRef === rawEntityRef) continue;
+      rewrittenInput = replacePayloadReferences(
+        rewrittenInput,
+        rawEntityRef,
+        finalRef,
+      );
+    }
+    if (rewrittenInput === input) return;
+
+    const validatedInput = validateWithSchema(
+      operation.inputSchema,
+      rewrittenInput,
+    );
+    if (validatedInput === null) return;
+
+    prepared.validatedInput = validatedInput;
+    if (prepared.entityRefs) {
+      prepared.entityRefs = resolveEntityRefsForInput(
+        operationName,
+        validatedInput,
+        prepared.entityRefs,
+      );
+    }
   }
 
   function findTempIdIndex(
@@ -5043,6 +5104,10 @@ export function createOfflineStoreController<
     let plannedMutation: PlannedQueuedMutation;
     let pendingEntityQueriesLoaded = false;
     for (;;) {
+      // A creation the mutation references may have been saved since it was
+      // prepared (e.g. while its direct request was sent): the queued work
+      // was rewritten then, but not this mutation
+      resolveSavedTempEntityRefs(preparedMutation);
       plannedMutation = await planPreparedMutation({
         current,
         preparedMutation,
@@ -5884,6 +5949,8 @@ export function createOfflineStoreController<
       reservedMutations.delete(reservedQueueOrder);
       throw error;
     }
+    // A creation the mutation references may have been saved during the check
+    resolveSavedTempEntityRefs(prepared);
 
     const { dependencyUploadIds } = prepared;
     const initialAction = getInitialOfflineMutationAction(current, prepared);
