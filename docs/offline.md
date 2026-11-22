@@ -222,7 +222,10 @@ async function attachFile(id: string, file: File) {
     const mode = await storeManager.reportOfflineFailure(error, {
       operationName: 'uploadFile',
     });
-    if (mode === 'ignore') throw error;
+    const { mutationQueueing } = storeManager.getOfflineRuntimeConfig();
+    if (mode === 'ignore' || mutationQueueing[mode] === 'disallow') {
+      throw error;
+    }
 
     // The session is offline now: stage the file for a queued mutation that
     // depends on it (see Uploads), it is uploaded once the session recovers
@@ -232,7 +235,7 @@ async function attachFile(id: string, file: File) {
 }
 ```
 
-A mode that is disabled is never entered. While the session gate is closed, when there is no active session key or when no `offlineSession` is configured, it resolves to `'ignore'` without calling any hook. There is nothing to report on success: the session leaves offline mode through its usual recovery checks.
+The answer is the session's mode, whatever `mutationQueueing` says: when that mode's policy is `'disallow'`, the mutation that would use the staged file runs online and fails, so check it before staging, as above. A mode that is disabled is never entered. It rejects only when `classifyFailure` or an async `network.getIsOffline` throws. While the session gate is closed, when there is no active session key or when no `offlineSession` is configured, it resolves to `'ignore'` without calling any hook. There is nothing to report on success: the session leaves offline mode through its usual recovery checks.
 
 ## Reading While Offline
 

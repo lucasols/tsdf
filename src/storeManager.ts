@@ -160,11 +160,14 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * Resolves to the offline mode the session is in afterwards: `'network'` or
    * `'outage'` (for example, to stage the file for a queued mutation instead
    * of failing), or `'ignore'` when it stays online and the failure belongs to
-   * the request. A mode that is disabled is never entered, and it resolves to
+   * the request. The mode does not account for `mutationQueueing`: check that
+   * the mode's policy is not `'disallow'` before staging work for a queued
+   * mutation. A mode that is disabled is never entered, and it resolves to
    * `'ignore'` without calling any hook while the session gate is closed,
    * there is no active session key or no `offlineSession` is configured.
    *
-   * It rejects only when `classifyFailure` throws.
+   * It rejects only when `classifyFailure` or an async `network.getIsOffline`
+   * throws.
    */
   reportOfflineFailure: (
     error: unknown,
