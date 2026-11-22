@@ -26,8 +26,11 @@ import { type SnapshotConsistency } from '../utils/browserTabsSync';
 import { createOptimisticMutationTracker } from '../utils/optimisticMutationTracker';
 import { revertOptimisticChange } from '../utils/optimisticRollback';
 import {
+  cancelPendingDebouncedMutation,
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
+  type MutationDebounceKey,
+  type PendingDebouncedMutation,
 } from '../utils/performMutation';
 import {
   fetchTypePriority,
@@ -386,9 +389,9 @@ export function createMutationApi<
     return [payload];
   }
 
-  const pendingDebounceRollbacks = new Map<
+  const pendingDebounces = new Map<
     string,
-    ListQueryMutationRollback[]
+    PendingDebouncedMutation<ListQueryMutationRollback>
   >();
   const optimisticMutations = createOptimisticMutationTracker();
 
@@ -2070,7 +2073,8 @@ export function createMutationApi<
       },
       debounce,
       blockWindowClose ?? undefined,
-      pendingDebounceRollbacks,
+      pendingDebounces,
+      (rollbacks) => revertOptimisticMutations(rollbacks, mutationId),
     ).finally(() => {
       for (const { itemKey } of affectedItemEntries ?? []) {
         optimisticMutations.end(itemKey, mutationId, accepted);
@@ -2103,6 +2107,10 @@ export function createMutationApi<
     return result;
   }
 
+  function cancelDebouncedMutation(debounce: MutationDebounceKey): boolean {
+    return cancelPendingDebouncedMutation(pendingDebounces, debounce);
+  }
+
   return {
     storeEvents,
     queryInvalidationWasTriggered,
@@ -2116,5 +2124,6 @@ export function createMutationApi<
     deleteItemState,
     resetInvalidationTracking,
     performMutation,
+    cancelDebouncedMutation,
   };
 }

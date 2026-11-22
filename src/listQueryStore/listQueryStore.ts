@@ -99,6 +99,7 @@ import {
   type BrowserTabsTransportFactory,
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
+import type { MutationDebounceKey } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   DEFAULT_BATCH_KEY,
@@ -1096,6 +1097,18 @@ export type ListQueryStore<
     ItemPayload,
     TOfflineOperations
   >;
+  /**
+   * Cancels the `performMutation` call waiting for the debounce window of the
+   * `debounce` group with this `context` and `payload`, e.g. an edit of an
+   * item deleted within the window. The call never runs its mutation (nor is
+   * queued offline) and resolves `Err(mutationSkipped)`, and the optimistic
+   * updates of the group (the call and the calls it superseded) are reverted
+   * as on a failure. Call it before starting the mutation that replaces it.
+   *
+   * Returns `false` when no call of the group is waiting, e.g. its mutation
+   * already started, which is not cancelled.
+   */
+  cancelDebouncedMutation: (debounce: MutationDebounceKey) => boolean;
   /** React hook for subscribing to many list queries at once. */
   useMultipleListQueries: ListQueryUseMultipleListQueriesApi<
     ItemState,
@@ -2295,6 +2308,7 @@ export function createListQueryStore<
     deleteItemState: deleteItemStateBase,
     resetInvalidationTracking,
     performMutation: performMutationBase,
+    cancelDebouncedMutation,
   } = createMutationApi<
     ItemState,
     QueryPayload,
@@ -4142,6 +4156,7 @@ export function createListQueryStore<
     addItemToState,
     deleteItemState,
     performMutation: performMutationBase,
+    cancelDebouncedMutation,
     useMultipleListQueries,
     useListQuery,
     useMultipleItems,
