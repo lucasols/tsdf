@@ -1557,7 +1557,7 @@ describe('direct mutation that falls back to the queue after later edits were qu
   });
 
   /** A field patch operation with `accumulation`: the newer edit's fields win */
-  function createPatchEnv() {
+  function createPatchEnv(networkConfig = network.config) {
     type PatchItemOperations = {
       patchItem: CollectionOfflineOperationDefinition<
         { value: { name: string; city: string } },
@@ -1582,7 +1582,7 @@ describe('direct mutation that falls back to the queue after later edits were qu
         storeManager: createStoreManager({
           errorNormalizer: normalizeError,
           getSessionKey: () => sessionKey,
-          offlineSession: { network: network.config },
+          offlineSession: { network: networkConfig },
         }),
         testScenario: 'loaded',
         persistentStorage: {
@@ -1759,6 +1759,78 @@ describe('direct mutation that falls back to the queue after later edits were qu
     expect(env.serverTable.get('users||1')).toMatchInlineSnapshot(`
       city: 'Lisbon'
       name: 'Edit 3'
+    `);
+    expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('with accumulation an edit is not merged before an older one still checking the connection', async () => {
+    // The app checks the connection with a request whose latency varies, so
+    // an older edit's check can settle after a newer edit's one
+    const detectionLatencies: number[] = [];
+    const { env, replayedInputs } = createPatchEnv({
+      enabled: true,
+      getIsOffline: () => {
+        const latency = detectionLatencies.shift();
+        if (latency === undefined) return network.isOffline();
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(network.isOffline()), latency);
+        });
+      },
+    });
+
+    // Offline, the user edits the name: it is queued
+    act(() => {
+      network.goOffline();
+    });
+    await advanceTime(100);
+    await env.apiStore.performMutation('users||1', {
+      mutation: () => Promise.reject(new Error('never sent directly')),
+      offline: {
+        operation: 'patchItem',
+        input: { id: 'users||1', name: 'Edit 1' },
+      },
+    });
+
+    // Edit 2's connection check is slow, edit 3's, made right after, is fast,
+    // so edit 3 is queued first
+    detectionLatencies.push(300, 50);
+    const edit2 = env.apiStore.performMutation('users||1', {
+      mutation: () => Promise.reject(new Error('never sent directly')),
+      offline: {
+        operation: 'patchItem',
+        input: { id: 'users||1', name: 'Edit 2' },
+      },
+    });
+    await advanceTime(10);
+    const edit3 = env.apiStore.performMutation('users||1', {
+      mutation: () => Promise.reject(new Error('never sent directly')),
+      offline: {
+        operation: 'patchItem',
+        input: { id: 'users||1', name: 'Edit 3' },
+      },
+    });
+    await advanceTime(400);
+    await Promise.all([edit2, edit3]);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Edit 3 is the latest edit, so its name is the one the server keeps.
+    // Merged into edit 1 before edit 2 was queued, edit 2 would be merged
+    // into it afterwards and win
+    expect(env.serverTable.get('users||1')).toMatchInlineSnapshot(`
+      city: 'Lisbon'
+      name: 'Edit 3'
+    `);
+    // Each edit kept its own entry, at the place it had when called
+    expect(replayedInputs).toMatchInlineSnapshot(`
+      - name: 'Edit 1'
+      - name: 'Edit 2'
+      - name: 'Edit 3'
     `);
     expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,

@@ -670,10 +670,11 @@ export function createOfflineStoreController<
   // the same moment, so this tab never accumulates into them: both merges
   // would save the same entry id and one tab's input would be lost.
   const entryIdsFromAnotherTab = new Set<string>();
-  // Direct requests in flight in this tab, by the queue position reserved when
-  // they were called. One that falls back to the queue goes at that position,
-  // so no newer mutation is merged into older work across it.
-  const directRunsInFlight = new Map<number, PreparedQueuedMutation>();
+  // Mutations of this tab not in the queue yet (checking the connection, or
+  // sent as a direct request), by the queue position reserved when they were
+  // called. Queued, they go at that position, so no newer mutation is merged
+  // into older work across them.
+  const reservedMutations = new Map<number, PreparedQueuedMutation>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -2169,12 +2170,12 @@ export function createOfflineStoreController<
     return entry.syncState === 'pending' && entry.attempts === 0;
   }
 
-  function hasDirectRunInFlightBetween(
+  function hasReservedMutationBetween(
     afterQueueOrder: number,
     beforeQueueOrder: number,
     entityRefs: OfflineEntityRef[],
   ): boolean {
-    for (const [queueOrder, prepared] of directRunsInFlight) {
+    for (const [queueOrder, prepared] of reservedMutations) {
       if (queueOrder <= afterQueueOrder || queueOrder >= beforeQueueOrder) {
         continue;
       }
@@ -4329,21 +4330,17 @@ export function createOfflineStoreController<
           });
       // Merged, the input is replayed at the candidate's place. A direct
       // request that fell back to the queue is older than the entries queued
-      // while it was in flight, and a direct request still in flight between
-      // the candidate and this mutation would be replayed after it if it falls
-      // back: either way the work would reach the server out of call order,
-      // so the mutation keeps its own entry instead.
+      // while it was in flight, and a mutation called between the candidate
+      // and this one but not queued yet would be replayed after it: either way
+      // the work would reach the server out of call order, so the mutation
+      // keeps its own entry instead.
       const candidateQueueOrder = candidateEntry
         ? getQueueOrder(candidateEntry)
         : undefined;
       const existingEntry =
         candidateQueueOrder !== undefined &&
         candidateQueueOrder < queueOrder &&
-        !hasDirectRunInFlightBetween(
-          candidateQueueOrder,
-          queueOrder,
-          entityRefs,
-        )
+        !hasReservedMutationBetween(candidateQueueOrder, queueOrder, entityRefs)
           ? candidateEntry
           : undefined;
       const existingWork = heldResolution ?? existingEntry;
@@ -5271,7 +5268,8 @@ export function createOfflineStoreController<
       throw new OfflineSessionUnavailableError();
     }
 
-    const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
+    const { nextQueueOrderValue } = previewQueueOrders(1);
+    const reservedQueueOrder = nextQueueOrderValue - 1;
     const prepared: PreparedQueuedMutation = {
       ...prepareMutationWithSession(current, {
         operation: args.offline.operation,
@@ -5280,24 +5278,26 @@ export function createOfflineStoreController<
       }),
       // Reserved now: if the direct request falls back to the queue, it keeps
       // the place it had when called, before the mutations queued meanwhile.
-      queueOrder: queueOrders[0],
+      queueOrder: reservedQueueOrder,
     };
     nextQueueOrder = nextQueueOrderValue;
-    await current.session.refreshNetworkState();
+    // Before the connection check, which can settle after the one of a newer
+    // mutation of the same entities
+    reservedMutations.set(reservedQueueOrder, prepared);
+    try {
+      await current.session.refreshNetworkState();
+    } catch (error) {
+      reservedMutations.delete(reservedQueueOrder);
+      throw error;
+    }
 
     const { dependencyUploadIds } = prepared;
     const initialAction = getInitialOfflineMutationAction(current, prepared);
-    const reservedQueueOrder = prepared.queueOrder;
-    if (initialAction === 'run' && reservedQueueOrder !== undefined) {
-      directRunsInFlight.set(reservedQueueOrder, prepared);
-    }
 
     return {
       initialAction,
-      finishDirectRun: () => {
-        if (reservedQueueOrder !== undefined) {
-          directRunsInFlight.delete(reservedQueueOrder);
-        }
+      releaseQueueOrder: () => {
+        reservedMutations.delete(reservedQueueOrder);
       },
       queueMutation: (afterDirectAttempt) =>
         queuePreparedMutations(
