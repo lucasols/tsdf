@@ -357,7 +357,8 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * Gate for the whole offline session, e.g. a feature flag or a
      * per-workspace setting. While it returns `false` the session behaves as if
      * no offline session existed: it never enters offline mode (network
-     * detection and `classifyFailure` are skipped), fetches always go to the
+     * detection only updates `status.isNetworkDetectedOffline`, and
+     * `classifyFailure` / `healthCheck` are skipped), fetches always go to the
      * network and mutations with an `offline` descriptor run as plain online
      * mutations instead of being queued.
      *
@@ -504,6 +505,20 @@ export type GlobalOfflineStatus = {
    * connectivity.
    */
   isForcedOffline: boolean;
+  /**
+   * Whether this tab's network detection (`network.getIsOffline`, or
+   * `navigator.onLine` by default, and forced offline mode) last reported the
+   * device offline. Unlike `network.active`, it is not gated: it is reported
+   * while the session gate (`offlineSession.enabled`) is closed or network
+   * mode is disabled, so an app can show a "no connection" state to users
+   * without offline mode. Failure classification and health checks do not
+   * change it.
+   *
+   * Always `false` when `offlineSession.network` is not configured, and in the
+   * default status returned while there is no active session key. It is local
+   * to the tab: it is not persisted nor shared with other tabs.
+   */
+  isNetworkDetectedOffline: boolean;
   /** Whether this tab currently acts as leader for this session. */
   isLeader: boolean;
   /** Timestamp when this status entry was last updated. */

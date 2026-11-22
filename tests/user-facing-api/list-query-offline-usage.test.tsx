@@ -511,6 +511,7 @@ test('direct list-query store offline public api', async () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '❌'
       lastFailureAt: null
       lastRecoveryCheckAt: null
@@ -700,6 +701,7 @@ test('direct list-query store offline public api', async () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '✅'
       isOfflineMode: '✅'
       lastFailureAt: null
       lastRecoveryCheckAt: null
@@ -845,6 +847,7 @@ test('direct list-query store offline public api', async () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '❌'
       lastFailureAt: null
       lastRecoveryCheckAt: null

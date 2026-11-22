@@ -1,9 +1,13 @@
 import { sleep } from '@ls-stack/utils/sleep';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import {
+  type CollectionOfflineOperationDefinition,
+  getGlobalOfflineStatus,
+} from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -1509,4 +1513,129 @@ test('a failure whose classification is still running when the gate closes does 
       active: '❌'
       enabled: '❌'
     `);
+});
+
+test('closed gate: the status still reports a lost connection, so the app can show it to users without offline mode', async () => {
+  const sessionKey = 'gate-closed-connectivity';
+  // The flag the app flips at runtime: this user's plan has no offline mode.
+  let offlineEnabled = false;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { enabled: () => offlineEnabled, network: network.config },
+  });
+  const statusChanges = createLoggerStore();
+
+  // The app's "No connection" banner, rendered from the offline status only
+  const banner = renderHook(() => {
+    const status = storeManager.useOfflineStatus();
+    statusChanges.add(
+      pick(status, ['isNetworkDetectedOffline', 'isOfflineMode', 'network']),
+    );
+  });
+
+  // -- The browser loses its connection while the gate is closed --
+  statusChanges.addMark('Gate closed, browser goes offline');
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  // -- The browser reconnects --
+  statusChanges.addMark('Gate closed, browser reconnects');
+  act(() => {
+    network.goOnline();
+  });
+  await Promise.resolve();
+
+  // -- The browser goes offline again, and the user's plan gets offline mode
+  // meanwhile --
+  statusChanges.addMark('Browser goes offline again, then the gate opens');
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+  offlineEnabled = true;
+  act(() => {
+    storeManager.setOfflineRuntimeConfig({});
+  });
+  await Promise.resolve();
+
+  // The detected connectivity is reported in every phase, while offline mode
+  // (and `network.active`) only follows it once the gate is open
+  expect(statusChanges.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> isNetworkDetectedOffline: ❌ ⋅ isOfflineMode: ❌ ⋅ network: {enabled:❌, active:❌}
+
+    >>> Gate closed, browser goes offline
+
+    -> isNetworkDetectedOffline: ✅ ⋅ isOfflineMode: ❌ ⋅ network: {enabled:❌, active:❌}
+
+    >>> Gate closed, browser reconnects
+
+    -> isNetworkDetectedOffline: ❌ ⋅ isOfflineMode: ❌ ⋅ network: {enabled:❌, active:❌}
+
+    >>> Browser goes offline again, then the gate opens
+
+    -> isNetworkDetectedOffline: ✅ ⋅ isOfflineMode: ❌ ⋅ network: {enabled:❌, active:❌}
+    -> isNetworkDetectedOffline: ✅ ⋅ isOfflineMode: ✅ ⋅ network: {enabled:✅, active:✅}
+    "
+  `);
+
+  banner.unmount();
+});
+
+test('closed gate: an async connectivity check updates the reported connection without delaying fetches', async () => {
+  const sessionKey = 'gate-closed-async-connectivity';
+  // The app's connectivity check pings an endpoint and takes 300ms
+  const getIsOffline = vi.fn(async () => {
+    await sleep(300);
+    return network.isOffline();
+  });
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => false,
+      network: { enabled: true, getIsOffline },
+    },
+  });
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+  await flushAllTimers();
+
+  // -- The connection drops and the app refetches --
+  network.setOffline();
+  env.serverMock.setFetchDurations(100);
+  env.scheduleFetch('highPriority');
+
+  // The fetch is not held back by the 300ms check: it goes to the server right
+  // away and settles after its own 100ms. (The status is read without the
+  // manager here: reading it through the manager re-checks the connectivity.)
+  await advanceTime(150);
+  expect(env.store.state.status).toBe('success');
+  expect(getGlobalOfflineStatus(sessionKey).isNetworkDetectedOffline).toBe(
+    false,
+  );
+
+  // The check answers in the background and the status reports the lost
+  // connection, without entering offline mode
+  await advanceTime(200);
+  expect(
+    pick(getGlobalOfflineStatus(sessionKey), [
+      'isNetworkDetectedOffline',
+      'isOfflineMode',
+    ]),
+  ).toMatchInlineSnapshot(`
+    isNetworkDetectedOffline: '✅'
+    isOfflineMode: '❌'
+  `);
 });
