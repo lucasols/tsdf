@@ -1,5 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { OfflineFailureContext } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
@@ -892,12 +893,7 @@ describe('document', () => {
       .fn<
         (
           error: unknown,
-          ctx: {
-            phase: 'fetch' | 'mutation' | 'sync';
-            storeType: 'document' | 'collection' | 'listQuery';
-            operationName?: string;
-            sessionKey: string;
-          },
+          ctx: OfflineFailureContext,
         ) => Promise<'outage' | 'network' | 'ignore'>
       >()
       .mockImplementationOnce(

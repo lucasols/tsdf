@@ -1689,3 +1689,49 @@ test('closed gate: a connectivity check that throws does not fail fetches of use
     isOfflineMode: '❌'
   `);
 });
+
+test('a failure the app reports is not classified while the gate is closed, and is explained by a lost connection once it opens', async () => {
+  const sessionKey = 'gate-app-reported-failure';
+  const health = createHealthCheckMock();
+  // Would put the session in network mode if it were ever consulted
+  const classifyFailure = vi.fn(() => 'network' as const);
+  // The flag the app flips at runtime: the offline layer starts turned off
+  let offlineEnabled = false;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => offlineEnabled,
+      classifyFailure,
+      healthCheck: { check: health.check },
+      network: network.config,
+      outage: { enabled: true },
+    },
+  });
+  const uploadError = new TypeError('Failed to fetch');
+
+  // -- Gate closed: the browser is offline and the app's upload fails --
+  network.setOffline();
+
+  // The failure stays a failure of the upload: no hook runs and the session
+  // stays online
+  expect(await storeManager.reportOfflineFailure(uploadError)).toBe('ignore');
+  expect(classifyFailure).not.toHaveBeenCalled();
+  expect(health.check).not.toHaveBeenCalled();
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+
+  // -- The gate opens, and the next upload fails the same way --
+  offlineEnabled = true;
+
+  // The browser already reports offline: the network detection explains the
+  // failure, so it is not classified either
+  expect(await storeManager.reportOfflineFailure(uploadError)).toBe('network');
+  expect(classifyFailure).not.toHaveBeenCalled();
+  expect(health.check).not.toHaveBeenCalled();
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '✅' }
+    sessionKey: 'gate-app-reported-failure'
+  `);
+});

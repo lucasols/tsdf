@@ -1,3 +1,4 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
@@ -17,6 +18,10 @@ import {
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { getOpfsDirTree } from '../utils/persistentStorageOptimizationTestUtils';
+import {
+  createHealthCheckMock,
+  HEALTH_CHECK_DURATION_MS,
+} from './offlineHealthCheckTestShared';
 import {
   docSchema,
   getGlobalOfflineStatusSummary,
@@ -184,6 +189,7 @@ function createUploadFailureTestEnv({
 
   return {
     env,
+    storeManager,
     requests,
     unmount: () => uiHook.unmount(),
     /** Uploads as the UI currently sees them through `useOfflineUploads()`. */
@@ -1138,6 +1144,111 @@ test('resolveOfflineUpload returns the transport error without touching the sess
     13.018s | "upload:failed (Upload failed: Network error) | op:none | session:online"    | -- app calls resolveOfflineUpload again
     .       | "upload:uploading (Upload failed: Network error) | op:none | session:online" | ui-changed
     13.227s | "upload:uploaded | op:none | session:online"                                 | ui-changed
+    "
+  `);
+
+  unmount();
+});
+
+test('an upload the app sends itself that loses the connection takes the session offline once reported, so the file is staged and its mutation replayed after recovery', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'upload-app-reported-failure-session';
+  const health = createHealthCheckMock();
+  const classifiedFailures: unknown[] = [];
+
+  const { env, storeManager, requests, unmount, ...actions } =
+    createUploadFailureTestEnv({
+      sessionKey,
+      storeId: 'upload-app-reported-failure-doc',
+      offlineSession: {
+        // The error of a failed upload does not tell why it failed: the
+        // session asks the health check
+        classifyFailure: (_error, ctx) => {
+          classifiedFailures.push(ctx);
+          return 'unknown';
+        },
+        healthCheck: { check: health.check },
+        network: {
+          ...network.config,
+          recoveryProbe: deterministicRecoveryProbe,
+        },
+      },
+      uploadAttempts: [],
+    });
+  await flushAllTimers();
+  env.clearTimeline();
+
+  // The app uploads the file with its own API client, outside the stores. The
+  // connection drops while it is sent, and only this request notices it: the
+  // browser still reports online
+  health.setBackend('unreachable');
+  async function appUploadFile() {
+    await sleep(200);
+    throw new UploadTransportError('connection', 'Failed to fetch');
+  }
+
+  env.addTimelineComments('beforeNextAction', [
+    'the app reports the failure of its own upload',
+  ]);
+  const uploadAttempt = appUploadFile().then(
+    () => 'uploaded' as const,
+    (error: unknown) =>
+      storeManager.reportOfflineFailure(error, { operationName: 'uploadFile' }),
+  );
+  // The upload request fails after 200ms, then the health check runs
+  await advanceTime(200 + HEALTH_CHECK_DURATION_MS);
+  const mode = await uploadAttempt;
+
+  // The failure went through the session classification, with the context of
+  // a request the app ran itself, then the health check found the backend
+  // unreachable: the session is in network mode and the app is told so
+  expect(mode).toBe('network');
+  expect(classifiedFailures).toMatchInlineSnapshot(`
+    - operationName: 'uploadFile'
+      phase: 'app'
+      sessionKey: 'upload-app-reported-failure-session'
+  `);
+  expect(health.check).toHaveBeenCalledTimes(1);
+
+  // -- Offline now, the app stages the file and queues the mutation that
+  // depends on it instead of failing --
+  await actions.stageUploadAndQueueDependentMutation();
+  expect(requests).toMatchInlineSnapshot(`[]`);
+
+  // -- The connection comes back. The first recovery check ran while the file
+  // was being staged (5s after the failure), the next one runs 10s later --
+  env.addTimelineComments('beforeNextAction', [
+    'the backend is reachable again',
+  ]);
+  health.setBackend('up');
+  await advanceTime(15_000);
+
+  // The recovery check ended network mode: the staged file was uploaded by
+  // the session transport and the mutation replayed with its ref
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+  expect(requests).toMatchInlineSnapshot(`
+    - 'upload asset-1 -> server:asset-1'
+    - 'execute updateWithAttachment with "server:asset-1"'
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time    | ui                                                      |
+    12s     | -                                                       | -- timeline-cleared
+    12.3s   | -                                                       | -- the app reports the failure of its own upload
+    .       | "upload:none | op:none | session:network-offline"       | ui-changed
+    12.309s | "upload:pending | op:none | session:network-offline"    | ui-changed
+    17.3s   | "upload:pending | op:pending | session:network-offline" | ui-changed
+    .       | "upload:pending | op:pending | session:network-offline" | offline:updateWithAttachment queued
+    27.5s   | "upload:pending | op:pending | session:network-offline" | -- the backend is reachable again
+    .       | "upload:pending | op:pending | session:online"          | ui-changed
+    .       | "upload:pending | op:syncing | session:online"          | ui-changed
+    27.509s | "upload:uploading | op:syncing | session:online"        | ui-changed
+    27.718s | "upload:uploaded | op:syncing | session:online"         | ui-changed
+    .       | "upload:uploaded | op:syncing | session:online"         | offline:updateWithAttachment replay-started
+    28.918s | "upload:uploaded | op:syncing | session:online"         | server-data-changed (value: 3)
+    .       | "upload:uploaded | op:syncing | session:online"         | offline:updateWithAttachment replay-finished
+    .       | "upload:uploaded | op:none | session:online"            | ui-changed
+    28.92s  | "upload:none | op:none | session:online"                | ui-changed
     "
   `);
 
