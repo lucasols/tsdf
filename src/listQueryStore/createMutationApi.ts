@@ -305,6 +305,8 @@ export function createMutationApi<
   onItemMutationsEnd: () => void,
   /** Offline creations not sent yet: local-only items that cannot be refetched. */
   unsentCreationItemKeys: ReadonlySet<string>,
+  /** Items whose data was restored from persistent storage, if persisted. */
+  restoredItemKeys: Set<string> | undefined,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -338,6 +340,7 @@ export function createMutationApi<
       | Map<string, DroppedFieldInvalidation>
       | undefined;
     invalidationWasTriggered: boolean;
+    restoredFromStorage: boolean;
   };
   type ListQueryItemRollback = {
     itemKey: string;
@@ -418,6 +421,7 @@ export function createMutationApi<
       droppedFieldInvalidations:
         droppedFieldInvalidations && new Map(droppedFieldInvalidations),
       invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
+      restoredFromStorage: !!restoredItemKeys?.has(itemKey),
     };
   }
 
@@ -704,6 +708,11 @@ export function createMutationApi<
             } else {
               itemInvalidationWasTriggered.delete(itemKey);
             }
+
+            // Deleting an item drops its restored from storage mark, which the
+            // restored data brings back. Only a fetch clears it otherwise, and
+            // that changes the item metadata, so the tracking isn't restored.
+            if (tracking.restoredFromStorage) restoredItemKeys?.add(itemKey);
           }
 
           // Newer data kept until the revalidation, or still carrying another
