@@ -1170,6 +1170,12 @@ export type OfflineAccumulationMergeContext<TInput> = {
 /**
  * Optional in-memory accumulation strategy for queued offline mutations.
  *
+ * A mutation is merged into the newest queued mutation of the operation for
+ * the same entity refs that was never sent, unless newer queued work of the
+ * entity follows it (a mutation of another operation, or one queued by another
+ * tab): that work is sent after the merged one and could overwrite it, so the
+ * incoming mutation is queued after it instead.
+ *
  * @typeParam TInput - Input type that will be merged and revalidated before persisting.
  */
 export type OfflineAccumulationConfig<TInput> = {

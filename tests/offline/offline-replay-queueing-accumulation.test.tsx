@@ -553,6 +553,13 @@ type UpdateRecordOperations = {
     { itemId: string; permissionCtx: string; name: string },
     unknown
   >;
+  /** A rename from another screen (e.g. a bulk rename), never merged. */
+  renameRecord: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { itemId: string; name: string },
+    unknown
+  >;
 };
 
 function createUpdateRecordEnv(sessionKey: string, storeName: string) {
@@ -610,6 +617,22 @@ function createUpdateRecordEnv(sessionKey: string, storeName: string) {
                 });
               },
             },
+            renameRecord: {
+              inputSchema: rc_object({ itemId: rc_string, name: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: async ({ input }) => {
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  name: input.name,
+                });
+                return { value: { name: input.name } };
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (draft) => {
+                  draft.value.name = input.name;
+                });
+              },
+            },
           },
         },
       },
@@ -634,7 +657,20 @@ function createUpdateRecordEnv(sessionKey: string, storeName: string) {
     });
   }
 
-  return { env, execute, updateRecord };
+  async function renameRecord(name: string) {
+    await env.apiStore.performMutation('users||1', {
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('users||1', { name });
+        return { value: { name } };
+      },
+      offline: {
+        operation: 'renameRecord',
+        input: { itemId: 'users||1', name },
+      },
+    });
+  }
+
+  return { env, execute, updateRecord, renameRecord };
 }
 
 test('offline accumulation keeps edits apart when canMerge refuses, and sends them in order', async () => {
@@ -742,6 +778,49 @@ test('a table edit made together with a refused app block edit is not merged ahe
   ).toMatchInlineSnapshot(`['Ada table 1', 'Ada block', 'Ada table 2']`);
   expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
     `name: 'Ada table 2'`,
+  );
+});
+
+test('an offline edit is not merged into an older edit when another operation changed the record in between, and the server ends with the last edit', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-other-operation-session';
+  const storeName = 'offline-accumulation-other-operation';
+  const { env, updateRecord, renameRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+  );
+
+  // Offline: a table edit, a rename from another screen, then another table
+  // edit of the same record
+  await updateRecord('table', 'Ada table 1');
+  await advanceTime(50);
+  await renameRecord('Ada renamed');
+  await advanceTime(50);
+  await updateRecord('table', 'Ada table 2');
+
+  // The last table edit is queued after the rename instead of being merged
+  // into the first table edit, which would send it before the rename and let
+  // the rename overwrite it on the server
+  expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', name: 'Ada table 1', permissionCtx: 'table' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada renamed' }
+      operation: 'renameRecord'
+    - input: { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+      operation: 'updateRecord'
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Sent in the order the edits were made: the server keeps the last one
+  expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
+    `name: 'Ada table 2'`,
+  );
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
   );
 });
 

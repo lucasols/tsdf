@@ -284,7 +284,7 @@ Create flows for collection and list-query stores can use `tempEntity` or `tempE
 
 ### Accumulating Queued Mutations
 
-With `accumulation`, a mutation is merged into the newest queued mutation of the same operation and entity refs that was never sent, so the server receives one request instead of one per edit. `mergeInput` combines the inputs, and the optional `canMerge` refuses a merge, which queues the incoming mutation as a separate entry sent after the existing one. Use it when some edits must reach the server as separate requests, e.g. edits of a record made with different permission contexts:
+With `accumulation`, a mutation is merged into the newest queued mutation of the same operation and entity refs that was never sent, so the server receives one request instead of one per edit. When newer queued work of the entity follows that mutation (a mutation of another operation, or one queued by another tab), the incoming mutation is queued after it instead, since the newer work is sent after the merged one and could overwrite it. `mergeInput` combines the inputs, and the optional `canMerge` refuses a merge, which queues the incoming mutation as a separate entry sent after the existing one. Use it when some edits must reach the server as separate requests, e.g. edits of a record made with different permission contexts:
 
 ```ts
 updateRecord: {

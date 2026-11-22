@@ -2138,8 +2138,21 @@ export function createOfflineStoreController<
   }): OfflineQueueEntry | null {
     const normalizedEntityRefs = normalizeEntityRefs(args.entityRefs);
     let candidate: OfflineQueueEntry | null = null;
+    let newestEntityEntry: OfflineQueueEntry | null = null;
 
     for (const entry of args.entries ?? queueEntries.values()) {
+      if (
+        entry.entityRefs.some((entryRef) =>
+          args.entityRefs.some((entityRef) =>
+            isSameEntityRef(entityRef, entryRef),
+          ),
+        ) &&
+        (!newestEntityEntry ||
+          compareQueueEntries(entry, newestEntityEntry) > 0)
+      ) {
+        newestEntityEntry = entry;
+      }
+
       if (entry.operation !== args.operationName) continue;
       if (!isUnsentQueueEntry(entry)) continue;
       if (entryIdsFromAnotherTab.has(entry.id)) continue;
@@ -2156,7 +2169,14 @@ export function createOfflineStoreController<
       }
     }
 
-    return candidate;
+    // Newer queued work of the entity (of another operation, from another
+    // tab, or not mergeable) is sent after the candidate and could overwrite
+    // the incoming change merged into it, so the mutation is queued after it.
+    return candidate &&
+      (!newestEntityEntry ||
+        compareQueueEntries(newestEntityEntry, candidate) <= 0)
+      ? candidate
+      : null;
   }
 
   /**
