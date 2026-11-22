@@ -343,6 +343,7 @@ test('direct collection store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -601,6 +602,7 @@ test('direct collection store offline public api', async () => {
   );
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '✅'
@@ -746,6 +748,7 @@ test('direct collection store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'

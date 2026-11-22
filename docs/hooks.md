@@ -22,7 +22,7 @@ These options are available across all data hooks:
 | `disableRefetchOnMount`    | `false` (or `true` when `usesRealTimeUpdates` is enabled) | Only fetches if data was explicitly invalidated or has never been loaded. Skips the low-priority refetch that normally happens on mount                     |
 | `returnIdleStatus`         | `true` when disabled, `false` otherwise                   | When `false`, maps `idle` status to `loading` so the UI shows a loading state immediately                                                                   |
 | `returnRefetchingStatus`   | `false`                                                   | When `false`, maps `refetching` status to `success` so the UI doesn't flicker during background refetches                                                   |
-| `requireFreshData`         | `false`                                                   | Unconditionally schedules a high-priority mount fetch and reports `loading` until it settles. Use sparingly because mounts can cause extra requests         |
+| `requireFreshData`         | `false`                                                   | `true` schedules a high-priority mount fetch and reports `loading` until it settles. `'ifFromStorage'` only does it for data restored from storage          |
 
 ## `requireFreshData`
 
@@ -48,6 +48,9 @@ This option changes both fetching and the returned status:
   the request fails.
 - It takes precedence over `disableRefetches` and `disableRefetchOnMount`.
   Disabled hooks do not fetch.
+- Items that only exist locally (offline creations the server has not
+  confirmed yet) are not fetched: the hook reports their local status right
+  away.
 - Scheduler coalescing can merge simultaneous work, but repeated mounts can
   still produce repeated network requests.
 
@@ -56,6 +59,52 @@ components. Doing so bypasses TSDF's normal low-priority mount throttling and
 can significantly increase request volume. Prefer the default cache behavior,
 targeted invalidation, or an explicit user-triggered refresh unless readiness
 truly depends on a new server response.
+
+### `'ifFromStorage'`
+
+With [persistent storage](./persistent-storage.md), data restored from a
+previous visit can be old. Use `requireFreshData: 'ifFromStorage'` when a
+component must not work on that old data, but data already loaded from the
+server in this tab is fine, for example an editor whose next keystroke would
+overwrite newer server content:
+
+```tsx
+const doc = docContentStore.useItem(docId, {
+  requireFreshData: 'ifFromStorage',
+});
+```
+
+- While the cached data was restored from persistent storage and not refreshed
+  from the server yet in this tab, the hook behaves like
+  `requireFreshData: true`: it schedules a `highPriority` fetch and reports
+  `loading`, with the restored data in `data`, until the refresh settles.
+- Otherwise it keeps the normal cache behavior: no forced fetch and no
+  `loading` status.
+- A successful fetch of the data marks it as refreshed, whichever hook or call
+  started it. For a list query, a successful load of the query also refreshes
+  its rows, so opening one of them with `useItem` does not fetch again. A
+  `loadMore` in offset pagination mode only appends rows, so it does not mark
+  the query as refreshed, and rows appended from storage mark the query as
+  restored again.
+- List query stores with [partial resources](./partial-resources.md) don't
+  support `'ifFromStorage'` (a type error), because restored data is tracked
+  per item and query, not per field. Use `true` there.
+- Only the exact query is tracked. A `useListQuery` result derived from other
+  queries with [`derivedQueries`](./list-query-store.md#derived-queries) shows
+  their rows without checking whether they were restored, so use `true` when a
+  derived view must be fresh.
+- Cross-tab snapshots and `updateState`/`updateItemState` changes don't mark
+  restored data as refreshed, because they can be based on restored data too.
+- Mounts that find a refresh of the restored data in flight wait for it
+  instead of starting another request, so several components opening the same
+  restored data send a single request.
+- A failed refresh reports `error` like `true` does, and the data stays
+  marked as restored, so the next mount tries again. While offline the refresh
+  can't reach the server, so the hook settles with the restored data, as with
+  `true`.
+- When the payload changes to other restored data, the hook waits for its
+  refresh again.
+- Without `persistentStorage` on the store, it is the same as `false`.
 
 ## `debouncePayload`
 

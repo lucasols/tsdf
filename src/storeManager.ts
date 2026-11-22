@@ -202,8 +202,32 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
     resolutionId: string,
     action: OfflineResolutionGenericAction,
   ) => Promise<ResultType<void, OfflineResolutionActionError>>;
-  /** Returns the latest session-scoped offline uploads for this manager. */
+  /**
+   * Returns the latest session-scoped offline uploads for this manager.
+   *
+   * Right after a reload it is empty until the session listed its stored
+   * uploads. Mutations whose operation declares `dependsOnUploads` wait for
+   * that list before calling it, so `dependsOnUploads` can read this list.
+   */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /**
+   * Returns the server ref an upload id already resolved to, synchronously
+   * and without uploading anything, or `null`:
+   *
+   * - the `resolvedRef` of a staged upload in `uploaded` state (the same
+   *   entry `getOfflineUploads()` lists), including one another tab sent
+   * - the ref of an upload deleted after it was sent, because the queued work
+   *   or direct run that used it is done. Like for `resolveOfflineUpload(id)`,
+   *   it is kept in memory for the rest of the app session, in every tab open
+   *   when the upload was deleted
+   *
+   * `null` for an upload that is not sent yet (or whose last attempt failed),
+   * an unknown id, and while the session is still restoring its stored
+   * uploads after a reload. Use it to swap a staged id for its server ref
+   * outside of render, e.g. when serializing editor content;
+   * `useOfflineUploadFile(id)` gives the same ref to components.
+   */
+  getResolvedOfflineUploadRef: (id: string) => TUploadRef | null;
   /**
    * Resolves a staged upload id to its latest final ref, uploading first if
    * needed. An upload deleted after it was sent keeps resolving to its ref for
@@ -440,6 +464,7 @@ function createDisabledStoreManagerOfflineApi<
         ),
       ),
     getOfflineUploads: () => emptyUploads,
+    getResolvedOfflineUploadRef: () => null,
     resolveOfflineUpload: () =>
       Promise.resolve(
         Result.err(
@@ -648,6 +673,8 @@ export function createStoreManager<
           }
         },
         getOfflineUploads: () => resolvedOfflineSession.getOfflineUploads(),
+        getResolvedOfflineUploadRef: (id: string) =>
+          resolvedOfflineSession.getResolvedOfflineUploadRef(id),
         resolveOfflineUpload: (id: string) =>
           resultify(
             () => resolvedOfflineSession.resolveOfflineUpload(id),

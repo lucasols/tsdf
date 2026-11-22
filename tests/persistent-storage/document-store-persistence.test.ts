@@ -82,6 +82,7 @@ function createDocPersistenceEnv(options: {
   serverData?: TestData;
   usesRealTimeUpdates?: boolean;
   onPersistentStorageError?: ((error: unknown) => void) | null;
+  persistenceEnabled?: () => boolean;
 }) {
   const getSessionKey =
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
@@ -95,6 +96,7 @@ function createDocPersistenceEnv(options: {
       schema: wrappedSchema,
       version: options.version,
       onPersistentStorageError: options.onPersistentStorageError,
+      enabled: options.persistenceEnabled,
     },
   });
 }
@@ -630,6 +632,50 @@ describe('localStorage: document store persistence', () => {
     expect(
       localStorage.getItem('tsdf.eventually-ready.skip-doc'),
     ).not.toBeNull();
+  });
+
+  test('disabled persistence neither restores nor saves the document', async () => {
+    let persistenceEnabled = false;
+
+    // Data persisted by an earlier session where persistence was enabled
+    setCachedDocumentData('switch-doc', 'sess1', { name: 'cached', value: 1 });
+
+    const env = createDocPersistenceEnv({
+      storeName: 'switch-doc',
+      sessionKey: 'sess1',
+      serverData: { name: 'server', value: 99 },
+      persistenceEnabled: () => persistenceEnabled,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument();
+      renders.add({ status, data: data?.value ?? null });
+    });
+    await flushAllTimers();
+
+    // The persisted document is not restored: the hook loads it from the server
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {name:server, value:99}
+      "
+    `);
+
+    // ...and the fetched document is not saved over the persisted one
+    expect(
+      persistentStore.scope('switch-doc', 'sess1').document.readData(),
+    ).toMatchInlineSnapshot(`value: { name: 'cached', value: 1 }`);
+
+    // Once enabled, the next fetch result is saved again
+    persistenceEnabled = true;
+    env.apiStore.invalidateData('highPriority');
+    await flushAllTimers();
+
+    expect(
+      persistentStore.scope('switch-doc', 'sess1').document.readData(),
+    ).toMatchInlineSnapshot(`value: { name: 'server', value: 99 }`);
   });
 
   test('cached data shows refetching status before settling with server data', async () => {

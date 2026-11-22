@@ -19,6 +19,7 @@ import type {
   ItemLoadedFields,
   ListQueryAddItemToQueries,
 } from '../../listQueryStore/types';
+import type { BlockWindowCloseHandler } from '../../utils/performMutation';
 import type { ValidPayload } from '../../utils/storeShared';
 import {
   getNavigatorLockManager,
@@ -55,8 +56,11 @@ import {
   OfflineResolutionConflictParseError,
   offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
+  persistedUploadRefSchema,
+  persistedUploadRefsSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
+  type OfflineFailureClassification,
   type OfflineStoreFailureContext,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
@@ -161,8 +165,14 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
   }) => void;
   syncEntityOverlays?: (args: {
     sessionKey: string;
-    entities: GlobalOfflineEntity[];
+    entities: InternalGlobalOfflineEntity[];
   }) => void;
+  /**
+   * The server saved these items created with a client-generated id. Called
+   * before the creation's `onSuccessExecute`, so that invalidations it makes
+   * refetch them: the entities are only synced again after it.
+   */
+  confirmClientIdCreations?: (entityKeys: string[]) => void;
   /**
    * A queued mutation for these entities was discarded. Its optimistic
    * changes are still applied to the store and no baseline exists to roll
@@ -232,6 +242,7 @@ const compactOfflineQueueEntrySchema = rc_object({
   x: rc_array(rc_unknown).optionalKey(),
   z: rc_record(rc_string).optionalKey(),
   k: rc_array(rc_string).optionalKey(),
+  r: persistedUploadRefsSchema.optionalKey(),
   m: rc_string.optionalKey(),
   y: rc_literals(0, 1).optionalKey(),
   f: rc_unknown.optionalKey(),
@@ -536,6 +547,12 @@ export type OfflineStoreController<
 > = {
   dispose: () => void;
   hydrateIfNeeded: () => Promise<void>;
+  /**
+   * Whether the queued work of the current session was read from storage, so
+   * the store knows its offline entities (e.g. its unsent creations). Always
+   * true without a session, since there is no queued work.
+   */
+  isHydrated: () => boolean;
   canQueueMutation: () => boolean;
   prepareForMutation: <TName extends keyof TOperations & string>(args: {
     offline: OfflineMutationInput<TOperations, TName>;
@@ -611,6 +628,7 @@ export function createOfflineStoreController<
   storeAdapter: OfflineStoreAdapter<TQueryPayload>,
   offlineSession: OfflineSession,
   operations: TOperations,
+  blockWindowClose: BlockWindowCloseHandler | null,
 ): OfflineStoreController<TOperations> {
   const sessionConfig = offlineSession.getConfig();
   const appVersion = getOfflineSessionAppVersion(offlineSession);
@@ -667,6 +685,23 @@ export function createOfflineStoreController<
   // the same moment, so this tab never accumulates into them: both merges
   // would save the same entry id and one tab's input would be lost.
   const entryIdsFromAnotherTab = new Set<string>();
+  // Mutations of this tab not in the queue yet (checking the connection, or
+  // sent as a direct request), by the queue position reserved when they were
+  // called. Queued, they go at that position, so no newer mutation is merged
+  // into older work across them.
+  const reservedMutations = new Map<number, PreparedQueuedMutation>();
+  // Set while a mutation waits for the session to list its stored uploads
+  // before computing its upload dependencies (right after a reload).
+  let uploadDependenciesWait: Promise<void> | undefined;
+  // Queue entries (`q:` keys) and resolution records (`r:` keys) whose last
+  // write failed: this tab only holds them in memory, so a reload loses them.
+  const inMemoryOnlyRecordKeys = new Set<string>();
+  let unblockWindowCloseForInMemoryOnlyRecords: (() => void) | null = null;
+  let isRetryingInMemoryOnlyRecords = false;
+  // The last retry stored none of them (e.g. localStorage writes are disabled
+  // until a reload while removals still work): only a successful save, not a
+  // removal, tells storage takes writes again.
+  let didLastInMemoryOnlyRetryFail = false;
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -675,6 +710,8 @@ export function createOfflineStoreController<
     upload?: OfflineMutationUploadsInput;
     /** Already stored direct uploads reused instead of `upload` (requeue). */
     attachedUploadIds?: OfflineAttachedUploadIds;
+    /** Released upload refs the replaced work kept (requeue). */
+    dependencyUploadRefs?: Record<string, ValidPayload>;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -692,6 +729,7 @@ export function createOfflineStoreController<
     dependencyUploadIds: string[];
     upload?: OfflineMutationUploadsInput;
     attachedUploadIds?: OfflineAttachedUploadIds;
+    dependencyUploadRefs?: Record<string, ValidPayload>;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
     /**
@@ -700,6 +738,12 @@ export function createOfflineStoreController<
      * the user sent again.
      */
     mayHaveBeenApplied?: boolean;
+    /**
+     * Queue position reserved when the mutation was called, so that a direct
+     * request that falls back to the queue goes before the work queued while
+     * it was in flight.
+     */
+    queueOrder?: number;
   };
 
   type PlannedQueuedMutation = {
@@ -1054,6 +1098,10 @@ export function createOfflineStoreController<
     queueEntries.clear();
     entryIdsFromAnotherTab.clear();
     resolutions.clear();
+    // Work only held in memory is dropped with the session's records
+    inMemoryOnlyRecordKeys.clear();
+    didLastInMemoryOnlyRetryFail = false;
+    syncInMemoryOnlyWindowCloseBlock();
     unknownOperationUploadIds.clear();
     nextQueueOrder = 0;
     publishedCreationResolutionIds = '';
@@ -1140,6 +1188,9 @@ export function createOfflineStoreController<
                 ...(entry.dependencyUploadIds !== undefined
                   ? { k: entry.dependencyUploadIds }
                   : {}),
+                ...(entry.dependencyUploadRefs !== undefined
+                  ? { r: entry.dependencyUploadRefs }
+                  : {}),
                 ...(entry.lastError ? { m: entry.lastError.message } : {}),
                 ...(entry.allowReplayRetry !== undefined
                   ? { y: entry.allowReplayRetry ? 1 : 0 }
@@ -1188,6 +1239,9 @@ export function createOfflineStoreController<
                   : {}),
                 ...(compactEntry.k !== undefined
                   ? { dependencyUploadIds: compactEntry.k }
+                  : {}),
+                ...(compactEntry.r !== undefined
+                  ? { dependencyUploadRefs: compactEntry.r }
                   : {}),
                 ...(compactEntry.m !== undefined
                   ? { lastError: { message: compactEntry.m } }
@@ -1339,6 +1393,12 @@ export function createOfflineStoreController<
           trackUnknownOperationUploads(`q:${entryId}`, null);
           queueEntries.delete(entryId);
           entryIdsFromAnotherTab.delete(entryId);
+          // This tab may be writing it again (see
+          // `persistInMemoryOnlyRecords`): removed after that write, so an
+          // entry another tab replayed is not stored again.
+          if (forgetInMemoryOnlyRecord(`q:${entryId}`)) {
+            void queueNamespace.remove(entryId);
+          }
           countedReplayFailures.delete(entryId);
           if (queueEntries.size === 0) clearReplayRetryTimer();
         });
@@ -1353,6 +1413,14 @@ export function createOfflineStoreController<
             resolutions.set(resolutionId, parsedResolution);
           } else {
             resolutions.delete(resolutionId);
+            // See the queue entries above. A record this deploy can't parse
+            // or run was just written by another tab, and stays stored.
+            if (
+              forgetInMemoryOnlyRecord(`r:${resolutionId}`) &&
+              resolution === null
+            ) {
+              void resolutionNamespace.remove(resolutionId);
+            }
           }
           // One a newer deploy wrote keeps its uploads
           trackUnknownOperationUploads(
@@ -1417,6 +1485,9 @@ export function createOfflineStoreController<
       queueEntries.clear();
       entryIdsFromAnotherTab.clear();
       resolutions.clear();
+      inMemoryOnlyRecordKeys.clear();
+      didLastInMemoryOnlyRetryFail = false;
+      syncInMemoryOnlyWindowCloseBlock();
       unknownOperationUploadIds.clear();
       // Records of an operation this deploy doesn't define were written by a
       // newer deploy: they stay in storage, with their uploads, for a deploy
@@ -1632,9 +1703,231 @@ export function createOfflineStoreController<
     const operation = operations[args.operationName];
     if (!operation?.dependsOnUploads) return [];
 
-    return [...new Set(operation.dependsOnUploads({ input: args.input }))].sort(
-      (left, right) => left.localeCompare(right),
+    const ids = new Set<string>();
+    for (const dependency of operation.dependsOnUploads({
+      input: args.input,
+    })) {
+      ids.add(typeof dependency === 'string' ? dependency : dependency.id);
+    }
+    return [...ids].sort((left, right) => left.localeCompare(right));
+  }
+
+  /**
+   * Ids `dependsOnUploads` marks as optional for this input, minus the ones it
+   * also declares as required. Only queue entry ids are persisted, so replay
+   * reads the marks again from the current operation definition.
+   */
+  function getOptionalDependencyUploadIds(
+    operationName: string,
+    input: unknown,
+  ): Set<string> {
+    const optionalIds = new Set<string>();
+    const dependencies = operations[operationName]?.dependsOnUploads?.({
+      input,
+    });
+    if (!dependencies) return optionalIds;
+
+    const requiredIds = new Set<string>();
+    for (const dependency of dependencies) {
+      if (typeof dependency === 'string') requiredIds.add(dependency);
+      else if (dependency.optional) optionalIds.add(dependency.id);
+      else requiredIds.add(dependency.id);
+    }
+    for (const id of requiredIds) optionalIds.delete(id);
+    return optionalIds;
+  }
+
+  /**
+   * Refs of the dependency uploads that are only known as released (sent and
+   * deleted), to persist with the work that declares them: the session keeps
+   * released refs in memory only, so without them the work could not resolve
+   * those ids after a reload. The session's ref wins over the ones the
+   * replaced or merged work kept.
+   */
+  function getDependencyUploadRefs(
+    current: ActiveSessionState,
+    uploadIds: readonly string[],
+    ...keptRefs: (Record<string, ValidPayload> | undefined)[]
+  ): Record<string, ValidPayload> | undefined {
+    const refs: [string, ValidPayload][] = [];
+    for (const id of uploadIds) {
+      let ref = current.session.getReleasedUploadRef(id);
+      // The transport's ref is not checked on its way in: one that would not
+      // parse back would make the whole entry unreadable after a reload, so
+      // it is not kept (the entry then fails to resolve the id instead).
+      if (ref !== undefined && !rc_parse(ref, persistedUploadRefSchema).ok) {
+        ref = undefined;
+      }
+      for (const kept of keptRefs) {
+        if (ref !== undefined) break;
+        if (kept && Object.hasOwn(kept, id)) ref = kept[id];
+      }
+      if (ref !== undefined) refs.push([id, ref]);
+    }
+    return refs.length > 0 ? Object.fromEntries(refs) : undefined;
+  }
+
+  /**
+   * Resolves dependency uploads like `resolveReplayUploadIds`, leaving out the
+   * optional ones the server refused. `classifyOptionalFailure` decides what
+   * a failed optional upload means: `'refused'` leaves it out and resolves
+   * the others, anything else is returned with the failure, so the caller
+   * does not classify that failure again.
+   */
+  async function resolveDependencyUploads<TClassification>(
+    current: ActiveSessionState,
+    uploadIds: readonly string[],
+    operationName: string,
+    input: unknown,
+    /** Refs the queued work kept for uploads released before it was queued */
+    keptRefs: Record<string, ValidPayload> | undefined,
+    classifyOptionalFailure: (
+      error: unknown,
+      uploadId: string,
+    ) => Promise<TClassification | 'refused'>,
+  ): Promise<
+    | {
+        failedUploadId?: undefined;
+        refs: Record<string, ValidPayload>;
+        refusedUploadErrorsById: Record<string, unknown>;
+      }
+    | {
+        failedUploadId: string;
+        error: unknown;
+        classification: TClassification | undefined;
+      }
+  > {
+    const canSendUploads = () => isSessionStillActive(current);
+    let optionalIds: Set<string> | undefined;
+    const refusedUploadErrors = new Map<string, unknown>();
+
+    // Optional uploads the server already refused in this session are left
+    // out without sending the file again.
+    if (current.session.hasRefusedUploads()) {
+      optionalIds = getOptionalDependencyUploadIds(operationName, input);
+      for (const id of uploadIds) {
+        if (!optionalIds.has(id)) continue;
+        const refused = current.session.getRefusedUploadError(id);
+        if (refused) refusedUploadErrors.set(id, refused.error);
+      }
+    }
+
+    // Shared by the calls below, so an upload is sent once per resolution.
+    const attempts = new Map<string, Promise<ValidPayload>>();
+    let resolution = await current.session.resolveReplayUploadIds(
+      refusedUploadErrors.size > 0
+        ? uploadIds.filter((id) => !refusedUploadErrors.has(id))
+        : uploadIds,
+      canSendUploads,
+      keptRefs,
+      attempts,
     );
+
+    while (resolution.failedUploadId !== undefined) {
+      const { failedUploadId, error } = resolution;
+      optionalIds ??= getOptionalDependencyUploadIds(operationName, input);
+      // A failure after a session switch says nothing about the file.
+      if (!optionalIds.has(failedUploadId) || !isSessionStillActive(current)) {
+        return { failedUploadId, error, classification: undefined };
+      }
+
+      const classification = await classifyOptionalFailure(
+        error,
+        failedUploadId,
+      );
+      if (classification !== 'refused') {
+        return { failedUploadId, error, classification };
+      }
+
+      refusedUploadErrors.set(failedUploadId, error);
+      // Uploads already settled or still running are not sent again: a
+      // failure that settled meanwhile is returned to be classified.
+      resolution = await current.session.resolveReplayUploadIds(
+        uploadIds.filter((id) => !refusedUploadErrors.has(id)),
+        canSendUploads,
+        keptRefs,
+        attempts,
+      );
+    }
+
+    // Nothing retries a refused upload on its own, and later work declaring
+    // it as optional leaves it out too.
+    if (refusedUploadErrors.size > 0) {
+      await current.session.markUploadsRefused(refusedUploadErrors);
+    }
+
+    return {
+      refs: resolution.refs,
+      refusedUploadErrorsById: Object.fromEntries(refusedUploadErrors),
+    };
+  }
+
+  type ReplayFailureClassification = {
+    classification: OfflineFailureClassification;
+    sessionEnabled: boolean;
+    allowReplayRetry: boolean;
+    /** A newer classification dropped a classifier answer for this failure */
+    overtaken: boolean;
+  };
+
+  async function classifyReplayFailure(
+    current: ActiveSessionState,
+    error: unknown,
+    operationName: string,
+    uploadId: string | undefined,
+  ): Promise<ReplayFailureClassification> {
+    const failureCtx: OfflineStoreFailureContext = {
+      phase: 'sync',
+      storeType,
+      operationName,
+      sessionKey: current.sessionKey,
+    };
+    if (uploadId !== undefined) failureCtx.uploadId = uploadId;
+
+    const failureClassification = await current.session.classifyFailure(
+      error,
+      failureCtx,
+    );
+    const classification =
+      failureClassification === 'overtaken' ? 'ignore' : failureClassification;
+    // A session gate closed while the entry was in flight leaves the
+    // failure unclassified: the entry stays queued as it was, to be
+    // replayed once the gate reopens
+    const sessionEnabled = isSessionEnabled();
+    const retriable =
+      sessionEnabled &&
+      classification === 'ignore' &&
+      !current.session.getStatus().isOfflineMode
+        ? await current.session.classifyRetriableFailure(error, failureCtx)
+        : false;
+
+    return {
+      classification,
+      // Also when the gate closed while the retry classifier answered.
+      sessionEnabled: sessionEnabled && isSessionEnabled(),
+      allowReplayRetry: retriable === true,
+      overtaken:
+        failureClassification === 'overtaken' || retriable === 'overtaken',
+    };
+  }
+
+  /**
+   * Whether a classified replay failure left the session online and enabled,
+   * so the entry is retried or resolved instead of waiting queued as it was.
+   */
+  function isReplayFailureKeptOnline(
+    current: ActiveSessionState,
+    { classification, sessionEnabled }: ReplayFailureClassification,
+  ): boolean {
+    return (
+      sessionEnabled &&
+      classification === 'ignore' &&
+      !current.session.getStatus().isOfflineMode
+    );
+  }
+
+  function getNextReplayFailureCount(entryId: string): number {
+    return (countedReplayFailures.get(entryId) ?? 0) + 1;
   }
 
   function getTempIdForEntityRef(args: {
@@ -1824,6 +2117,7 @@ export function createOfflineStoreController<
     // creation starts being sent.
     const attemptedCreationEntityKeys = new Set<string>();
     let creationResolutionIds = '';
+    const hasInMemoryOnlyRecords = inMemoryOnlyRecordKeys.size > 0;
 
     function createEntityBase(
       ref: OfflineEntityRef,
@@ -1866,6 +2160,10 @@ export function createOfflineStoreController<
         const isClientIdCreation = clientIdCreatedEntityKeys.includes(
           ref.entityKey,
         );
+        const isInMemoryOnly =
+          existing?.isInMemoryOnly ??
+          (hasInMemoryOnlyRecords &&
+            inMemoryOnlyRecordKeys.has(`q:${entry.id}`));
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
@@ -1894,6 +2192,7 @@ export function createOfflineStoreController<
           ...(isClientIdCreation || existing?.isClientIdCreation
             ? { isClientIdCreation: true }
             : {}),
+          ...(isInMemoryOnly ? { isInMemoryOnly: true } : {}),
         });
 
         if (
@@ -1932,6 +2231,10 @@ export function createOfflineStoreController<
         const isClientIdCreation = clientIdCreatedEntityKeys.includes(
           ref.entityKey,
         );
+        const isInMemoryOnly =
+          existing?.isInMemoryOnly ??
+          (hasInMemoryOnlyRecords &&
+            inMemoryOnlyRecordKeys.has(`r:${resolution.id}`));
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
@@ -1955,6 +2258,7 @@ export function createOfflineStoreController<
           ...(isClientIdCreation || existing?.isClientIdCreation
             ? { isClientIdCreation: true }
             : {}),
+          ...(isInMemoryOnly ? { isInMemoryOnly: true } : {}),
         });
 
         // A creation held for a manual resolution cannot be cancelled
@@ -2012,6 +2316,7 @@ export function createOfflineStoreController<
         resolutions: derivedResolutions,
         referencedUploadIds,
         protectedKeys,
+        inMemoryOnlyRecordCount: inMemoryOnlyRecordKeys.size,
         replayHead:
           nextReplayEntry === null
             ? null
@@ -2102,6 +2407,7 @@ export function createOfflineStoreController<
     attachedUploads?: OfflineMutationUploadsInput;
     attachedUploadIds?: OfflineAttachedUploadIds;
     dependencyUploadIds?: string[];
+    dependencyUploadRefs?: Record<string, ValidPayload>;
     tempIds?: ValidPayload[];
   }): OfflineQueueEntry {
     const now = Date.now();
@@ -2126,6 +2432,7 @@ export function createOfflineStoreController<
       syncState: 'pending',
       attachedUploadIds,
       dependencyUploadIds: args.dependencyUploadIds,
+      dependencyUploadRefs: args.dependencyUploadRefs,
       tempIds: args.tempIds,
     };
   }
@@ -2192,6 +2499,34 @@ export function createOfflineStoreController<
    */
   function isUnsentQueueEntry(entry: OfflineQueueEntry): boolean {
     return entry.syncState === 'pending' && entry.attempts === 0;
+  }
+
+  function hasReservedMutationBetween(
+    sessionKey: string,
+    afterQueueOrder: number,
+    beforeQueueOrder: number,
+    entityRefs: OfflineEntityRef[],
+  ): boolean {
+    for (const [queueOrder, prepared] of reservedMutations) {
+      // A mutation of a session the app switched away from is never queued
+      // in this one
+      if (
+        prepared.currentSessionKey !== sessionKey ||
+        queueOrder <= afterQueueOrder ||
+        queueOrder >= beforeQueueOrder
+      ) {
+        continue;
+      }
+      const runEntityRefs = getPreparedEntityRefs(prepared);
+      if (
+        entityRefs.some((ref) =>
+          runEntityRefs.some((runRef) => isSameEntityRef(ref, runRef)),
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function isSameEntityRef(
@@ -2317,6 +2652,7 @@ export function createOfflineStoreController<
       tempIds: entry.tempIds,
       attachedUploadIds: entry.attachedUploadIds,
       dependencyUploadIds: entry.dependencyUploadIds,
+      dependencyUploadRefs: entry.dependencyUploadRefs,
     };
   }
 
@@ -2491,6 +2827,7 @@ export function createOfflineStoreController<
       'input' | 'createdAt' | 'updatedAt' | 'attachedUploadIds'
     >;
     resolvedRefsById: Record<string, ValidPayload>;
+    refusedUploadErrorsById: Record<string, unknown>;
   }) {
     const fileEntries = await Promise.all(
       Object.entries(args.entry.attachedUploadIds ?? {}).map(
@@ -2511,7 +2848,11 @@ export function createOfflineStoreController<
         enqueuedAt: args.entry.createdAt,
         updatedAt: args.entry.updatedAt,
       }),
-      uploads: { filesById, resolvedRefsById: args.resolvedRefsById },
+      uploads: {
+        filesById,
+        resolvedRefsById: args.resolvedRefsById,
+        refusedUploadErrorsById: args.refusedUploadErrorsById,
+      },
     };
   }
 
@@ -2586,16 +2927,7 @@ export function createOfflineStoreController<
       if (!rewrite) continue;
 
       const rewrittenResolution = { ...resolution, ...rewrite };
-      resolutions.set(rewrittenResolution.id, rewrittenResolution);
-      await args.current.resolutionNamespace.save(
-        rewrittenResolution.id,
-        rewrittenResolution,
-      );
-      args.current.session.publishResolutionChange(
-        storeName,
-        rewrittenResolution.id,
-        rewrittenResolution,
-      );
+      await persistResolution(rewrittenResolution, args.current, true);
       entityRefRewrites.push({
         previousEntityRefs: resolution.entityRefs,
         nextEntityRefs: rewrittenResolution.entityRefs,
@@ -2806,21 +3138,126 @@ export function createOfflineStoreController<
     return storeAdapter.loadTempEntities?.([], addToQueries)?.catch(() => {});
   }
 
+  /**
+   * Records whether the last write of a queue entry (`q:` key) or resolution
+   * record (`r:` key) reached storage. One whose write failed is only held in
+   * memory, and keeps the window close blocked, until a later write of it
+   * succeeds or it leaves this tab's records. A failed write whose stored
+   * version is as good for a reload (`storedVersionIsEquivalent`) leaves the
+   * record as it was.
+   */
+  function setRecordPersisted(
+    recordKey: string,
+    persisted: boolean,
+    isStillHeld: boolean,
+    storedVersionIsEquivalent = false,
+  ): void {
+    if (persisted || !isStillHeld) {
+      inMemoryOnlyRecordKeys.delete(recordKey);
+    } else if (!storedVersionIsEquivalent) {
+      inMemoryOnlyRecordKeys.add(recordKey);
+    }
+    syncInMemoryOnlyWindowCloseBlock();
+  }
+
+  /** Returns whether the record was only held in memory */
+  function forgetInMemoryOnlyRecord(recordKey: string): boolean {
+    if (!inMemoryOnlyRecordKeys.delete(recordKey)) return false;
+    syncInMemoryOnlyWindowCloseBlock();
+    return true;
+  }
+
+  function syncInMemoryOnlyWindowCloseBlock(): void {
+    if (inMemoryOnlyRecordKeys.size > 0) {
+      unblockWindowCloseForInMemoryOnlyRecords ??=
+        blockWindowClose?.().unblock ?? null;
+      return;
+    }
+
+    const unblock = unblockWindowCloseForInMemoryOnlyRecords;
+    unblockWindowCloseForInMemoryOnlyRecords = null;
+    unblock?.();
+  }
+
+  /**
+   * Writes the records only held in memory again after a write of this
+   * store's records succeeded: storage works again (e.g. the browser accepted
+   * a new IndexedDB connection), so they can survive a reload too.
+   * `afterSave`: the write that succeeded saved a record, rather than only
+   * removing one.
+   */
+  function persistInMemoryOnlyRecords(
+    current: ActiveSessionState,
+    afterSave: boolean,
+  ): void {
+    if (
+      isRetryingInMemoryOnlyRecords ||
+      inMemoryOnlyRecordKeys.size === 0 ||
+      (didLastInMemoryOnlyRetryFail && !afterSave)
+    ) {
+      return;
+    }
+    isRetryingInMemoryOnlyRecords = true;
+
+    let persistedAny = false;
+    const writes = [...inMemoryOnlyRecordKeys].map(async (recordKey) => {
+      const recordId = recordKey.slice(2);
+      const isQueueEntry = recordKey.startsWith('q:');
+      const records = isQueueEntry ? queueEntries : resolutions;
+      let write: Promise<boolean> | undefined;
+      if (isQueueEntry) {
+        const entry = queueEntries.get(recordId);
+        if (entry) write = current.queueNamespace.save(recordId, entry);
+      } else {
+        const resolution = resolutions.get(recordId);
+        if (resolution) {
+          write = current.resolutionNamespace.save(recordId, resolution);
+        }
+      }
+      if (!write) return;
+
+      const persisted = await write;
+      if (!isActiveSessionState(current)) return;
+      if (persisted) persistedAny = true;
+      setRecordPersisted(recordKey, persisted, records.has(recordId));
+    });
+
+    void Promise.all(writes).finally(() => {
+      isRetryingInMemoryOnlyRecords = false;
+      if (!isActiveSessionState(current)) return;
+      didLastInMemoryOnlyRetryFail = !persistedAny;
+      if (persistedAny) refreshDerivedState(current);
+    });
+  }
+
+  /**
+   * `isReplayStateUpdate`: the write only updates the replay state of a queued
+   * entry (being sent, or back to `pending` after a failed send or a session
+   * switch), so if it fails, the version stored before still holds the same
+   * work for a reload.
+   */
   async function persistEntry(
     entry: OfflineQueueEntry,
     current?: ActiveSessionState,
     skipRefresh?: boolean,
+    isReplayStateUpdate?: boolean,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
     if (isActiveSessionState(session)) {
       queueEntries.set(entry.id, entry);
     }
-    await session.queueNamespace.save(entry.id, entry);
+    const persisted = await session.queueNamespace.save(entry.id, entry);
     session.session.publishQueueEntryChange(storeName, entry.id, entry);
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    if (!isActiveSessionState(session)) return;
+    setRecordPersisted(
+      `q:${entry.id}`,
+      persisted,
+      queueEntries.has(entry.id),
+      isReplayStateUpdate,
+    );
+    if (persisted) persistInMemoryOnlyRecords(session, true);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   function runSuccessfulExecuteSync(args: {
@@ -2850,6 +3287,7 @@ export function createOfflineStoreController<
       queueEntries.delete(entryId);
       entryIdsFromAnotherTab.delete(entryId);
       countedReplayFailures.delete(entryId);
+      forgetInMemoryOnlyRecord(`q:${entryId}`);
       if (queueEntries.size === 0) {
         clearReplayRetryTimer();
       }
@@ -2857,10 +3295,10 @@ export function createOfflineStoreController<
     // Announced before the storage write: an entry that was replayed must
     // leave the other tabs' queues as early as possible.
     session.session.publishQueueEntryChange(storeName, entryId, null);
-    await session.queueNamespace.remove(entryId);
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    const removed = await session.queueNamespace.remove(entryId);
+    if (!isActiveSessionState(session)) return;
+    if (removed) persistInMemoryOnlyRecords(session, false);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   async function persistResolution(
@@ -2873,15 +3311,23 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       resolutions.set(resolution.id, resolution);
     }
-    await session.resolutionNamespace.save(resolution.id, resolution);
+    const persisted = await session.resolutionNamespace.save(
+      resolution.id,
+      resolution,
+    );
     session.session.publishResolutionChange(
       storeName,
       resolution.id,
       resolution,
     );
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    if (!isActiveSessionState(session)) return;
+    setRecordPersisted(
+      `r:${resolution.id}`,
+      persisted,
+      resolutions.has(resolution.id),
+    );
+    if (persisted) persistInMemoryOnlyRecords(session, true);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   async function removeResolution(
@@ -2893,12 +3339,13 @@ export function createOfflineStoreController<
     if (!session) return;
     if (isActiveSessionState(session)) {
       resolutions.delete(resolutionId);
+      forgetInMemoryOnlyRecord(`r:${resolutionId}`);
     }
-    await session.resolutionNamespace.remove(resolutionId);
+    const removed = await session.resolutionNamespace.remove(resolutionId);
     session.session.publishResolutionChange(storeName, resolutionId, null);
-    if (!skipRefresh && isActiveSessionState(session)) {
-      refreshDerivedState(session);
-    }
+    if (!isActiveSessionState(session)) return;
+    if (removed) persistInMemoryOnlyRecords(session, false);
+    if (!skipRefresh) refreshDerivedState(session);
   }
 
   /**
@@ -3875,6 +4322,7 @@ export function createOfflineStoreController<
             queueOrder,
             attachedUploadIds: resolution.attachedUploadIds,
             dependencyUploadIds: resolution.dependencyUploadIds,
+            dependencyUploadRefs: resolution.dependencyUploadRefs,
             tempIds: resolution.tempIds,
           })
         : null;
@@ -4086,6 +4534,7 @@ export function createOfflineStoreController<
       }),
       upload: args.upload,
       attachedUploadIds: args.attachedUploadIds,
+      dependencyUploadRefs: args.dependencyUploadRefs,
       tempIds: args.tempIds,
       entityRefs: args.entityRefs,
     };
@@ -4152,6 +4601,7 @@ export function createOfflineStoreController<
         dependencyUploadIds,
         upload,
         attachedUploadIds,
+        dependencyUploadRefs: preparedDependencyUploadRefs,
         tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
         mayHaveBeenApplied,
@@ -4324,7 +4774,7 @@ export function createOfflineStoreController<
           normalizeEntityRefs(resolution.entityRefs) === normalizedEntityRefs,
         replacedResolutionId,
       ).at(-1);
-      const existingEntry = heldResolution
+      const candidateEntry = heldResolution
         ? undefined
         : findAccumulationCandidate({
             operationName,
@@ -4332,6 +4782,21 @@ export function createOfflineStoreController<
             queueOrder,
             entries: workingQueue.values(),
           });
+      // Merged, the input is replayed at the candidate's place. A mutation
+      // called between the candidate and this one but not queued yet (checking
+      // the connection, or sent as a direct request that can fall back to the
+      // queue) would then be replayed after it, out of call order, so this
+      // mutation keeps its own entry instead.
+      const existingEntry =
+        candidateEntry &&
+        !hasReservedMutationBetween(
+          current.sessionKey,
+          getQueueOrder(candidateEntry),
+          queueOrder,
+          entityRefs,
+        )
+          ? candidateEntry
+          : undefined;
       const existingWork = heldResolution ?? existingEntry;
       const mergeContext = existingWork && {
         sessionKey: current.sessionKey,
@@ -4370,12 +4835,19 @@ export function createOfflineStoreController<
           mergedDependencyUploadIds.length > 0
             ? mergedDependencyUploadIds
             : undefined;
+        const dependencyUploadRefsOfMerge = getDependencyUploadRefs(
+          current,
+          mergedDependencyUploadIds,
+          existingWork.dependencyUploadRefs,
+          preparedDependencyUploadRefs,
+        );
 
         if (heldResolution) {
           const nextResolution: PersistedOfflineResolutionRecord = {
             ...heldResolution,
             input: validatedMergedInput,
             dependencyUploadIds: dependencyUploadIdsOfMerge,
+            dependencyUploadRefs: dependencyUploadRefsOfMerge,
             updatedAt: now,
           };
 
@@ -4400,6 +4872,7 @@ export function createOfflineStoreController<
             queueOrder,
             entityRefs: heldResolution.entityRefs,
             dependencyUploadIds: dependencyUploadIdsOfMerge,
+            dependencyUploadRefs: dependencyUploadRefsOfMerge,
           });
           workingQueue.set(nextEntry.id, nextEntry);
 
@@ -4420,6 +4893,7 @@ export function createOfflineStoreController<
             ...existingEntry,
             input: validatedMergedInput,
             dependencyUploadIds: dependencyUploadIdsOfMerge,
+            dependencyUploadRefs: dependencyUploadRefsOfMerge,
             updatedAt: now,
           };
 
@@ -4504,6 +4978,17 @@ export function createOfflineStoreController<
       attachedUploadIds,
       dependencyUploadIds:
         dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
+      // The replaced work may be the only one that kept the ref of a released
+      // id after a reload.
+      dependencyUploadRefs: getDependencyUploadRefs(
+        current,
+        dependencyUploadIds,
+        preparedDependencyUploadRefs,
+        ...supersededEntries.map((entry) => entry.dependencyUploadRefs),
+        ...supersededResolutions.map(
+          (resolution) => resolution.dependencyUploadRefs,
+        ),
+      ),
       tempIds,
     });
     // The server may have created the item in an earlier request: a delete
@@ -4529,23 +5014,32 @@ export function createOfflineStoreController<
     };
   }
 
+  /**
+   * Resolves with whether the work the mutation was queued in is only held in
+   * memory, because writing it to storage failed.
+   */
   async function queuePreparedMutations(
     preparedMutation: PreparedQueuedMutation,
     replacedResolutionId?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const current = ensureActiveSession();
     if (!current || current.sessionKey !== preparedMutation.currentSessionKey) {
       throw new OfflineSessionUnavailableError();
     }
 
-    const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
+    const reservedQueueOrder = preparedMutation.queueOrder;
+    const { queueOrders, nextQueueOrderValue } =
+      reservedQueueOrder === undefined
+        ? previewQueueOrders(1)
+        : { queueOrders: [reservedQueueOrder], nextQueueOrderValue: null };
     const queueOrder = queueOrders[0];
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
     }
     // Reserved right away: a mutation made while this one is planned is
-    // queued after it, in the order the user made them.
-    nextQueueOrder = nextQueueOrderValue;
+    // queued after it, in the order the user made them. A reserved order was
+    // already taken when the mutation was called.
+    if (nextQueueOrderValue !== null) nextQueueOrder = nextQueueOrderValue;
     let plannedMutation: PlannedQueuedMutation;
     let pendingEntityQueriesLoaded = false;
     for (;;) {
@@ -4806,6 +5300,16 @@ export function createOfflineStoreController<
       await deleteOrphanedDependencyUploads(current, supersededWork);
     }
     await ensureReplayScheduled();
+
+    const { nextEntry, replacedResolution } = plannedMutation;
+    return (
+      (nextEntry !== undefined &&
+        inMemoryOnlyRecordKeys.has(
+          blockedResolution ? `r:${blockedResolution.id}` : `q:${nextEntry.id}`,
+        )) ||
+      (replacedResolution !== undefined &&
+        inMemoryOnlyRecordKeys.has(`r:${replacedResolution.id}`))
+    );
   }
 
   async function ensureReplayScheduled(): Promise<void> {
@@ -5004,10 +5508,15 @@ export function createOfflineStoreController<
         updatedAt: Date.now(),
         lastAttemptAt: Date.now(),
       };
-      await persistEntry(entryToUse, current);
+      await persistEntry(entryToUse, current, false, true);
       // Set when the replay failed while resolving a dependency upload, which
       // means `execute` was never called for this attempt.
       let failedUploadId: string | undefined;
+      // That failure's classification when it was already classified (an
+      // optional upload), so the hooks don't run twice for it.
+      let uploadFailureClassification: ReplayFailureClassification | undefined;
+      // Optional dependency uploads the server refused: sent without them.
+      let refusedUploadIds: string[] = [];
       let executeStarted = false;
       // The app can switch to another session (e.g. another org) without a
       // reload while the replay awaits: the work of the old session must not
@@ -5095,14 +5604,42 @@ export function createOfflineStoreController<
           continue;
         }
 
-        const dependencyUploads = await current.session.resolveReplayUploadIds(
+        const replayedEntry = entryToUse;
+        const dependencyUploads = await resolveDependencyUploads(
+          current,
           entryToUse.dependencyUploadIds ?? [],
-          () => isSessionStillActive(current),
+          entryToUse.operation,
+          entryToUse.input,
+          entryToUse.dependencyUploadRefs,
+          async (error, uploadId) => {
+            const classified = await classifyReplayFailure(
+              current,
+              error,
+              replayedEntry.operation,
+              uploadId,
+            );
+            // Refused: a permanent failure, or a retryable one out of
+            // retries, the cases that send the operation of a required upload
+            // to manual resolution. A failure left unclassified because a
+            // newer classification dropped its answer is handled like the one
+            // of a required upload instead.
+            return isReplayFailureKeptOnline(current, classified) &&
+              !classified.overtaken &&
+              (!classified.allowReplayRetry ||
+                getNextReplayFailureCount(replayedEntry.id) >=
+                  replayRetryMaxFailures)
+              ? 'refused'
+              : classified;
+          },
         );
         if (dependencyUploads.failedUploadId !== undefined) {
           failedUploadId = dependencyUploads.failedUploadId;
+          uploadFailureClassification = dependencyUploads.classification;
           throw dependencyUploads.error;
         }
+        refusedUploadIds = Object.keys(
+          dependencyUploads.refusedUploadErrorsById,
+        );
 
         // WORKAROUND: The shared replay builder returns the runtime upload-ref
         // shape, and each operation rebinds that same value to its own
@@ -5115,6 +5652,7 @@ export function createOfflineStoreController<
             current,
             entry: entryToUse,
             resolvedRefsById: dependencyUploads.refs,
+            refusedUploadErrorsById: dependencyUploads.refusedUploadErrorsById,
           }),
         );
         throwIfSessionChanged();
@@ -5134,6 +5672,12 @@ export function createOfflineStoreController<
 
         await removeEntry(entryToUse.id, current, true);
 
+        const clientIdCreatedEntityKeys =
+          getClientIdCreatedEntityKeys(entryToUse);
+        if (clientIdCreatedEntityKeys.length > 0) {
+          storeAdapter.confirmClientIdCreations?.(clientIdCreatedEntityKeys);
+        }
+
         const successfulExecuteSync = runSuccessfulExecuteSync({
           operation,
           entry: entryToUse,
@@ -5150,47 +5694,39 @@ export function createOfflineStoreController<
 
         refreshDerivedState(current);
         // The replayed entry consumed its uploads. Not awaited, so removing
-        // the files does not hold back the next queued entry.
-        void deleteOrphanedDependencyUploads(current, [entryToUse]);
+        // the files does not hold back the next queued entry. Refused uploads
+        // were not sent, so their files are kept.
+        void deleteOrphanedDependencyUploads(current, [
+          refusedUploadIds.length > 0
+            ? {
+                dependencyUploadIds: entryToUse.dependencyUploadIds?.filter(
+                  (id) => !refusedUploadIds.includes(id),
+                ),
+              }
+            : entryToUse,
+        ]);
       } catch (error) {
         // The session changed before the entry was sent: whatever failed
         // (the check above, or an upload sent before the switch) says nothing
         // about the entry, so it stays queued for its session as it was, to
         // be replayed once that session is active again.
         if (!executeStarted && !isSessionStillActive(current)) {
-          await persistEntry(nextEntry, current, true);
+          await persistEntry(nextEntry, current, true, true);
           return;
         }
 
         const lastError = { message: unknownToError(error).message };
-        const failureCtx: OfflineStoreFailureContext = {
-          phase: 'sync',
-          storeType,
-          operationName: entryToUse.operation,
-          sessionKey: current.sessionKey,
-        };
-        if (failedUploadId !== undefined) failureCtx.uploadId = failedUploadId;
+        const classified =
+          uploadFailureClassification ??
+          (await classifyReplayFailure(
+            current,
+            error,
+            entryToUse.operation,
+            failedUploadId,
+          ));
+        const { allowReplayRetry } = classified;
 
-        const classification = await current.session.classifyFailure(
-          error,
-          failureCtx,
-        );
-        // A session gate closed while the entry was in flight leaves the
-        // failure unclassified: the entry stays queued as it was, to be
-        // replayed once the gate reopens
-        const sessionEnabled = isSessionEnabled();
-        const allowReplayRetry =
-          sessionEnabled &&
-          classification === 'ignore' &&
-          !current.session.getStatus().isOfflineMode
-            ? await current.session.classifyRetriableFailure(error, failureCtx)
-            : false;
-
-        if (
-          !sessionEnabled ||
-          classification !== 'ignore' ||
-          current.session.getStatus().isOfflineMode
-        ) {
+        if (!isReplayFailureKeptOnline(current, classified)) {
           entryToUse = {
             ...entryToUse,
             attempts: entryToUse.attempts + 1,
@@ -5200,12 +5736,12 @@ export function createOfflineStoreController<
             lastError,
             allowReplayRetry: undefined,
           };
-          await persistEntry(entryToUse, current);
+          await persistEntry(entryToUse, current, false, true);
           return;
         }
 
         const nextFailures = allowReplayRetry
-          ? (countedReplayFailures.get(entryToUse.id) ?? 0) + 1
+          ? getNextReplayFailureCount(entryToUse.id)
           : 0;
 
         if (allowReplayRetry) {
@@ -5256,12 +5792,49 @@ export function createOfflineStoreController<
     }
   }
 
+  /**
+   * Active session to compute the dependency uploads of `operationName` with.
+   * Right after a reload the session is still listing its stored uploads, and
+   * `dependsOnUploads` may read them (`getOfflineUploads()`), so operations
+   * that declare uploads wait for that list first.
+   */
+  async function ensureSessionForUploadDependencies(
+    operationName: string,
+  ): Promise<ActiveSessionState | null> {
+    const current = ensureActiveSession();
+    if (!current) return current;
+
+    const storedUploadsListed = operations[operationName]?.dependsOnUploads
+      ? current.session.waitForStoredUploads()
+      : undefined;
+    if (storedUploadsListed && !uploadDependenciesWait) {
+      uploadDependenciesWait = storedUploadsListed;
+      void storedUploadsListed.then(() => {
+        uploadDependenciesWait = undefined;
+      });
+    }
+    // A mutation called while an older one of this store waits for that list
+    // waits too, so it can't take a queue position before it. Mutations of
+    // other stores don't wait, so one called meanwhile can replay first.
+    const wait = storedUploadsListed ?? uploadDependenciesWait;
+    if (!wait) return current;
+    await wait;
+    // A mutation called in a session the app switched away from meanwhile is
+    // not run or queued in the new one.
+    if (!isSessionStillActive(current)) {
+      throw new OfflineSessionUnavailableError();
+    }
+    return current;
+  }
+
   async function queueMutation<TName extends keyof TOperations & string>(args: {
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;
   }): Promise<void> {
     await hydrateIfNeeded();
-    const current = ensureActiveSession();
+    const current = await ensureSessionForUploadDependencies(
+      args.offline.operation,
+    );
     if (!current) {
       throw new OfflineSessionUnavailableError();
     }
@@ -5282,22 +5855,73 @@ export function createOfflineStoreController<
     upload?: OfflineMutationUploadsInput;
   }): Promise<PreparedOfflineMutation> {
     await hydrateIfNeeded();
-    const current = ensureActiveSession();
+    const current = await ensureSessionForUploadDependencies(
+      args.offline.operation,
+    );
     if (!current) {
       throw new OfflineSessionUnavailableError();
     }
 
-    const prepared = prepareMutationWithSession(current, {
-      operation: args.offline.operation,
-      input: args.offline.input,
-      upload: args.upload,
-    });
-    await current.session.refreshNetworkState();
+    const { nextQueueOrderValue } = previewQueueOrders(1);
+    const reservedQueueOrder = nextQueueOrderValue - 1;
+    const prepared: PreparedQueuedMutation = {
+      ...prepareMutationWithSession(current, {
+        operation: args.offline.operation,
+        input: args.offline.input,
+        upload: args.upload,
+      }),
+      // Reserved now: if the direct request falls back to the queue, it keeps
+      // the place it had when called, before the mutations queued meanwhile.
+      queueOrder: reservedQueueOrder,
+    };
+    nextQueueOrder = nextQueueOrderValue;
+    // Before the connection check, which can settle after the one of a newer
+    // mutation of the same entities
+    reservedMutations.set(reservedQueueOrder, prepared);
+    try {
+      await current.session.refreshNetworkState();
+    } catch (error) {
+      reservedMutations.delete(reservedQueueOrder);
+      throw error;
+    }
 
     const { dependencyUploadIds } = prepared;
+    const initialAction = getInitialOfflineMutationAction(current, prepared);
+    // Optional uploads the server refused: not sent, so not released either.
+    let refusedUploadIds: readonly string[] = [];
+
+    const classifyDirectFailure = async (
+      error: unknown,
+      uploadId: string | undefined,
+    ) => {
+      const preparedCurrent = ensureActiveSession();
+      if (
+        !preparedCurrent ||
+        preparedCurrent.sessionKey !== prepared.currentSessionKey
+      ) {
+        throw new OfflineSessionUnavailableError();
+      }
+
+      const failureCtx: OfflineStoreFailureContext = {
+        phase: 'mutation',
+        storeType,
+        operationName: prepared.operationName,
+        sessionKey: preparedCurrent.sessionKey,
+      };
+      if (uploadId !== undefined) failureCtx.uploadId = uploadId;
+      const activeCause = await preparedCurrent.session.classifyRequestFailure(
+        error,
+        failureCtx,
+      );
+
+      return { preparedCurrent, failureCtx, activeCause };
+    };
 
     return {
-      initialAction: getInitialOfflineMutationAction(current, prepared),
+      initialAction,
+      releaseQueueOrder: () => {
+        reservedMutations.delete(reservedQueueOrder);
+      },
       queueMutation: (afterDirectAttempt) =>
         queuePreparedMutations(
           afterDirectAttempt
@@ -5309,9 +5933,35 @@ export function createOfflineStoreController<
       resolveDirectUploads:
         dependencyUploadIds.length > 0
           ? async () => {
-              const resolution = await current.session.resolveReplayUploadIds(
+              const resolution = await resolveDependencyUploads(
+                current,
                 dependencyUploadIds,
-                () => isSessionStillActive(current),
+                prepared.operationName,
+                prepared.validatedInput,
+                undefined,
+                async (error, uploadId) => {
+                  const { preparedCurrent, failureCtx, activeCause } =
+                    await classifyDirectFailure(error, uploadId);
+                  // A classifier answer dropped by a newer classification, or
+                  // a session gate closed during the run, leaves the failure
+                  // unclassified, so it fails the mutation like a required
+                  // upload. Retryable: running the mutation again may upload
+                  // it. Only a failure found permanent drops the upload.
+                  if (activeCause === 'overtaken') return false;
+                  if (activeCause)
+                    return isMutationQueueingAllowed(activeCause);
+                  if (
+                    !isSessionEnabled() ||
+                    (await preparedCurrent.session.classifyRetriableFailure(
+                      error,
+                      failureCtx,
+                    )) !== false ||
+                    !isSessionEnabled()
+                  ) {
+                    return false;
+                  }
+                  return 'refused';
+                },
               );
               // The app switched to another session while the uploads were
               // sent: the request is not sent from the new session. Thrown
@@ -5321,6 +5971,16 @@ export function createOfflineStoreController<
               if (!isSessionStillActive(current)) {
                 throw new OfflineSessionUnavailableError();
               }
+              if (resolution.failedUploadId !== undefined) {
+                return {
+                  failedUploadId: resolution.failedUploadId,
+                  error: resolution.error,
+                  shouldQueue: resolution.classification,
+                };
+              }
+              refusedUploadIds = Object.keys(
+                resolution.refusedUploadErrorsById,
+              );
               return resolution;
             }
           : null,
@@ -5344,34 +6004,20 @@ export function createOfflineStoreController<
         // awaited, so removing the files does not delay the result.
         if (dependencyUploadIds.length > 0) {
           void deleteOrphanedDependencyUploads(current, [
-            { dependencyUploadIds },
+            {
+              dependencyUploadIds: dependencyUploadIds.filter(
+                (id) => !refusedUploadIds.includes(id),
+              ),
+            },
           ]);
         }
         await clearOfflineStatusOnSuccess(prepared.currentSessionKey);
       },
       classifyError: async (error, uploadId) => {
-        const preparedCurrent = ensureActiveSession();
-        if (
-          !preparedCurrent ||
-          preparedCurrent.sessionKey !== prepared.currentSessionKey
-        ) {
-          throw new OfflineSessionUnavailableError();
-        }
-
-        const failureCtx: OfflineStoreFailureContext = {
-          phase: 'mutation',
-          storeType,
-          operationName: prepared.operationName,
-          sessionKey: preparedCurrent.sessionKey,
-        };
-        if (uploadId !== undefined) failureCtx.uploadId = uploadId;
-        const activeCause =
-          await preparedCurrent.session.classifyRequestFailure(
-            error,
-            failureCtx,
-          );
-
-        return activeCause ? isMutationQueueingAllowed(activeCause) : false;
+        const { activeCause } = await classifyDirectFailure(error, uploadId);
+        return activeCause && activeCause !== 'overtaken'
+          ? isMutationQueueingAllowed(activeCause)
+          : false;
       },
     };
   }
@@ -5385,7 +6031,7 @@ export function createOfflineStoreController<
   ): Promise<T> {
     const operationName: string = offline.operation;
     const current = operations[operationName]?.dependsOnUploads
-      ? ensureActiveSession()
+      ? await ensureSessionForUploadDependencies(operationName)
       : null;
     const dependencyUploadIds = current
       ? prepareMutationWithSession(current, {
@@ -5455,7 +6101,8 @@ export function createOfflineStoreController<
     resolution: OfflineResolutionActionForOperation<TOperations, TName>,
   ): Promise<void> {
     await hydrateIfNeeded();
-    const current = ensureActiveSession();
+    // A `requeue` computes the dependency uploads of its replacement input.
+    const current = await ensureSessionForUploadDependencies(operationName);
     if (!current) return;
 
     const resolutionRecord = resolutions.get(resolutionId);
@@ -5584,6 +6231,7 @@ export function createOfflineStoreController<
         // The replacement is sent with the files attached to the original
         // mutation, which stay stored under their ids.
         attachedUploadIds: resolutionRecord.attachedUploadIds,
+        dependencyUploadRefs: resolutionRecord.dependencyUploadRefs,
         tempIds: resolutionRecord.tempIds,
         entityRefs: resolutionRecord.entityRefs,
       });
@@ -5754,6 +6402,10 @@ export function createOfflineStoreController<
   return {
     dispose,
     hydrateIfNeeded,
+    isHydrated: () => {
+      const sessionKey = offlineSession.getSessionKey();
+      return sessionKey === false || hydratedSessionKey === sessionKey;
+    },
     canQueueMutation,
     prepareForMutation,
     runUnqueuedMutation,

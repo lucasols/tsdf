@@ -1,7 +1,7 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_number, rc_object } from 'runcheck';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
@@ -34,6 +34,7 @@ import {
   network,
   setupOfflineUploadTests,
   type DirectUploadUpdateOperations,
+  type UploadDependencyOperations,
 } from './offlineUploadsTestShared';
 
 setupOfflineUploadTests();
@@ -1113,6 +1114,124 @@ test('a file staged while the session is still restoring stored uploads is liste
   `);
 
   uploadHook.unmount();
+});
+
+type UploadDependencyAndPlainOperations = UploadDependencyOperations & {
+  setValue: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { value: number } }
+  >;
+};
+
+test('a change saved right after a reload declares the files staged before it, while the session is still restoring them, and keeps its place before the changes saved after it', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-hydration-dependency-session';
+  const requests: string[] = [];
+
+  // A previous app run staged an image offline; the page is reloaded before
+  // anything was saved with it.
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    'img-1': textFile('image body', 'image.png', 1),
+  });
+
+  // --- Setup: app startup. The session starts restoring the stored uploads
+  // in the background ---
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => {
+          requests.push(`upload ${id}`);
+          return Promise.resolve(`server:${id}`);
+        },
+      },
+    },
+  });
+  const env = createDocumentStoreTestEnv<
+    number,
+    UploadDependencyAndPlainOperations
+  >(1, {
+    id: 'offline-upload-hydration-dependency-doc',
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateWithAttachment: {
+            inputSchema: rc_object({
+              attachmentId: rc_string,
+              value: rc_number,
+            }),
+            kind: 'update',
+            // The app only declares the ids that are still staged: an id the
+            // data holds after its file was sent and deleted needs no upload.
+            dependsOnUploads: ({ input }) =>
+              storeManager
+                .getOfflineUploads()
+                .some((upload) => upload.id === input.attachmentId)
+                ? [input.attachmentId]
+                : [],
+            execute: async ({ input, uploads }) => {
+              requests.push(
+                `replay ${input.value} with ${JSON.stringify(uploads.resolvedRefsById)}`,
+              );
+              await env.serverMock.delayedSetData(input.value);
+              return { value: input.value };
+            },
+          },
+          // Declares no uploads, so it has nothing to wait for on its own
+          setValue: {
+            inputSchema: rc_object({ value: rc_number }),
+            kind: 'update',
+            execute: async ({ input }) => {
+              requests.push(`replay ${input.value}`);
+              await env.serverMock.delayedSetData(input.value);
+              return { value: input.value };
+            },
+          },
+        },
+      },
+    },
+  });
+  // The restore is still running: nothing is listed yet.
+  expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+
+  // --- Action: the user saves a change with the image right away, then
+  // another change of the same document without files before the first save
+  // finished ---
+  const saveWithImage = env.apiStore.performMutation({
+    mutation: () => Promise.resolve({ value: 2 }),
+    offline: {
+      operation: 'updateWithAttachment',
+      input: { attachmentId: 'img-1', value: 2 },
+    },
+  });
+  const saveWithoutFiles = env.apiStore.performMutation({
+    mutation: () => Promise.resolve({ value: 3 }),
+    offline: { operation: 'setValue', input: { value: 3 } },
+  });
+  await resolveAfterAllTimers(Promise.all([saveWithImage, saveWithoutFiles]));
+
+  // On reconnect the image is uploaded first and sent with the change: the
+  // save waited for the restore before reading which files are staged, so
+  // the queued change declares it.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(3_000);
+  // The change without files waited behind it instead of taking an earlier
+  // queue position, so the newest value is the one the server keeps.
+  expect(requests).toMatchInlineSnapshot(
+    `['upload img-1', 'replay 2 with {"img-1":"server:img-1"}', 'replay 3']`,
+  );
+  expect(env.serverMock.current).toMatchInlineSnapshot(`3`);
 });
 
 test('an upload deleted while the session is still restoring stored uploads does not come back', async () => {

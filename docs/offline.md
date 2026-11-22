@@ -107,9 +107,11 @@ When the online mutation succeeds, the result value is `{ kind: 'online', data }
 
 A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) or for the entities it depends on (`dependsOn`), or queued mutations that depend on an entity it changes (e.g. a queued subfolder creation and a delete of its folder), are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them (and be overwritten, or reference an entity the server does not have yet), so it joins the queue and is replayed in the order the user made the changes. The same applies while the creation of an entity of another store the operation declares in `cancelledWith` is still queued (e.g. a comment added to a task whose creation is being replayed). It also applies in offline mode when new work is not queued (`mutationQueueing` `'disallow'`, a disabled mode, or the [`'replay-only'` gate](#session-gate)): the server may already be reachable, e.g. after an outage that ended before the next recovery check, and the older work replayed after a successful direct run would overwrite it.
 
+A mutation whose online request fails and is then queued keeps the place it had when it was called, in this tab and in the others: mutations queued while its request was in flight (e.g. the connection dropped and the user kept editing) and not sent yet are replayed after it. With `accumulation`, it is not merged into them, and the ones queued in the same tab are not merged into older queued work of the same entities while its request is still in flight. Mutations already sent by then (e.g. replayed after reconnecting while its request was still waiting for a response) reach the server first.
+
 Queued mutations and pending resolutions are persisted through the store's own `persistentStorage.adapter`, and the cached entries they reference are protected from cache expiry until the queue is replayed or discarded. They are not migrated when a store's adapter changes: let the queue drain first. See [Changing a store's adapter](./persistent-storage.md#changing-a-stores-adapter).
 
-The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the result is still `{ kind: 'queued' }`: the mutation stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded first. Treat an `onPersistentStorageError` call while offline as "pending changes may not survive a reload".
+The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the mutation is still queued: it stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded or closed first. See [Changes not stored on the device](#changes-not-stored-on-the-device) for how the app can tell.
 
 Without an active offline session — `getSessionKey()` returns `false`, or the [session gate](#session-gate) is closed — the same call runs as a plain online mutation: `mutation` is called, a success resolves with `{ kind: 'online', data }`, and a failure goes through the normal error handling (optimistic update rolled back, `onMutationError` called). Nothing is queued.
 
@@ -291,7 +293,7 @@ Changes waiting for a manual resolution only hold back what they changed, since 
 - In collection and list query stores, the items with such a change are left out: they are not refetched (window-focus revalidations leave them out too), and a list query store's lists are refetched but keep these items as they are locally (their data, and whether and where they are in the part of a list loaded before; every list fetch does, e.g. a window-focus revalidation too). A temp entity whose creation waits for a decision although the server did create it (the response of an earlier attempt was lost) shows twice in a refetched list, under its temp key and under its server id, until the creation is handled. The rest of the store is revalidated as usual. Each time one of these changes is handled (committed, discarded, or sent again and replayed), the store revalidates again, now including the items it no longer holds back.
 - A change on a whole document, or a change whose operation references no entity (`getEntityRefs` returns nothing), holds back the whole store: it revalidates once the change is handled. A document with such a change is not refetched by window-focus and reconnect revalidations either.
 
-Mounted data refetches right away, unmounted data on its next mount. Stores with `usesRealTimeUpdates` revalidate with `realtimeUpdate` priority, other stores with `highPriority`. Stores with `usesRealTimeUpdates` first wait one `transportReconnectCooldownMs` (2s by default): the app's transport usually reconnects right after the network comes back, and the `onTransportReconnect()` call in that window runs a single revalidation for both. Without a reconnect, the store revalidates when the cooldown ends, or right away when discarding a change refetches the store in the meantime. Tabs that are not focused revalidate when they get focus. Items that only exist locally (offline creations not sent yet) are skipped by invalidations, since there is nothing to fetch for them.
+Mounted data refetches right away, unmounted data on its next mount. Stores with `usesRealTimeUpdates` revalidate with `realtimeUpdate` priority, other stores with `highPriority`. Stores with `usesRealTimeUpdates` first wait one `transportReconnectCooldownMs` (2s by default): the app's transport usually reconnects right after the network comes back, and the `onTransportReconnect()` call in that window runs a single revalidation for both. Without a reconnect, the store revalidates when the cooldown ends, or right away when discarding a change refetches the store in the meantime. Tabs that are not focused revalidate when they get focus. Items that only exist locally (offline creations the server has not confirmed yet, of a temp entity or of an item with an id the app generated) are skipped by invalidations and by the refetches hooks run when they mount, since there is nothing to fetch for them.
 
 ## Operation Definitions
 
@@ -370,7 +372,7 @@ createUser: {
 ```
 
 - The entity is added to the queries when the mutation is queued, so `optimisticUpdate` does not need to call `addItemToState` for it. A mutation that runs online right away is never queued and creates no pending entity.
-- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function is matched against them too: every query of the store saved in persistent storage is loaded for it, so prefer query payloads when the lists are known. The queries loaded this way, and their rows, count as recently used for storage expiry and eviction.
+- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function is matched against them too, on their saved data (`status` is `'success'` and `items` are the saved row keys): every query of the store saved in persistent storage is read for it, so prefer query payloads when the lists are known. Only the queries it matches are loaded, so the others and their rows don't count as used for storage expiry and eviction.
 - The membership is stored with the queries, so the row is still in its lists after the app restarts with the mutation queued.
 - When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. The declared queries that are only in persistent storage are loaded first: the function form of `addToQueries` runs again for this, so it should only depend on its arguments. Discarding the queued mutation removes the row from its lists.
 - While the mutation is pending, a list refetch that does not return the row keeps it rendered at its last known position. This memory does not survive an app restart.
@@ -586,6 +588,33 @@ const showNoConnection =
 - A failure classified as `network` (by `classifyFailure` or the [health check](#health-check)) does not change it: it only activates `network.active`.
 - It is local to the tab: it is not persisted nor shared with the other tabs of the session.
 
+### Changes not stored on the device
+
+When writing a queued mutation to persistent storage fails (see [Queuing Mutations](#queuing-mutations)), the tab keeps it in memory and still sends it, but a reload or closing the tab loses it. TSDF tracks those changes so the app does not have to:
+
+- `status.inMemoryOnlyMutations` counts the offline records this tab holds only in memory: queued mutations (a mutation merged into a queued one by `accumulation` counts once with it) and mutations waiting for a manual resolution.
+- The affected entities of `useOfflineEntities()` have `isInMemoryOnly: true`.
+- The result of the `performMutation(...)` call that hit the failure is `{ kind: 'queued', inMemoryOnly: true }`.
+- While `inMemoryOnlyMutations` is not `0`, the store manager's [`blockWindowClose`](./mutations.md#window-close-blocking) stays held (once per store holding such changes), so the browser asks before closing or reloading the tab.
+- A change already stored is not counted when only the write recording a send attempt fails (sending it, or back to pending after a failed send): the stored version still holds it. A failed write that moves it to `needs-confirmation` or to a manual resolution does count: after a reload, the stored version would be sent again without that step.
+
+```tsx
+const { inMemoryOnlyMutations } = storeManager.useOfflineStatus();
+
+const storageWarning =
+  inMemoryOnlyMutations > 0
+    ? `${inMemoryOnlyMutations} changes are not stored on this device`
+    : null;
+```
+
+The count goes back to `0`, and the window close is released, once those changes are stored or leave the queue:
+
+- After any successful write of a store's offline records (e.g. the browser accepts a new IndexedDB connection and the user makes another change), TSDF writes that store's in-memory changes again.
+- A change that is synced, discarded or superseded leaves the queue, in this tab or because another tab sent it.
+- Changing the session key drops this tab's in-memory records of the previous session, including these changes.
+
+The count and the flags describe this tab: they are not persisted, and the status of the other tabs does not include them. Another open tab of the session also holds the change in memory (it can send it as the leading tab), but it does not count it. An entity flagged by another tab for a store this tab has not attached keeps the flag in this tab too.
+
 ### Per-item state
 
 Collection and list-query stores expose `useItemOfflineState(itemPayload)` / `getItemOfflineState(itemPayload)` for per-row UI such as sync badges. They return `null` when the item has nothing queued, otherwise `{ syncState, pendingMutations, requiresResolution, isUnsentCreation, creationAttempted }`:
@@ -743,10 +772,13 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `deleteOfflineUpload(id)`
 - `resolveOfflineUpload(id)`
 - `resolveOfflineUploads(ids)`
+- `getResolvedOfflineUploadRef(id)` — see [Following a released upload to its server ref](#following-a-released-upload-to-its-server-ref)
 - `useOfflineUploads()`
 - `useOfflineUploadFile(id)` — see [Rendering staged files](#rendering-staged-files)
 
-Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. An upload the operation can be sent without is declared as `{ id, optional: true }`, see [Optional uploads](#optional-uploads).
+
+Right after a reload the session lists its stored uploads in the background, so `getOfflineUploads()` is empty for a moment. A mutation (queued, run directly, or a `requeue`) whose operation declares `dependsOnUploads` waits for that list before calling it, so a `dependsOnUploads` that only returns the ids `getOfflineUploads()` still lists sees the restored uploads. Operations without `dependsOnUploads` only wait when called while an older mutation of the same store is still waiting, so they keep their place in the queue behind it. A mutation of another store called during that wait (a few milliseconds) does not wait and can replay first: when a change of another store needs the waiting one on the server first, await the first mutation before making it. If the app switches to another session meanwhile, the waiting mutation fails instead of running in the new session. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
 ### Direct runs
 
@@ -848,7 +880,7 @@ Set `resolvedRefSchema` to validate those refs. It accepts the same schemas as a
 - Refs restored from the upload adapter are parsed once when their record is loaded, and refs received from another tab once per record version.
 - A ref that fails the schema is dropped and its upload goes back to `pending`. The staged file is kept with the record, so the next `resolveOfflineUpload(s)` call or the replay of an operation that depends on the upload sends the file through the transport again and stores the new ref. The dependent operation is not failed, and `execute` never receives the invalid ref. The file uploaded under the old ref is not cleaned up by TSDF.
 - The exception is a ref another tab sends when it deletes an upload that was already sent: its staged file is gone, so a ref that fails the schema can't be uploaded again, and its id stops resolving (`resolveOfflineUpload(s)` returns an unknown upload error).
-- Queued operations only persist upload ids. Their refs are resolved when the operation replays, so they are covered by the same validation.
+- Queued operations only persist upload ids, plus the refs of uploads that were already sent and deleted when the operation was queued (see [Upload lifecycle](#upload-lifecycle)). Their refs are resolved when the operation replays, so they are covered by the same validation: a kept ref that fails the schema can't be uploaded again (its file is gone), so the id is unknown.
 - Without `resolvedRefSchema`, restored refs are exposed as they were stored.
 
 ### Upload metadata
@@ -911,7 +943,7 @@ A staged upload follows the queued work that depends on it:
 - References are session-wide. An upload declared by queued mutations of several stores is deleted only after the last of them is gone. Only stores created in the tab count: an upload staged with `saveOfflineUpload` and shared with a store that is not created in the tab yet (a code-split screen, or the app restarted on another screen) can be deleted when the stores already created release it, and that store's queued mutation then fails to replay. If an upload id is shared across lazily created stores, create those stores before their queued work replays, or stage a separate upload for each store. Files attached directly to a mutation don't have this limit: they record the store that queued them (see `storeName` above).
 - An upload that no queued work declared yet is never deleted for being unreferenced: the app stages the file first and queues the mutation afterwards. It stays until a mutation that declares it is queued and leaves the queue or runs directly, until the app calls `deleteOfflineUpload(id)`, or until it expires. Unreferenced uploads expire after the session has been online for one week without interruption (going offline restarts the window). This also applies to uploads the app resolves itself with `resolveOfflineUpload(s)`, e.g. for a mutation without `offline` descriptor, because they never enter the queue.
 
-After an upload that was already sent is deleted, its id keeps resolving to the same server ref for the rest of the app session, in every tab open when it was deleted: a mutation queued later that still declares it (for example from optimistic or draft data that was not updated with the server ref yet) replays with that ref without uploading again, and `resolveOfflineUpload(id)` returns it. This ref is kept in memory only: after a reload, in a tab opened later, or after `deleteOfflineUpload(id)`, the id is unknown again, so stage the file again with `saveOfflineUpload` before reusing it. Uploads deleted before they were sent (discarded, superseded or cancelled work) are not kept.
+After an upload that was already sent is deleted, its id keeps resolving to the same server ref for the rest of the app session, in every tab open when it was deleted: a mutation queued later that still declares it (for example from optimistic or draft data that was not updated with the server ref yet) replays with that ref without uploading again, and `resolveOfflineUpload(id)` returns it. The session keeps this ref in memory only, but a mutation queued in that window persists the ref with its queue entry (and with the resolution it may turn into), so it still replays with it after a reload or from a tab opened later. Elsewhere (a new mutation after a reload, in a tab opened later, or after `deleteOfflineUpload(id)`) the id is unknown again, so write the server ref into the data, or stage the file again with `saveOfflineUpload` before reusing it. Uploads deleted before they were sent (discarded, superseded or cancelled work) are not kept.
 
 Files attached directly to a mutation (`upload: { ... }` in `performMutation`) belong to that single queued mutation and are deleted with it in the same situations.
 
@@ -981,7 +1013,17 @@ function ImageNode({ uploadId }: { uploadId: string }) {
 }
 ```
 
-`resolvedRef` is the ref `resolveOfflineUpload(id)` returns for a sent upload that was deleted (see [Upload lifecycle](#upload-lifecycle)) and is kept for as long: in memory, for the rest of the app session, in every tab open when the upload was deleted. Tabs that show the staged file switch to the ref as soon as it is deleted, and components mounted later get it on their first render. It is `null` after a reload, in a tab opened later, after `deleteOfflineUpload(id)`, and for uploads deleted before they were sent, so data that must keep its file across reloads still needs the server ref written into it.
+Code that runs outside of render (building a mutation input, replacing ids in editor content, cleaning up removed files) reads the same ref synchronously with `storeManager.getResolvedOfflineUploadRef(id)`. It returns the `resolvedRef` of a staged upload in `uploaded` state (the entry `getOfflineUploads()` lists, also when another tab sent it), or the ref of a sent upload that was deleted, and `null` otherwise: not sent yet, last attempt failed, unknown id, or while the session is still restoring its stored uploads after a reload. It is typed with the upload ref of the manager.
+
+```ts
+function serializeBody(body: EditorContent) {
+  return replaceImageIds(body, (uploadId) =>
+    storeManager.getResolvedOfflineUploadRef(uploadId),
+  );
+}
+```
+
+`resolvedRef` is the ref `resolveOfflineUpload(id)` returns for a sent upload that was deleted (see [Upload lifecycle](#upload-lifecycle)) and is kept for as long: in memory, for the rest of the app session, in every tab open when the upload was deleted. Tabs that show the staged file switch to the ref as soon as it is deleted, and components mounted later get it on their first render. It is `null` after a reload, in a tab opened later (until queued work that kept the ref replays there), after `deleteOfflineUpload(id)`, and for uploads deleted before they were sent, so data that must keep its file across reloads still needs the server ref written into it.
 
 ### Upload failure handling
 
@@ -993,7 +1035,7 @@ When a queued operation with `dependsOnUploads` replays, a transport failure is 
 
 - **Connection problem or outage** - `classifyFailure` returns `'network'` or `'outage'` (and that mode is enabled, as for any other failure). The session enters that mode, the upload goes back to `pending` (with `lastError` set) and the operation stays queued. Replay runs the upload again when the session recovers. The replay retry budget is not consumed, however long the outage lasts.
 - **Transient failure that is safe to repeat** - `classifyFailure` returns `'ignore'` and `classifyRetryableFailure` returns `true`. The upload goes back to `pending` and is sent again on the `replayRetry` cadence (`intervalMs`, 5s by default). After `maxFailures` attempts (3 by default) it is handled as a permanent failure.
-- **Permanent failure** (file too large, type not accepted) - no hook recognizes the error, which is the default. The upload becomes `failed` and the operation moves right away to a `retry-exhausted` resolution: `lastReplayError` carries the upload error and `dependencyUploadIds` lists the uploads it depends on. Resolving it with `retry` requeues the operation, which runs the upload again; `discard` removes the operation and, when no other queued work declares the upload, deletes the staged file (see "Upload lifecycle").
+- **Permanent failure** (file too large, type not accepted) - no hook recognizes the error, which is the default. The upload becomes `failed` and the operation moves right away to a `retry-exhausted` resolution: `lastReplayError` carries the upload error and `dependencyUploadIds` lists the uploads it depends on. Resolving it with `retry` requeues the operation, which runs the upload again; `discard` removes the operation and, when no other queued work declares the upload, deletes the staged file (see "Upload lifecycle"). An [optional upload](#optional-uploads) is left out instead, and the operation is sent without it.
 
 `lastError` is cleared when an upload succeeds.
 
@@ -1044,6 +1086,35 @@ A transport failure while a [direct run](#direct-runs) resolves its uploads is c
 
 With the session gate closed, the failure is not classified: the mutation fails with it.
 
+#### Optional uploads
+
+An operation that can be sent without one of its files declares it as optional: `dependsOnUploads` returns `{ id, optional: true }` for it instead of the plain id. For example a document whose editor images can keep their local reference, while its cover is required:
+
+```ts
+dependsOnUploads: ({ input }) => [
+  input.coverId,
+  ...input.imageIds.map((id) => ({ id, optional: true })),
+],
+execute: ({ input, uploads }) =>
+  api.saveDoc({
+    ...input,
+    // A refused image is missing from `resolvedRefsById`: its local id stays
+    // in the body.
+    body: replaceImageIds(input.body, uploads.resolvedRefsById),
+  }),
+```
+
+When the server refuses an optional upload, the operation is sent without it instead of moving to manual resolution or failing:
+
+- Refused means the failure is permanent, as classified above. During replay: `classifyFailure` keeps the session online and `classifyRetryableFailure` returns `false`, or the replay retries of a retryable failure are used up. During a direct run: the session stays online and `classifyRetryableFailure`, called with `phase: 'mutation'` and `uploadId` set, returns `false`.
+- `execute` (or the direct `mutation`) runs with the other uploads. The refused id is missing from `uploads.resolvedRefsById` and listed in `uploads.refusedUploadErrorsById` with the error the transport threw, so the app can keep the local reference, drop it, or tell the user.
+- The refused upload is not deleted with the work that declared it, since it was not sent: it stays staged as `failed` with `lastError`, so `useOfflineUploadFile(id)` keeps rendering the file. Later work of the session that declares it as optional is sent without it the same way, without uploading the file again (an autosaving editor does not resend a rejected image on every save), and lists it in `refusedUploadErrorsById` with the same error. It is uploaded again when work declares it as required, when `resolveOfflineUpload(id)` is called, or once the id is staged again. After a reload the session no longer knows it was refused, so the next work declaring it uploads it once more. Delete it with `deleteOfflineUpload(id)` once the app no longer needs it, otherwise it expires like the uploads no mutation used.
+- A connection problem, an outage, or a retryable failure with retries left is handled as for a required upload: the operation waits and is sent with the file once it uploads. In a direct run a retryable failure fails the mutation with the upload error, so running it again uploads the file again.
+- A required upload that fails permanently still sends the operation to manual resolution, whatever happened to its optional uploads. An id returned both as a plain id and as optional is required.
+- With the session gate closed, upload failures are not classified, so a failed optional upload fails the mutation like a required one.
+- An async classifier answer is dropped when a newer classification (of any request of the session) starts before it answers, and the dropped answer decides nothing. A failed optional upload whose answer was dropped is handled like a required one, never as refused: a direct run fails with the upload error, and a replayed operation is retried or moves to manual resolution as for a required upload.
+- Queued work only persists the upload ids: the optional marks are read from the `dependsOnUploads` of the running deploy when an upload fails.
+
 #### `resolveOfflineUpload(s)`
 
 When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again. To let the session classify the failure (and possibly enter offline mode), pass the error to `storeManager.reportOfflineFailure(error)`; see [Failures of the app's own requests](#failures-of-the-apps-own-requests).
@@ -1053,6 +1124,6 @@ When the app uploads a staged file itself, a transport failure is returned to th
 - `pending` - staged and waiting to be uploaded, including uploads waiting for an automatic retry (those have `lastError` set).
 - `uploading` - the transport is running.
 - `uploaded` - the transport returned the final ref (`resolvedRef`).
-- `failed` - the last attempt failed and TSDF will not retry on its own. A `failed` upload is never blocked: it is uploaded again the next time an operation that depends on it is replayed or runs directly, or `resolveOfflineUpload(s)` is called for it.
+- `failed` - the last attempt failed and TSDF will not retry on its own. A `failed` upload is never blocked: it is uploaded again the next time an operation that depends on it is replayed or runs directly, or `resolveOfflineUpload(s)` is called for it. The exception is an optional upload the server refused: work of the same session declaring it as optional leaves it out without uploading it (see [Optional uploads](#optional-uploads)).
 
 Queued mutations and staged uploads live in browser storage (localStorage, IndexedDB, OPFS), which the browser may evict under storage pressure unless the origin was granted persistent storage. TSDF does not request it: `navigator.storage.persist()` is an origin-wide permission and some browsers prompt for it, so the app should call it at a moment of its choosing (for example when the first change is queued).

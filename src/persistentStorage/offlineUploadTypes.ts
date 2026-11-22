@@ -324,8 +324,9 @@ export type OfflineSessionUploadsConfig<
    * set, exactly like a failed `execute`: classify connection problems as
    * `'network'` / `'outage'` (or as retryable) so they are retried, and leave
    * permanent ones (file too large, type not accepted) unclassified so the
-   * operation goes to manual resolution. Throw errors those hooks can tell
-   * apart.
+   * operation goes to manual resolution, or is sent without the file when the
+   * operation declares the upload as optional. Throw errors those hooks can
+   * tell apart.
    */
   upload: (ctx: OfflineUploadTransportContext) => Promise<TResolvedRef>;
   /**
@@ -352,6 +353,27 @@ export type OfflineMutationUploadsInput = Record<string, Blob | File>;
 
 export type OfflineAttachedUploadIds = Record<string, string>;
 
+/**
+ * Upload declared by an operation's `dependsOnUploads`.
+ *
+ * - A plain id (or `{ id }`, `{ id, optional: false }`) is required: when the
+ *   server refuses the file (a failure no session classifier marks as offline
+ *   or retryable), the operation is not sent and moves to manual resolution,
+ *   or the direct run fails.
+ * - `{ id, optional: true }` is sent without that file instead: `execute`
+ *   (or the direct `mutation`) runs with the other uploads, the id is missing
+ *   from `resolvedRefsById` and listed in `refusedUploadErrorsById`. Upload
+ *   failures that are offline or retryable are handled as for a required id.
+ *   For the rest of the session, later work declaring a refused id as
+ *   optional leaves it out the same way without sending the file again,
+ *   until `resolveOfflineUpload(id)` is called or the id is staged again.
+ *
+ * An id returned both as required and as optional is required.
+ */
+export type OfflineUploadDependency =
+  | string
+  | { id: string; optional?: boolean };
+
 /** Resolved upload files and references available while an offline operation replays. */
 export type OfflineOperationUploadsContext<
   TResolvedRef extends ValidPayload = ValidPayload,
@@ -361,9 +383,19 @@ export type OfflineOperationUploadsContext<
   /**
    * Final uploaded refs by upload id, for the ids returned by
    * `dependsOnUploads`. Typed with the upload ref type of the operation
-   * definition.
+   * definition. Optional uploads the server refused are missing.
    */
   resolvedRefsById: Record<string, TResolvedRef>;
+  /**
+   * Uploads declared with `{ id, optional: true }` that the server refused,
+   * by id, with the error the `upload` transport threw. The operation is sent
+   * without them: keep the local reference in the data you send (or drop it).
+   * The staged file is kept as a `failed` upload, so it can still be rendered
+   * and retried with `resolveOfflineUpload(id)`, until `deleteOfflineUpload(id)`
+   * or the retention window removes it. Also lists ids refused earlier in the
+   * session, which are not sent again. Empty when nothing was refused.
+   */
+  refusedUploadErrorsById: Record<string, unknown>;
 };
 
 /**
@@ -379,9 +411,18 @@ export type OfflineDirectMutationUploadsContext<
    * `dependsOnUploads` returns for the mutation input. TSDF uploads them
    * before `mutation` is called, the same way it does before `execute` on
    * replay, and deletes the staged uploads once `mutation` succeeds. Empty
-   * when the operation declares no uploads.
+   * when the operation declares no uploads. Optional uploads the server
+   * refused are missing.
    */
   resolvedRefsById: Record<string, TResolvedRef>;
+  /**
+   * Uploads declared with `{ id, optional: true }` that the server refused,
+   * by id, with the error the `upload` transport threw, as on replay
+   * (including ids refused earlier in the session, which are not sent
+   * again). They are not deleted when `mutation` succeeds. Empty when
+   * nothing was refused.
+   */
+  refusedUploadErrorsById: Record<string, unknown>;
 };
 
 /**

@@ -4,6 +4,7 @@ import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { assertNoRequireFreshDataWithDebouncePayload } from '../utils/payloadDebounce';
 import {
+  RequireFreshData,
   ValidPayload,
   ValidStoreState,
   invalidPayloadError,
@@ -22,12 +23,15 @@ export type UseItemOptions<
   Selected,
 > = UseMultipleItemsOptions<ItemState, Selected> & {
   /**
-   * Unconditionally schedules a high-priority fetch on mount and reports
-   * `loading` until that refresh succeeds or fails, even when cached data
-   * exists. Use sparingly because each mount can cause an extra request.
-   * Cannot be combined with `debouncePayload`.
+   * Schedules a high-priority fetch on mount and reports `loading` until that
+   * refresh succeeds or fails, even when cached data exists. `true` refreshes
+   * on every mount, so use it sparingly. `'ifFromStorage'` only refreshes
+   * while the cached item was restored from persistent storage and not
+   * refreshed from the server yet in this tab. `'ifFromStorage'` is not
+   * supported with `partialResources`. Cannot be combined with
+   * `debouncePayload`.
    */
-  requireFreshData?: boolean;
+  requireFreshData?: RequireFreshData;
   /**
    * Partial-resource fields to request for this item.
    *
@@ -63,15 +67,17 @@ export function useItem<
     debouncePayload,
   }: UseItemOptions<ItemState, Selected>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
-  scheduleItemFetch: (
+  scheduleAutomaticItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
-    options?: { fields?: FieldsInput },
+    options: { fields?: FieldsInput } | undefined,
+    onSkipped: () => void,
   ) => ScheduleFetchResults,
   useMultipleItems: <S = ItemState | null>(
     items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
     options: UseMultipleItemsOptions<ItemState, S>,
   ) => readonly TSFDUseListItemReturn<S, ItemPayload, undefined>[],
+  isItemRestoredFromStorage: ((itemKey: string) => boolean) | undefined,
 ): TSFDUseListItemReturn<Selected, ItemPayload> {
   const isInvalidPayload = itemPayload === '';
   const hasPayload =
@@ -159,12 +165,28 @@ export function useItem<
   const [useModifyResult, markRefreshSettled] = useRequireFreshData(
     requireFreshData,
     hasPayload,
-    () => {
-      if (fetchQuery) {
-        scheduleItemFetch('highPriority', fetchQuery.payload, {
-          fields: fetchQuery.fields,
-        });
+    result.itemStateKey,
+    requireFreshData === 'ifFromStorage' &&
+      hasPayload &&
+      !!isItemRestoredFromStorage?.(result.itemStateKey),
+    (skipRefresh) => {
+      if (!fetchQuery) return;
+
+      // A refresh already in flight brings server data newer than the
+      // restored one, so it settles this hook without another request
+      if (
+        requireFreshData === 'ifFromStorage' &&
+        store.state.itemQueries[result.itemStateKey]?.status === 'refetching'
+      ) {
+        return;
       }
+
+      scheduleAutomaticItemFetch(
+        'highPriority',
+        fetchQuery.payload,
+        { fields: fetchQuery.fields },
+        skipRefresh,
+      );
     },
   );
 

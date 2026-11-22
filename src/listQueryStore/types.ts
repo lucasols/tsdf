@@ -331,7 +331,9 @@ export type OptimisticListUpdate<
    * affected query, so a single rule can decide membership from
    * `context.queryPayload` instead of needing one rule per query.
    *
-   * - `true`: the item should be in the query (added if missing)
+   * - `true`: the item should be in the query (added if missing). A query
+   *   that is not in memory is created with only the item, unless the store
+   *   has persistent storage, where it may have a saved copy and is left as is
    * - `false`: the item should not be in the query (removed if present)
    * - `null`: keep the membership as is and skip this rule for the query
    */
@@ -523,3 +525,16 @@ export type FieldsOption<HasPartialResources extends boolean> =
          */
         fields?: FieldsInput;
       };
+
+/**
+ * Options of `useItem` and `useListQuery` that change when `partialResources`
+ * is enabled.
+ */
+export type PartialResourcesHookOptions = FieldsOption<true> & {
+  /**
+   * `'ifFromStorage'` is not supported with `partialResources`: data restored
+   * from storage is tracked per item and query, not per field. Use `true`
+   * to refresh on mount.
+   */
+  requireFreshData?: boolean;
+};

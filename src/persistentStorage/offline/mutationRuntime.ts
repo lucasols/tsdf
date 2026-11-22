@@ -14,7 +14,8 @@ import type {
  * `online` means the direct request completed and returned the server payload.
  * `queued` means the mutation was queued for offline replay. It is normally
  * persisted, but if the queue write failed (reported through
- * `onPersistentStorageError`) it is only kept in memory until the page reloads.
+ * `onPersistentStorageError`) it is only kept in memory (`inMemoryOnly`) until
+ * the page reloads.
  */
 export type OfflineMutationResult<T> =
   | {
@@ -30,17 +31,41 @@ export type OfflineMutationResult<T> =
        * memory until the page reloads.
        */
       kind: 'queued';
+      /**
+       * Set (to `true`) when the queue write failed, so the mutation is only
+       * kept in memory: it is still synced, but reloading or closing the tab
+       * before that loses it. Only describes the moment the mutation was
+       * queued: follow `inMemoryOnlyMutations` in the offline status (or
+       * `isInMemoryOnly` on the offline entities) to know when a later write
+       * stored it or it synced.
+       */
+      inMemoryOnly?: true;
     };
 
 /** Outcome of resolving the dependency uploads of a direct run. */
 type DirectMutationUploadsResolution =
-  | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
-  | { failedUploadId: string; error: unknown };
+  | {
+      failedUploadId?: undefined;
+      refs: Record<string, ValidPayload>;
+      refusedUploadErrorsById: Record<string, unknown>;
+    }
+  | {
+      failedUploadId: string;
+      error: unknown;
+      /**
+       * `classifyError` result for this failure when it was already
+       * classified (an optional upload), so it is not classified again.
+       */
+      shouldQueue: boolean | undefined;
+    };
 
 export type PreparedOfflineMutation = {
   initialAction: 'run' | 'queue';
-  /** `afterDirectAttempt`: the direct request failed, so it may have been applied */
-  queueMutation: (afterDirectAttempt: boolean) => Promise<void>;
+  /**
+   * `afterDirectAttempt`: the direct request failed, so it may have been
+   * applied. Resolves with whether the queued work is only held in memory.
+   */
+  queueMutation: (afterDirectAttempt: boolean) => Promise<boolean>;
   /** `uploadId`: the failure came from resolving that dependency upload */
   classifyError: (
     error: unknown,
@@ -56,8 +81,17 @@ export type PreparedOfflineMutation = {
    * including the ones still being sent that fail too
    */
   markUploadsFailed: () => Promise<void>;
-  /** Also releases the dependency uploads the direct request consumed */
+  /**
+   * Also releases the dependency uploads the direct request consumed, which
+   * excludes the refused optional ones
+   */
   handleDirectSuccess: () => Promise<void>;
+  /**
+   * The mutation no longer holds its reserved queue position: it was queued
+   * (the queue write settled), or its direct run succeeded or failed without
+   * being queued
+   */
+  releaseQueueOrder: () => void;
 };
 
 export type OfflineAwareMutationController<
@@ -81,8 +115,9 @@ export type OfflineAwareMutationController<
 
 export function createDirectMutationContext(
   resolvedRefsById: Record<string, ValidPayload>,
+  refusedUploadErrorsById: Record<string, unknown> = {},
 ): OfflineDirectMutationContext {
-  return { uploads: { resolvedRefsById } };
+  return { uploads: { resolvedRefsById, refusedUploadErrorsById } };
 }
 
 export async function runHybridOfflineMutation<
@@ -107,32 +142,41 @@ export async function runHybridOfflineMutation<
   const prepared = await controller.prepareForMutation({ offline, upload });
 
   if (prepared.initialAction === 'queue') {
-    await prepared.queueMutation(false);
-    return { kind: 'queued' };
+    try {
+      return toQueuedResult(await prepared.queueMutation(false));
+    } finally {
+      prepared.releaseQueueOrder();
+    }
   }
 
   // Set when resolving a dependency upload failed, which means the direct
   // request was never sent.
   let failedUploadId: string | undefined;
+  let classifiedShouldQueue: boolean | undefined;
 
   try {
     let resolvedRefsById: Record<string, ValidPayload> = {};
+    let refusedUploadErrorsById: Record<string, unknown> = {};
     if (prepared.resolveDirectUploads) {
       const resolution = await prepared.resolveDirectUploads();
       if (resolution.failedUploadId !== undefined) {
         failedUploadId = resolution.failedUploadId;
+        classifiedShouldQueue = resolution.shouldQueue;
         throw resolution.error;
       }
       resolvedRefsById = resolution.refs;
+      refusedUploadErrorsById = resolution.refusedUploadErrorsById;
     }
 
     const data = await directMutation(
-      createDirectMutationContext(resolvedRefsById),
+      createDirectMutationContext(resolvedRefsById, refusedUploadErrorsById),
     );
     await prepared.handleDirectSuccess();
     return { kind: 'online', data };
   } catch (error) {
-    const shouldQueue = await prepared.classifyError(error, failedUploadId);
+    const shouldQueue =
+      classifiedShouldQueue ??
+      (await prepared.classifyError(error, failedUploadId));
     if (!shouldQueue) {
       if (failedUploadId !== undefined) await prepared.markUploadsFailed();
       throw error;
@@ -140,7 +184,19 @@ export async function runHybridOfflineMutation<
 
     // The queued mutation keeps declaring its uploads, so they stay staged
     // for the replay.
-    await prepared.queueMutation(failedUploadId === undefined);
-    return { kind: 'queued' };
+    return toQueuedResult(
+      await prepared.queueMutation(failedUploadId === undefined),
+    );
+  } finally {
+    prepared.releaseQueueOrder();
   }
+}
+
+function toQueuedResult(inMemoryOnly: boolean): {
+  kind: 'queued';
+  inMemoryOnly?: true;
+} {
+  return inMemoryOnly
+    ? { kind: 'queued', inMemoryOnly: true }
+    : { kind: 'queued' };
 }

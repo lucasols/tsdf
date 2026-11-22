@@ -124,6 +124,7 @@ function createEnv(options: {
   serverData?: Record<string, ItemState>;
   usesRealTimeUpdates?: boolean;
   onPersistentStorageError?: (error: unknown) => void;
+  persistenceEnabled?: () => boolean;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
@@ -138,6 +139,7 @@ function createEnv(options: {
       pinnedItems: options.pinnedItems,
       ignoreItems: options.ignoreItems,
       onPersistentStorageError: options.onPersistentStorageError,
+      enabled: options.persistenceEnabled,
     },
   });
 }
@@ -496,6 +498,68 @@ describe('localStorage: collection store persistence', () => {
     expect(
       listStoredItemKeys('col-ignore', 'sess1').sort(),
     ).toMatchInlineSnapshot(`['"keep:cached', '"keep:live']`);
+  });
+
+  test('disabled persistence neither restores nor saves items', async () => {
+    let persistenceEnabled = false;
+
+    // An item persisted by an earlier session where persistence was enabled
+    setCachedCollectionItem('col-switch', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
+
+    const env = createEnv({
+      storeName: 'col-switch',
+      sessionKey: 'sess1',
+      serverData: {
+        '1': { id: '1', name: 'Server 1' },
+        '2': { id: '2', name: 'Server 2' },
+      },
+      persistenceEnabled: () => persistenceEnabled,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const [first, second] = env.apiStore.useMultipleItems([
+        { payload: '1' },
+        { payload: '2' },
+      ]);
+      renders.add({
+        first: `${first?.status} ${first?.data?.value.name ?? null}`,
+        second: `${second?.status} ${second?.data?.value.name ?? null}`,
+      });
+    });
+    await flushAllTimers();
+
+    // The persisted item is not restored: both items load from the server
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> first: loading null ⋅ second: loading null
+      -> first: success Server 1 ⋅ second: loading null
+      -> first: success Server 1 ⋅ second: success Server 2
+      "
+    `);
+
+    // ...and the fetched items are not saved
+    expect(listStoredItemPayloads('col-switch', 'sess1')).toMatchInlineSnapshot(
+      `['1']`,
+    );
+    expect(
+      persistentStore.scope('col-switch', 'sess1').collection.readItemData('1'),
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Cached' }`);
+
+    // Once enabled, the next fetch results are saved again
+    persistenceEnabled = true;
+    env.apiStore.invalidateItem(() => true);
+    await flushAllTimers();
+
+    expect(
+      listStoredItemPayloads('col-switch', 'sess1').sort(),
+    ).toMatchInlineSnapshot(`['1', '2']`);
+    expect(
+      persistentStore.scope('col-switch', 'sess1').collection.readItemData('1'),
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Server 1' }`);
   });
 
   test('when maxBytes is exceeded, pinnedItems keeps that payload in storage', async () => {

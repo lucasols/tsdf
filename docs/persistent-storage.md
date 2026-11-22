@@ -10,6 +10,7 @@ See also: [Document Store](./document-store.md) | [Collection Store](./collectio
 - Persists successful fetch results back to local storage.
 - Invalidates and drops cache entries when schema or version checks fail.
 - Uses session scoped keys, so data is isolated per tenant/account.
+- Restored data is served right away and revalidated like other cached data. Hooks that must not use restored data before it is refreshed can pass [`requireFreshData: 'ifFromStorage'`](./hooks.md#iffromstorage).
 
 ## Public API
 
@@ -55,6 +56,7 @@ Common options (applies to all store configs):
 | `adapter`                         | Yes      | `'local-sync'`, `opfsPersistentStorage`, `indexedDbPersistentStorage`, or a custom async adapter.                                |
 | `version`                         | No       | Cache version; bump to invalidate old entries.                                                                                   |
 | `onPersistentStorageError(error)` | No       | Store-specific callback for write/read failures (quota, decode, etc.). Overrides the manager fallback; use `null` to disable it. |
+| `enabled()`                       | No       | Runtime switch for this store's persistence. See [Disabling persistence at runtime](#disabling-persistence-at-runtime).          |
 
 Store-specific options:
 
@@ -180,7 +182,7 @@ If the second attempt also fails, the error is reported through `onPersistentSto
 
 #### When a write fails
 
-A persistence write that still fails after the recovery above is reported through `onPersistentStorageError` and dropped. In-memory store state is not affected and the app keeps working; the entry keeps its previous persisted value (or stays absent) until the store saves it again. See [Offline](./offline.md#queuing-mutations) for what this means for queued mutations.
+A persistence write that still fails after the recovery above is reported through `onPersistentStorageError` and dropped. In-memory store state is not affected and the app keeps working; the entry keeps its previous persisted value (or stays absent) until the store saves it again. See [Offline - Changes not stored on the device](./offline.md#changes-not-stored-on-the-device) for what this means for queued mutations.
 
 ### Custom async adapters
 
@@ -361,6 +363,47 @@ When a row before one of the rows that are left is missing, or no row is left, t
 - Online, hooks report `status: 'loading'` and fetch the query right away, as for a query that was never cached. The remaining rows are available in `items` meanwhile (stores using [Partial Resources](./partial-resources.md) hide items while loading, as usual).
 - Offline, the fetch fails with the offline error: hooks report `status: 'error'` with `error.id === 'offline'` and the remaining rows in `items`, so a screen can show what is left of the list together with a notice that it is incomplete. `awaitListQueryFetch` returns the offline error instead of the incomplete list. A loaded list doesn't load more rows from such a cached list while offline (`loadMore` is skipped and `hasMore` is `false`), since its next rows may come after a missing one.
 - The stored query is left as it is until the list is fetched again, so the next start sees the same state. With `local-sync`, the query entry rewritten after an eviction lists only the rows that are left, and is flagged (`"m": true`) as incomplete unless only its last rows were evicted (then it is saved with `"h": true`).
+
+## Disabling persistence at runtime
+
+`enabled` turns a store's persistence off without recreating the store, for
+example in public or portal sessions that must not keep data on the device:
+
+```ts
+const docContentStore = createCollectionStore<DocContent, string>({
+  // ...
+  persistentStorage: {
+    adapter: 'local-sync',
+    schema: docContentSchema,
+    payloadSchema: rc_string,
+    enabled: () => !auth.isPublicSession,
+  },
+});
+```
+
+TSDF calls it every time the store would read or write storage. While it
+returns `false`, the store works as if it had no persistence, for its items
+and its queries alike (`ignoreItems` only skips items):
+
+- Nothing is restored: data saved by an earlier session, for example an
+  authenticated one on the same device, is not shown and hooks load from the
+  server.
+- Nothing is saved, including the data fetched while it is disabled.
+- `reset()` doesn't remove the data saved before, and turning persistence off
+  doesn't remove it either. Use `clearSessionStorage` /
+  `clearAllSessionStorage` to delete stored data.
+- Only this store is affected. Other stores and browser tabs sync keep working,
+  unlike a `getSessionKey` that returns `false`, which disables persistence and
+  tabs sync for every store.
+- The offline queue is kept separately and keeps working: edits queued offline
+  are saved and sent as usual. While offline, reads have no stored data to
+  fall back to, so after a reload hooks report the offline error until the
+  connection is back.
+
+Once it returns `true` again, the next changes are saved, including the data
+fetched while it was disabled. Switch it at session boundaries, together with
+a store `reset()` when the data in memory must not be saved under the new
+session.
 
 ## Clearing stored data
 

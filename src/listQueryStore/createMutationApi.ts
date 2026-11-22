@@ -305,6 +305,18 @@ export function createMutationApi<
   onItemMutationsEnd: () => void,
   /** Offline creations not sent yet: local-only items that cannot be refetched. */
   unsentCreationItemKeys: ReadonlySet<string>,
+  /**
+   * Whether queries that are not in memory may have a copy in persistent
+   * storage, which optimistic list updates must not replace.
+   */
+  hasPersistentStorage: boolean,
+  /**
+   * Captures again the offline overlays of items with queued work after a
+   * local optimistic change, so hooks show the change before it is queued.
+   */
+  recaptureOfflineOverlays: (itemKeys: Iterable<string>) => void,
+  /** Items whose data was restored from persistent storage, if persisted. */
+  restoredItemKeys: Set<string> | undefined,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -338,6 +350,7 @@ export function createMutationApi<
       | Map<string, DroppedFieldInvalidation>
       | undefined;
     invalidationWasTriggered: boolean;
+    restoredFromStorage: boolean;
   };
   type ListQueryItemRollback = {
     itemKey: string;
@@ -418,6 +431,7 @@ export function createMutationApi<
       droppedFieldInvalidations:
         droppedFieldInvalidations && new Map(droppedFieldInvalidations),
       invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
+      restoredFromStorage: !!restoredItemKeys?.has(itemKey),
     };
   }
 
@@ -704,6 +718,11 @@ export function createMutationApi<
             } else {
               itemInvalidationWasTriggered.delete(itemKey);
             }
+
+            // Deleting an item drops its restored from storage mark, which the
+            // restored data brings back. Only a fetch clears it otherwise, and
+            // that changes the item metadata, so the tracking isn't restored.
+            if (tracking.restoredFromStorage) restoredItemKeys?.add(itemKey);
           }
 
           // Newer data kept until the revalidation, or still carrying another
@@ -743,6 +762,8 @@ export function createMutationApi<
           );
         }
       });
+
+      recaptureOfflineOverlays(revertedItems.keys());
     }
 
     if (keptDataItemKeys.size > 0) addQueriesShowingKeptData();
@@ -794,6 +815,17 @@ export function createMutationApi<
       });
     }
 
+    lockOptimisticMutationQuery(context, queryKey);
+  }
+
+  /**
+   * Makes the fetches of the query wait for the mutation to settle, so they
+   * can't return data that predates it.
+   */
+  function lockOptimisticMutationQuery(
+    context: OptimisticMutationQueryContext,
+    queryKey: string,
+  ): void {
     if (context.lockedQueryKeys.has(queryKey)) return;
 
     context.lockedQueryKeys.add(queryKey);
@@ -1327,6 +1359,13 @@ export function createMutationApi<
       deferredOptimisticQueryInvalidationsStack[
         deferredOptimisticQueryInvalidationsStack.length - 1
       ];
+    // Resolved before the draft is created: a filter reads the saved queries
+    // that are not in memory, and with sync storage that loads them into the
+    // state, so the draft must already include them
+    const rulesWithQueries = optimisticListUpdates.map((rule) => ({
+      rule,
+      relatedFilterQueries: getQueriesKeyArray(rule.queries),
+    }));
 
     store.produceState((draftState) => {
       for (const { itemKey, payload: itemPayload } of items) {
@@ -1352,14 +1391,9 @@ export function createMutationApi<
         };
 
         for (const {
-          queries,
-          filterItem,
-          appendNewTo = 'end',
-          invalidateQueries,
-          sort,
-        } of optimisticListUpdates) {
-          const relatedFilterQueries = getQueriesKeyArray(queries);
-
+          rule: { filterItem, appendNewTo = 'end', invalidateQueries, sort },
+          relatedFilterQueries,
+        } of rulesWithQueries) {
           for (const { key: queryKey, payload } of relatedFilterQueries) {
             const queryState = draftState.queries[queryKey];
 
@@ -1389,6 +1423,19 @@ export function createMutationApi<
               if (itemShouldBeIncluded === null) continue;
 
               if (itemShouldBeIncluded) {
+                // A query only in persistent storage (not loaded yet, being
+                // loaded, or evicted from memory) would be replaced by a list
+                // with only this item. It is left as is: a query restored from
+                // storage is refetched when it is used. That refetch waits for
+                // the mutation, or it could return the query without the item.
+                // There is no rollback snapshot, so a rollback doesn't delete
+                // the query restored meanwhile.
+                if (!queryState && hasPersistentStorage) {
+                  const context = getCurrentOptimisticMutationQueryContext();
+                  if (context) lockOptimisticMutationQuery(context, queryKey);
+                  continue;
+                }
+
                 captureAndLockOptimisticMutationQuery(queryKey);
 
                 if (!queryState) {
@@ -1633,6 +1680,12 @@ export function createMutationApi<
   ) {
     const itemKey = getItemKey(itemPayload);
     const previousState = store.state;
+    // Resolved before the draft is created: a filter reads the saved queries
+    // that are not in memory, and with sync storage that loads them into the
+    // state, so the draft must already include them
+    const queriesToAddTo =
+      options.addItemToQueries &&
+      getQueriesKeyArray(options.addItemToQueries.queries);
 
     store.batch(() => {
       store.produceState(
@@ -1649,12 +1702,8 @@ export function createMutationApi<
             payload: klona(itemPayload),
           };
 
-          if (options.addItemToQueries) {
-            const queries = getQueriesKeyArray(
-              options.addItemToQueries.queries,
-            );
-
-            for (const { key } of queries) {
+          if (options.addItemToQueries && queriesToAddTo) {
+            for (const { key } of queriesToAddTo) {
               const queryState = draftState.queries[key];
               if (!queryState) continue;
 
@@ -2001,9 +2050,22 @@ export function createMutationApi<
             );
 
             try {
-              return runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(payloadToUse),
+              const updateResult = runWithBroadcastConsistency(
+                'optimistic',
+                () => optimisticUpdate(payloadToUse),
               );
+
+              if (updateResult !== false) {
+                recaptureOfflineOverlays(
+                  filterAndMap(itemSnapshots, ({ itemKey, before }) =>
+                    store.state.items[itemKey] !== before.item
+                      ? itemKey
+                      : false,
+                  ),
+                );
+              }
+
+              return updateResult;
             } finally {
               optimisticMutationQueryContextStack.pop();
               deferredOptimisticQueryInvalidationsStack.pop();

@@ -94,12 +94,14 @@ function createOfflineDocumentEnv({
   testScenario,
   onExecute,
   startedLongBeforeTestTime = false,
+  persistenceEnabled,
 }: {
   adapter: 'local-sync' | typeof opfsPersistentStorage;
   sessionKey: string;
   storeName: string;
   testScenario: 'idle' | 'loaded';
   onExecute?: (input: { value: number }) => void;
+  persistenceEnabled?: () => boolean;
   /** The app ran days before `TEST_INITIAL_TIME`. */
   startedLongBeforeTestTime?: boolean;
 }) {
@@ -122,6 +124,7 @@ function createOfflineDocumentEnv({
     persistentStorage: {
       adapter,
       schema: docSchema,
+      enabled: persistenceEnabled,
       offline: {
         operations: {
           updateValue: {
@@ -712,6 +715,85 @@ test('local-sync offline persistence replays queued data when a new browser sess
   expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
     `[]`,
   );
+
+  hook.unmount();
+});
+
+test('edits queued offline are kept and sent while the store persistence is disabled', async () => {
+  const sessionKey = 'offline-persistence-disabled-session';
+  const storeName = 'offline-persistence-disabled-doc';
+  const replayedInputs: { value: number }[] = [];
+
+  network.setOffline();
+
+  const firstEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+    persistenceEnabled: () => false,
+  });
+
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // The edit is queued, but the edited document is not saved over the one
+  // the 'loaded' scenario seeded in storage
+  expect(firstEnv.apiStore.getOfflineEntities()).toHaveLength(1);
+  expect(
+    localStorage.getItem(`tsdf.${sessionKey}.${storeName}`),
+  ).toMatchInlineSnapshot(`"{"d":{"value":1}}"`);
+
+  // The app is reopened once the connection is back
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+
+  const restartedEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+    onExecute: (input) => {
+      replayedInputs.push(input);
+    },
+    persistenceEnabled: () => false,
+  });
+  const hook = renderHook(() =>
+    restartedEnv.apiStore.useDocument({ returnRefetchingStatus: true }),
+  );
+
+  await flushAllTimers();
+
+  // The queued edit is sent, and storage still only holds the seeded document
+  expect(replayedInputs).toMatchInlineSnapshot(`- value: 2`);
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '❌'
+    status: 'success'
+  `);
+  expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+    `[]`,
+  );
+  expect(
+    localStorage.getItem(`tsdf.${sessionKey}.${storeName}`),
+  ).toMatchInlineSnapshot(`"{"d":{"value":1}}"`);
 
   hook.unmount();
 });
