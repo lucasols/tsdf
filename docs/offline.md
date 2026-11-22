@@ -870,7 +870,7 @@ The hook returns an `OfflineUploadFile`, a union narrowed by `status`:
 - `url` — object URL of the staged file, managed by TSDF. Only set on `success`
 - `file` — the staged `File`, for reading its contents. Only set on `success`
 - `error` — the read failure. Only set on `error`
-- `resolvedRef` — the server ref of an upload that was sent and then deleted with the queued work that used it. Only set on `missing`, see [Following a released upload to its server ref](#following-a-released-upload-to-its-server-ref)
+- `resolvedRef` — the server ref of an upload that was sent and then deleted with the queued work or [direct run](#direct-runs) that used it. Only set on `missing`, see [Following a released upload to its server ref](#following-a-released-upload-to-its-server-ref)
 
 Caching and URL lifetime:
 
@@ -886,7 +886,7 @@ The file follows the upload record, not its upload state: it stays available whi
 - Uploads staged with `saveOfflineUpload` are deleted once the last queued work that declares them leaves the queue (see [Upload lifecycle](#upload-lifecycle)). They are also deleted once a mutation that declares them [runs directly](#direct-runs). Files attached with `performMutation({ upload })` are removed once their mutation replayed. Uploads no mutation declared stay until `deleteOfflineUpload` or retention removes them.
 - A replayed mutation releases its uploads after its `onSuccessExecute` ran (and, for a temp entity create, after the result replaced the temp entity). When `onSuccessExecute` writes the server ref into the entity, the local file stays renderable until that render, and from then on the component passes a falsy id and renders the server file.
 - A [direct run](#direct-runs) releases its uploads once `mutation` resolves, before `onSuccess` and the `revalidateOnSuccess` refetch. Write the server ref into the entity inside `mutation` to get the same handoff.
-- Otherwise the entity keeps the local ref until it is revalidated after the replay or direct run, so the hook can report `missing` for a moment in between. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
+- Otherwise the entity keeps the local ref until it is revalidated after the replay or direct run, so the hook reports `missing` in between. In the tabs open when the upload was deleted, that `missing` carries the server ref in `resolvedRef` (see [Following a released upload to its server ref](#following-a-released-upload-to-its-server-ref)), so the component can render the uploaded file until the entity is revalidated. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
 
 Outside of these windows, a local ref paired with `missing` and no `resolvedRef` means the staged file was deleted or expired, not that it is about to appear.
 
