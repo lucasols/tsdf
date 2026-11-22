@@ -562,7 +562,19 @@ type UpdateRecordOperations = {
   >;
 };
 
-function createUpdateRecordEnv(sessionKey: string, storeName: string) {
+function createUpdateRecordEnv(
+  sessionKey: string,
+  storeName: string,
+  {
+    sendAppBlockEditsAlone = false,
+  }: {
+    /**
+     * App block edits are never merged into earlier work, while other edits
+     * can merge into anything, including an app block edit.
+     */
+    sendAppBlockEditsAlone?: boolean;
+  } = {},
+) {
   const execute = vi
     .fn<
       (ctx: {
@@ -605,9 +617,13 @@ function createUpdateRecordEnv(sessionKey: string, storeName: string) {
               kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               accumulation: {
-                // Only edits made with the same permissions are combined
+                // Only edits made with the same permissions are combined, or
+                // with `sendAppBlockEditsAlone`, any edit but an app block one
                 canMerge: ({ existingInput, incomingInput }) =>
-                  existingInput.permissionCtx === incomingInput.permissionCtx,
+                  sendAppBlockEditsAlone
+                    ? incomingInput.permissionCtx !== 'app-block'
+                    : existingInput.permissionCtx ===
+                      incomingInput.permissionCtx,
                 mergeInput: ({ incomingInput }) => incomingInput,
               },
               execute,
@@ -778,6 +794,52 @@ test('a table edit made together with a refused app block edit is not merged ahe
   ).toMatchInlineSnapshot(`['Ada table 1', 'Ada block', 'Ada table 2']`);
   expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
     `name: 'Ada table 2'`,
+  );
+});
+
+test('an edit made together with a later edit that is sent alone is not merged into it, and the server ends with the last edit', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-can-merge-alone-session';
+  const storeName = 'offline-accumulation-can-merge-alone';
+  const { env, execute, updateRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+    { sendAppBlockEditsAlone: true },
+  );
+
+  // Offline: a table edit is queued
+  await updateRecord('table', 'Ada table 1');
+  await advanceTime(50);
+
+  // Then the app sends another table edit and an app block edit of the record
+  // at once (e.g. two blocks saving on the same blur). The table edit is made
+  // first, so it merges into the first one, while the app block edit, which
+  // is always sent alone, is queued after it
+  await Promise.all([
+    updateRecord('table', 'Ada table 2'),
+    updateRecord('app-block', 'Ada block'),
+  ]);
+
+  // The table edit is not merged into the newer app block edit, which would
+  // replace the app block edit with the older table edit
+  expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada block', permissionCtx: 'app-block' }
+      operation: 'updateRecord'
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Sent in the order the edits were made: the server keeps the last one
+  expect(
+    execute.mock.calls.map(([ctx]) => ctx.input.name),
+  ).toMatchInlineSnapshot(`['Ada table 2', 'Ada block']`);
+  expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
+    `name: 'Ada block'`,
   );
 });
 

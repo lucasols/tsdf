@@ -2134,6 +2134,12 @@ export function createOfflineStoreController<
   function findAccumulationCandidate(args: {
     operationName: string;
     entityRefs: OfflineEntityRef[];
+    /**
+     * The queue order of the incoming mutation. Entries ordered after it come
+     * from mutations made after it (queued while it was planned), so they are
+     * neither merged into nor block a merge: they are sent after it anyway.
+     */
+    queueOrder: number;
     entries?: Iterable<OfflineQueueEntry>;
   }): OfflineQueueEntry | null {
     const normalizedEntityRefs = normalizeEntityRefs(args.entityRefs);
@@ -2141,6 +2147,8 @@ export function createOfflineStoreController<
     let newestEntityEntry: OfflineQueueEntry | null = null;
 
     for (const entry of args.entries ?? queueEntries.values()) {
+      if (getQueueOrder(entry) > args.queueOrder) continue;
+
       if (
         entry.entityRefs.some((entryRef) =>
           args.entityRefs.some((entityRef) =>
@@ -4322,6 +4330,7 @@ export function createOfflineStoreController<
         : findAccumulationCandidate({
             operationName,
             entityRefs,
+            queueOrder,
             entries: workingQueue.values(),
           });
       const existingWork = heldResolution ?? existingEntry;
@@ -4565,14 +4574,16 @@ export function createOfflineStoreController<
       // drop the incoming input or send the existing one twice, so the
       // mutation is planned again. The same applies to held work merged into
       // when it changes meanwhile, and to an entry that is no longer the
-      // newest candidate (e.g. a concurrent mutation whose merge was refused
-      // queued a newer one, which merging into the older entry would send
-      // after it). The check runs with no `await` before the commit below.
+      // newest candidate (e.g. an earlier concurrent mutation whose merge was
+      // refused queued a newer one, which merging into the older entry would
+      // send after it). The check runs with no `await` before the commit
+      // below.
       if (
         (!plannedMutation.accumulatedEntry ||
           findAccumulationCandidate({
             operationName: plannedMutation.operationName,
             entityRefs: plannedMutation.accumulatedEntry.entityRefs,
+            queueOrder,
           }) === plannedMutation.accumulatedEntry) &&
         (!plannedMutation.accumulatedResolution ||
           resolutions.get(plannedMutation.accumulatedResolution.id) ===
