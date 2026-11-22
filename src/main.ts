@@ -114,6 +114,8 @@ export type {
 } from './persistentStorage/types';
 
 export type {
+  OfflineDirectMutationContext,
+  OfflineDirectMutationUploadsContext,
   OfflineMutationUploadsInput,
   OfflineOperationUploadsContext,
   OfflineSessionUploadsConfig,

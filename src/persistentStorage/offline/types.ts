@@ -839,8 +839,9 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   loadOfflineUpload: (id: string) => Promise<File | null>;
   /**
    * Deletes a stored upload that no queued work references. Only needed for
-   * uploads no queued mutation used: the others are deleted with the work that
-   * depends on them.
+   * uploads no mutation used: the others are deleted with the queued work
+   * that depends on them, or once the mutation that declares them ran
+   * directly.
    */
   deleteOfflineUpload: (id: string) => Promise<void>;
   /** React hook subscribing to the session's global offline status. */
@@ -1081,6 +1082,31 @@ export type OfflineMutationInput<
   >,
   TName extends keyof TOperations & string = keyof TOperations & string,
 > = OfflineMutationDescriptor<TOperations, TName>;
+
+/**
+ * Upload ref type the operations of a store read in `execute`, from the ref
+ * type argument of their definitions. Falls back to `ValidPayload` for stores
+ * without operations.
+ */
+export type OfflineOperationsUploadRef<TOperations> = [
+  {
+    [K in keyof TOperations]: TOperations[K] extends {
+      execute: (ctx: infer TCtx) => unknown;
+    }
+      ? TCtx extends {
+          uploads: {
+            resolvedRefsById: Record<string, infer TRef extends ValidPayload>;
+          };
+        }
+        ? TRef
+        : never
+      : never;
+  }[keyof TOperations],
+] extends [infer TRef extends ValidPayload]
+  ? [TRef] extends [never]
+    ? ValidPayload
+    : TRef
+  : ValidPayload;
 
 /**
  * Extracts operation result type from a registered operation map.

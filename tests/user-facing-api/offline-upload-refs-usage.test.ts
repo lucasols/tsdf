@@ -33,7 +33,8 @@ import { resetSessionForTests } from '../utils/resetSessionForTests';
 
 // Type-level usage tests for the upload ref type: what an app gets, without
 // narrowing by hand, from `createStoreManager`, from the manager upload APIs
-// and inside the `execute` of queued operations of the three store types.
+// and inside the `execute` of queued operations and the direct `mutation` of
+// the three store types.
 //
 // The runtime behavior of uploads is covered by
 // `tests/offline/offline-uploads.test.tsx`; here the assertions are the
@@ -375,7 +376,23 @@ test('document store operations read the typed upload ref in execute', () => {
     >();
   };
 
+  // A mutation that runs online reads the same typed refs. Not called: only
+  // the types are checked here.
+  const saveAvatar = () =>
+    documentStore.performMutation({
+      mutation: ({ uploads }) => {
+        const uploadedFile_ = uploads.resolvedRefsById['avatar-1'];
+        typingTest.expectTypesAreEqual<
+          typeof uploadedFile_,
+          UploadedFileRef | undefined
+        >();
+        return Promise.resolve(undefined);
+      },
+      offline: { operation: 'setAvatar', input: { uploadId: 'avatar-1' } },
+    });
+
   expect(typeof untypedExecute).toBe('function');
+  expect(typeof saveAvatar).toBe('function');
   expect(storeManager.getAllStoreIds()).toMatchInlineSnapshot(`
     ['upload-refs-document']
   `);
@@ -441,6 +458,25 @@ test('collection store operations read the typed upload ref in execute', () => {
     },
   });
 
+  // A mutation that runs online reads the same typed refs, in its second
+  // argument. Not called: only the types are checked here.
+  const attachFile = () =>
+    collectionStore.performMutation('todo-1', {
+      mutation: (_payload, { uploads }) => {
+        const uploadedFile_ = uploads.resolvedRefsById['file-1'];
+        typingTest.expectTypesAreEqual<
+          typeof uploadedFile_,
+          UploadedFileRef | undefined
+        >();
+        return Promise.resolve(undefined);
+      },
+      offline: {
+        operation: 'attachFile',
+        input: { id: 'todo-1', uploadId: 'file-1' },
+      },
+    });
+
+  expect(typeof attachFile).toBe('function');
   expect(storeManager.getAllStoreIds()).toMatchInlineSnapshot(`
     ['upload-refs-collection']
   `);
@@ -519,6 +555,28 @@ test('list query store operations read the typed upload ref in execute', () => {
     },
   });
 
+  // A mutation that runs online reads the same typed refs, in its second
+  // argument. Not called: only the types are checked here.
+  const setAvatar = () =>
+    listQueryStore.performMutation(
+      { id: 1 },
+      {
+        mutation: (_payload, { uploads }) => {
+          const uploadedFile_ = uploads.resolvedRefsById['avatar-1'];
+          typingTest.expectTypesAreEqual<
+            typeof uploadedFile_,
+            UploadedFileRef | undefined
+          >();
+          return Promise.resolve(undefined);
+        },
+        offline: {
+          operation: 'setAvatar',
+          input: { id: 1, uploadId: 'avatar-1' },
+        },
+      },
+    );
+
+  expect(typeof setAvatar).toBe('function');
   expect(storeManager.getAllStoreIds()).toMatchInlineSnapshot(`
     ['upload-refs-list-query']
   `);

@@ -26,6 +26,7 @@ import {
 } from '../navigatorLocks';
 import type {
   OfflineAttachedUploadIds,
+  OfflineDirectMutationContext,
   OfflineMutationUploadsInput,
 } from '../offlineUploadTypes';
 import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
@@ -40,7 +41,11 @@ import {
   getOfflineStoreEntityLookup,
   toItemOfflineState,
 } from './entityMetadata';
-import type { PreparedOfflineMutation } from './mutationRuntime';
+import {
+  createDirectMutationContext,
+  type OfflineAwareMutationController,
+  type PreparedOfflineMutation,
+} from './mutationRuntime';
 import {
   getOfflineSessionAppVersion,
   getOfflineSessionUploadsConfig,
@@ -534,6 +539,7 @@ export type OfflineStoreController<
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;
   }) => Promise<PreparedOfflineMutation>;
+  runUnqueuedMutation: OfflineAwareMutationController<TOperations>['runUnqueuedMutation'];
   queueMutation: <TName extends keyof TOperations & string>(args: {
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;
@@ -5219,6 +5225,8 @@ export function createOfflineStoreController<
     });
     await current.session.refreshNetworkState();
 
+    const { dependencyUploadIds } = prepared;
+
     return {
       initialAction: getInitialOfflineMutationAction(current, prepared),
       queueMutation: (afterDirectAttempt) =>
@@ -5227,6 +5235,15 @@ export function createOfflineStoreController<
             ? { ...prepared, mayHaveBeenApplied: true }
             : prepared,
         ),
+      // Resolved like on replay: a failed upload stays `pending` until the
+      // failure is classified, since it is retried if the mutation is queued.
+      resolveDirectUploads:
+        dependencyUploadIds.length > 0
+          ? () => current.session.resolveReplayUploadIds(dependencyUploadIds)
+          : null,
+      // Like replay: the uploads that did not fail are left untouched.
+      markUploadsFailed: () =>
+        current.session.markUploadsFailed(dependencyUploadIds),
       handleDirectSuccess: async () => {
         // Before the offline status is cleared, which resumes the replay, so
         // that the other stores drop their work for the deleted entities
@@ -5240,9 +5257,16 @@ export function createOfflineStoreController<
             );
           }
         }
+        // The request consumed its uploads, as a replayed entry does. Not
+        // awaited, so removing the files does not delay the result.
+        if (dependencyUploadIds.length > 0) {
+          void deleteOrphanedDependencyUploads(current, [
+            { dependencyUploadIds },
+          ]);
+        }
         await clearOfflineStatusOnSuccess(prepared.currentSessionKey);
       },
-      classifyError: async (error) => {
+      classifyError: async (error, uploadId) => {
         const preparedCurrent = ensureActiveSession();
         if (
           !preparedCurrent ||
@@ -5258,12 +5282,14 @@ export function createOfflineStoreController<
           return isMutationQueueingAllowed(activeCauseAfterRefresh);
         }
 
-        await preparedCurrent.session.classifyFailure(error, {
+        const failureCtx: OfflineFailureContext = {
           phase: 'mutation',
           storeType,
           operationName: prepared.operationName,
           sessionKey: preparedCurrent.sessionKey,
-        });
+        };
+        if (uploadId !== undefined) failureCtx.uploadId = uploadId;
+        await preparedCurrent.session.classifyFailure(error, failureCtx);
 
         const activeCauseAfterClassification =
           getActiveMutationQueueingCause(preparedCurrent);
@@ -5273,6 +5299,38 @@ export function createOfflineStoreController<
           : false;
       },
     };
+  }
+
+  async function runUnqueuedMutation<
+    T,
+    TName extends keyof TOperations & string,
+  >(
+    offline: OfflineMutationInput<TOperations, TName>,
+    directMutation: (ctx: OfflineDirectMutationContext) => Promise<T>,
+  ): Promise<T> {
+    const operationName: string = offline.operation;
+    const current = operations[operationName]?.dependsOnUploads
+      ? ensureActiveSession()
+      : null;
+    const dependencyUploadIds = current
+      ? prepareMutationWithSession(current, {
+          operation: offline.operation,
+          input: offline.input,
+        }).dependencyUploadIds
+      : [];
+    if (!current || dependencyUploadIds.length === 0) {
+      return directMutation(createDirectMutationContext({}));
+    }
+
+    // Nothing is queued, so a failed upload is `failed` right away, as with
+    // `resolveOfflineUploads`.
+    const result = await directMutation(
+      createDirectMutationContext(
+        await current.session.resolveUploadIds(dependencyUploadIds),
+      ),
+    );
+    void deleteOrphanedDependencyUploads(current, [{ dependencyUploadIds }]);
+    return result;
   }
 
   function getOfflineEntities(): GlobalOfflineEntity[] {
@@ -5594,6 +5652,7 @@ export function createOfflineStoreController<
     hydrateIfNeeded,
     canQueueMutation,
     prepareForMutation,
+    runUnqueuedMutation,
     queueMutation,
     getOfflineEntities,
     getItemOfflineState,

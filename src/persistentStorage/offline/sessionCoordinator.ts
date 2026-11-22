@@ -1821,14 +1821,17 @@ class SessionOfflineCoordinator {
    *
    * Store controllers call this after a queue entry or resolution record left
    * the queue for good (replayed, discarded, superseded, cancelled), passing
-   * the uploads that work depended on. It must run after the store synced its
-   * remaining references: they are aggregated session-wide, so an upload is
-   * kept while a queue entry or resolution record of any store references it.
+   * the uploads that work depended on, and after the direct run of a mutation
+   * that declares uploads succeeded, passing the uploads it consumed (which
+   * queued work may never have referenced). It must run after the store
+   * synced its remaining references: they are aggregated session-wide, so an
+   * upload is kept while a queue entry or resolution record of any store
+   * references it.
    *
-   * Uploads no queued work referenced are never passed here: the app stages a
-   * file before it queues the mutation, so being unreferenced alone must not
-   * delete an upload. Those are left to `deleteUpload` and to the retention
-   * window.
+   * Only uploads that some work consumed or dropped are passed here: the app
+   * stages a file before it queues or runs the mutation, so being
+   * unreferenced alone must not delete an upload. The others are left to
+   * `deleteUpload` and to the retention window.
    */
   async deleteUnreferencedUploads(uploadIds: readonly string[]): Promise<void> {
     if (this.#disposed) return;
@@ -1909,10 +1912,11 @@ class SessionOfflineCoordinator {
   }
 
   /**
-   * Resolves the dependency uploads of a replaying operation. A failure is
-   * returned with the id of the upload that caused it instead of thrown, and
-   * leaves that upload `pending`: replay classifies the failure first and
-   * calls `markUploadFailed` only when it gives up on the operation.
+   * Resolves the dependency uploads of a replaying operation, or of a direct
+   * run that can still be queued. A failure is returned with the id of the
+   * upload that caused it instead of thrown, and leaves that upload `pending`:
+   * the caller classifies the failure first and calls `markUploadsFailed` only
+   * when it gives up on the operation.
    */
   async resolveReplayUploadIds(
     uploadIds: readonly string[],

@@ -5,16 +5,19 @@ import type { StandardSchemaLike } from './types';
  * Lifecycle state for a session-scoped offline upload.
  *
  * - `pending`: staged and waiting to be uploaded. An upload whose transport
- *   failed during replay with a failure TSDF retries on its own (session went
- *   offline, or the failure was classified as retryable) goes back to
+ *   failed with a failure TSDF retries on its own (during replay: session
+ *   went offline, or the failure was classified as retryable; during a direct
+ *   run of a dependent mutation: the mutation was queued) goes back to
  *   `pending` with `lastError` set.
  * - `uploading`: the `upload` transport is running.
  * - `uploaded`: the transport returned the final ref (`resolvedRef`).
  * - `failed`: the last transport attempt failed and TSDF will not retry on
- *   its own: the dependent operation was moved to manual resolution, or the
+ *   its own: the dependent operation was moved to manual resolution, the
+ *   direct run of a dependent mutation failed without being queued, or the
  *   upload was started through `resolveOfflineUpload(s)`. A failed upload is
  *   not blocked: it is uploaded again when a dependent operation is replayed
- *   (resolution `retry`) or `resolveOfflineUpload(s)` is called again.
+ *   (resolution `retry`) or run again, or `resolveOfflineUpload(s)` is called
+ *   again.
  */
 export type OfflineUploadState =
   | 'pending'
@@ -332,4 +335,33 @@ export type OfflineOperationUploadsContext<
    * definition.
    */
   resolvedRefsById: Record<string, TResolvedRef>;
+};
+
+/**
+ * Uploads passed to the `mutation` of a `performMutation(...)` call with an
+ * `offline` descriptor when it runs directly (online), instead of being
+ * queued.
+ */
+export type OfflineDirectMutationUploadsContext<
+  TResolvedRef extends ValidPayload = ValidPayload,
+> = {
+  /**
+   * Final uploaded refs by upload id, for the ids the operation's
+   * `dependsOnUploads` returns for the mutation input. TSDF uploads them
+   * before `mutation` is called, the same way it does before `execute` on
+   * replay, and deletes the staged uploads once `mutation` succeeds. Empty
+   * when the operation declares no uploads.
+   */
+  resolvedRefsById: Record<string, TResolvedRef>;
+};
+
+/**
+ * Extra context passed to the `mutation` of a `performMutation(...)` call
+ * with an `offline` descriptor.
+ */
+export type OfflineDirectMutationContext<
+  TResolvedRef extends ValidPayload = ValidPayload,
+> = {
+  /** Uploads the operation declares with `dependsOnUploads`, already resolved. */
+  uploads: OfflineDirectMutationUploadsContext<TResolvedRef>;
 };

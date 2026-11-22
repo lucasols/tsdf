@@ -210,8 +210,9 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
   /**
    * Deletes a stored upload that no queued work references. Only needed for
-   * uploads no queued mutation used: the others are deleted with the work that
-   * depends on them.
+   * uploads no mutation used: the others are deleted with the queued work
+   * that depends on them, or once the mutation that declares them ran
+   * directly.
    */
   deleteOfflineUpload: (id: string) => Promise<ResultType<void, Error>>;
   /** React hook subscribing to the manager's aggregated offline status. */

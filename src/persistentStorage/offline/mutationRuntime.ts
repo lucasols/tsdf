@@ -1,4 +1,8 @@
-import type { OfflineMutationUploadsInput } from '../offlineUploadTypes';
+import type { ValidPayload } from '../../utils/storeShared';
+import type {
+  OfflineDirectMutationContext,
+  OfflineMutationUploadsInput,
+} from '../offlineUploadTypes';
 import type {
   OfflineMutationInput,
   OfflineOperationSchemaShape,
@@ -28,11 +32,31 @@ export type OfflineMutationResult<T> =
       kind: 'queued';
     };
 
+/** Outcome of resolving the dependency uploads of a direct run. */
+type DirectMutationUploadsResolution =
+  | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
+  | { failedUploadId: string; error: unknown };
+
 export type PreparedOfflineMutation = {
   initialAction: 'run' | 'queue';
   /** `afterDirectAttempt`: the direct request failed, so it may have been applied */
   queueMutation: (afterDirectAttempt: boolean) => Promise<void>;
-  classifyError: (error: unknown) => Promise<boolean>;
+  /** `uploadId`: the failure came from resolving that dependency upload */
+  classifyError: (
+    error: unknown,
+    uploadId: string | undefined,
+  ) => Promise<boolean>;
+  /**
+   * Uploads the operation's dependency uploads before the direct request.
+   * `null` when the operation declares none for this input.
+   */
+  resolveDirectUploads: (() => Promise<DirectMutationUploadsResolution>) | null;
+  /**
+   * Marks the dependency uploads `failed` when a failed upload was not queued,
+   * including the ones still being sent that fail too
+   */
+  markUploadsFailed: () => Promise<void>;
+  /** Also releases the dependency uploads the direct request consumed */
   handleDirectSuccess: () => Promise<void>;
 };
 
@@ -44,22 +68,40 @@ export type OfflineAwareMutationController<
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;
   }) => Promise<PreparedOfflineMutation>;
+  /**
+   * Runs the direct request of a mutation that can't be queued (session gate
+   * closed), with the dependency uploads resolved before it and released
+   * after it succeeds.
+   */
+  runUnqueuedMutation: <T, TName extends keyof TOperations & string>(
+    offline: OfflineMutationInput<TOperations, TName>,
+    directMutation: (ctx: OfflineDirectMutationContext) => Promise<T>,
+  ) => Promise<T>;
 };
+
+export function createDirectMutationContext(
+  resolvedRefsById: Record<string, ValidPayload>,
+): OfflineDirectMutationContext {
+  return { uploads: { resolvedRefsById } };
+}
 
 export async function runHybridOfflineMutation<
   T,
   TOperations extends Record<string, OfflineOperationSchemaShape>,
   TName extends keyof TOperations & string,
 >(
-  controller: OfflineAwareMutationController<TOperations> | null | undefined,
-  offline: OfflineMutationInput<TOperations, TName> | undefined,
+  controller: OfflineAwareMutationController<TOperations>,
+  offline: OfflineMutationInput<TOperations, TName>,
   upload: OfflineMutationUploadsInput | undefined,
-  directMutation: () => Promise<T>,
+  directMutation: (ctx: OfflineDirectMutationContext) => Promise<T>,
 ): Promise<OfflineMutationResult<T>> {
-  if (!offline || !controller) {
-    throw new Error(
-      'runHybridOfflineMutation requires an offline mutation and controller',
-    );
+  // Without an active offline session (no session key, or the session gate
+  // is closed) it runs as a plain online mutation
+  if (!controller.canQueueMutation()) {
+    return {
+      kind: 'online',
+      data: await controller.runUnqueuedMutation(offline, directMutation),
+    };
   }
 
   const prepared = await controller.prepareForMutation({ offline, upload });
@@ -69,17 +111,36 @@ export async function runHybridOfflineMutation<
     return { kind: 'queued' };
   }
 
+  // Set when resolving a dependency upload failed, which means the direct
+  // request was never sent.
+  let failedUploadId: string | undefined;
+
   try {
-    const data = await directMutation();
+    let resolvedRefsById: Record<string, ValidPayload> = {};
+    if (prepared.resolveDirectUploads) {
+      const resolution = await prepared.resolveDirectUploads();
+      if (resolution.failedUploadId !== undefined) {
+        failedUploadId = resolution.failedUploadId;
+        throw resolution.error;
+      }
+      resolvedRefsById = resolution.refs;
+    }
+
+    const data = await directMutation(
+      createDirectMutationContext(resolvedRefsById),
+    );
     await prepared.handleDirectSuccess();
     return { kind: 'online', data };
   } catch (error) {
-    const shouldQueue = await prepared.classifyError(error);
+    const shouldQueue = await prepared.classifyError(error, failedUploadId);
     if (!shouldQueue) {
+      if (failedUploadId !== undefined) await prepared.markUploadsFailed();
       throw error;
     }
 
-    await prepared.queueMutation(true);
+    // The queued mutation keeps declaring its uploads, so they stay staged
+    // for the replay.
+    await prepared.queueMutation(failedUploadId === undefined);
     return { kind: 'queued' };
   }
 }

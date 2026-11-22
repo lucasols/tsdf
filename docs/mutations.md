@@ -113,7 +113,9 @@ When a mutation uses the `offline` option, the success value is `OfflineMutation
 - `{ kind: 'online', data }` when the direct mutation completed.
 - `{ kind: 'queued' }` when TSDF persisted the mutation for offline replay.
 
-When only some calls may be queued, pass `offline: descriptor | undefined` (and `upload: files | undefined`) in a single call instead of writing it twice. `undefined` runs a plain online mutation, and the success value is typed as the union `T | OfflineMutationResult<T>`:
+The `mutation` callback of such a call also gets the uploads the offline operation declares, already uploaded: as `uploads` in the document store context, and in a second `{ uploads }` argument for collection and list query stores. See [Offline - Direct runs](./offline.md#direct-runs).
+
+When only some calls may be queued, pass `offline: descriptor | undefined` (and `upload: files | undefined`) in a single call instead of writing it twice. `undefined` runs a plain online mutation, and the success value is typed as the union `T | OfflineMutationResult<T>`. The uploads `mutation` gets are optional then: set when the descriptor is, `undefined` otherwise:
 
 ```ts
 const result = await store.performMutation('item-id', {
