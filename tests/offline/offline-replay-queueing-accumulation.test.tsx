@@ -540,23 +540,22 @@ test('collection offline accumulation keeps a single persisted queue entry and r
   );
 });
 
-test('offline accumulation keeps edits apart when canMerge refuses, and sends them in order', async () => {
-  network.setOffline();
-  const sessionKey = 'offline-accumulation-can-merge-session';
-  const storeName = 'offline-accumulation-can-merge';
+/**
+ * A record whose edits carry the permission context they were made with (e.g.
+ * a table view or an app block): the server checks the edit against it, so
+ * edits with different contexts must reach it as separate requests. Offline
+ * edits with the same context are merged.
+ */
+type UpdateRecordOperations = {
+  updateRecord: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { itemId: string; permissionCtx: string; name: string },
+    unknown
+  >;
+};
 
-  // An edit of a record carries the permission context it was made with
-  // (e.g. a table view or an app block): the server checks the edit against
-  // it, so edits with different contexts must reach it as separate requests.
-  type UpdateRecordOperations = {
-    updateRecord: CollectionOfflineOperationDefinition<
-      { value: { name: string } },
-      string,
-      { itemId: string; permissionCtx: string; name: string },
-      unknown
-    >;
-  };
-
+function createUpdateRecordEnv(sessionKey: string, storeName: string) {
   const execute = vi
     .fn<
       (ctx: {
@@ -635,6 +634,18 @@ test('offline accumulation keeps edits apart when canMerge refuses, and sends th
     });
   }
 
+  return { env, execute, updateRecord };
+}
+
+test('offline accumulation keeps edits apart when canMerge refuses, and sends them in order', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-can-merge-session';
+  const storeName = 'offline-accumulation-can-merge';
+  const { env, execute, updateRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+  );
+
   // Two table edits, an app block edit and another table edit of the same
   // record, made offline
   await updateRecord('table', 'Ada table 1');
@@ -685,6 +696,52 @@ test('offline accumulation keeps edits apart when canMerge refuses, and sends th
     `);
   expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
     `[]`,
+  );
+});
+
+test('a table edit made together with a refused app block edit is not merged ahead of it, and the server ends with the last edit', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-can-merge-concurrent-session';
+  const storeName = 'offline-accumulation-can-merge-concurrent';
+  const { env, execute, updateRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+  );
+
+  // Offline: a table edit is queued
+  await updateRecord('table', 'Ada table 1');
+  await advanceTime(50);
+
+  // Then the app sends an app block edit and another table edit of the record
+  // at once, without waiting for the first one to be queued (e.g. two blocks
+  // saving on the same blur)
+  await Promise.all([
+    updateRecord('app-block', 'Ada block'),
+    updateRecord('table', 'Ada table 2'),
+  ]);
+
+  // The app block edit is queued apart. The second table edit is not merged
+  // into the first one, which would send it before the app block edit
+  expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', name: 'Ada table 1', permissionCtx: 'table' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada block', permissionCtx: 'app-block' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+      operation: 'updateRecord'
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Sent in the order the edits were made: the server keeps the last one
+  expect(
+    execute.mock.calls.map(([ctx]) => ctx.input.name),
+  ).toMatchInlineSnapshot(`['Ada table 1', 'Ada block', 'Ada table 2']`);
+  expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
+    `name: 'Ada table 2'`,
   );
 });
 

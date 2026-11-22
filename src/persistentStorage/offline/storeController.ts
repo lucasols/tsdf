@@ -4515,6 +4515,9 @@ export function createOfflineStoreController<
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
     }
+    // Reserved right away: a mutation made while this one is planned is
+    // queued after it, in the order the user made them.
+    nextQueueOrder = nextQueueOrderValue;
     let plannedMutation: PlannedQueuedMutation;
     let pendingEntityQueriesLoaded = false;
     for (;;) {
@@ -4541,12 +4544,16 @@ export function createOfflineStoreController<
       // being merged into before it is committed. Merging into it then would
       // drop the incoming input or send the existing one twice, so the
       // mutation is planned again. The same applies to held work merged into
-      // when it changes meanwhile. The check runs with no `await` before the
-      // commit below.
+      // when it changes meanwhile, and to an entry that is no longer the
+      // newest candidate (e.g. a concurrent mutation whose merge was refused
+      // queued a newer one, which merging into the older entry would send
+      // after it). The check runs with no `await` before the commit below.
       if (
         (!plannedMutation.accumulatedEntry ||
-          queueEntries.get(plannedMutation.accumulatedEntry.id) ===
-            plannedMutation.accumulatedEntry) &&
+          findAccumulationCandidate({
+            operationName: plannedMutation.operationName,
+            entityRefs: plannedMutation.accumulatedEntry.entityRefs,
+          }) === plannedMutation.accumulatedEntry) &&
         (!plannedMutation.accumulatedResolution ||
           resolutions.get(plannedMutation.accumulatedResolution.id) ===
             plannedMutation.accumulatedResolution)
@@ -4575,7 +4582,6 @@ export function createOfflineStoreController<
       validatedInput: unknown;
       pendingEntities: PendingTempEntity[];
     }> = [];
-    const previousNextQueueOrder = nextQueueOrder;
 
     try {
       const appliedMutation: AppliedQueuedMutation = {
@@ -4645,8 +4651,6 @@ export function createOfflineStoreController<
         appliedMutation.removedResolutionsApplied.push(removedResolution);
         await removeResolution(removedResolution.id, current, true);
       }
-
-      nextQueueOrder = nextQueueOrderValue;
 
       if (
         storeAdapter.applyPendingEntity &&
@@ -4737,7 +4741,6 @@ export function createOfflineStoreController<
         }
       }
 
-      nextQueueOrder = previousNextQueueOrder;
       refreshDerivedState(current);
 
       throw error;
