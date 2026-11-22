@@ -281,8 +281,12 @@ test('a staged file can be rendered again after an app reload, and components sh
     -> component: late ⋅ status: success ⋅ url: blob:staged-1 ⋅ fileName: photo.png
     "
   `);
-  // The restored file carries the original bytes.
-  expect(await lateHook.result.current.file?.text()).toBe('photo bytes');
+  // The restored file carries the original bytes, read from storage.
+  expect(
+    await resolveAfterAllTimers(
+      Promise.resolve(lateHook.result.current.file?.text()),
+    ),
+  ).toBe('photo bytes');
   expect(storage.reads).toMatchInlineSnapshot(`['list']`);
 
   // The URL stays alive while at least one consumer is mounted...

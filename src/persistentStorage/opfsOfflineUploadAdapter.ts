@@ -158,12 +158,12 @@ function getUploadPath(sessionKey: string, encodedId: string): string {
 class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
   #rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
   /**
-   * Upload paths whose stored binary holds each file, for the files this
+   * The file each upload path's stored binary holds, for the binaries this
    * driver wrote or restored. Restored files are read lazily from their
    * binary, so writing one over its own binary would leave it unreadable
    * (browsers fail reads of a file snapshot once the file changed).
    */
-  readonly #storedFilePaths = new WeakMap<File, Set<string>>();
+  readonly #storedFiles = new Map<string, File>();
 
   async save<TResolvedRef extends ValidPayload>(
     sessionKey: string,
@@ -179,16 +179,18 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
 
     // State changes save the record again with the same file, so the binary
     // is only written when it doesn't already hold this file. It is written
-    // before the metadata, so a failed write keeps the previous record whole.
+    // before the metadata, so a failed binary write keeps the previous record.
     const isFileStored =
-      this.#storedFilePaths.get(file)?.has(uploadPath) === true &&
+      this.#storedFiles.get(uploadPath) === file &&
       (await getFileHandleIfExists(uploadDir, BINARY_FILE_NAME)) !== null;
     if (!isFileStored) {
       const binaryHandle = await uploadDir.getFileHandle(BINARY_FILE_NAME, {
         create: true,
       });
+      // The binary no longer holds the previous file once the write starts
+      this.#storedFiles.delete(uploadPath);
       await writeFile(binaryHandle, file);
-      this.#addStoredFilePath(file, uploadPath);
+      this.#storedFiles.set(uploadPath, file);
     }
 
     const metadataHandle = await uploadDir.getFileHandle(METADATA_FILE_NAME, {
@@ -247,6 +249,7 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     const sessionDir = await this.#getSessionDir(sessionKey, false);
     if (!sessionDir) return;
 
+    this.#storedFiles.delete(getUploadPath(sessionKey, encodePathSegment(id)));
     try {
       await sessionDir.removeEntry(encodePathSegment(id), { recursive: true });
     } catch {
@@ -255,6 +258,13 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
   }
 
   async clearSession(sessionKey: string): Promise<void> {
+    const sessionPathPrefix = `${encodePathSegment(sessionKey)}/`;
+    for (const uploadPath of this.#storedFiles.keys()) {
+      if (uploadPath.startsWith(sessionPathPrefix)) {
+        this.#storedFiles.delete(uploadPath);
+      }
+    }
+
     const rootDir = await this.#getExistingRootDir();
     if (!rootDir) return;
 
@@ -269,12 +279,7 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
 
   resetForTests(): void {
     this.#rootDirPromise = null;
-  }
-
-  #addStoredFilePath(file: File, uploadPath: string): void {
-    const paths = this.#storedFilePaths.get(file);
-    if (paths) paths.add(uploadPath);
-    else this.#storedFilePaths.set(file, new Set([uploadPath]));
+    this.#storedFiles.clear();
   }
 
   async #loadFromDir<TResolvedRef extends ValidPayload>(
@@ -316,7 +321,7 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
           lastModified: metadataRecord.lastModified,
         },
       );
-      this.#addStoredFilePath(file, uploadPath);
+      this.#storedFiles.set(uploadPath, file);
 
       return { ...metadataRecord, file };
     } catch {

@@ -1011,7 +1011,9 @@ test('uploads named metadata.json still rehydrate their original bytes after res
     )
   ).unwrap();
   expect(restoredFile?.name).toBe('metadata.json');
-  expect(await restoredFile?.text()).toBe('real file bytes');
+  expect(
+    await resolveAfterAllTimers(Promise.resolve(restoredFile?.text())),
+  ).toBe('real file bytes');
 });
 
 function createOpfsUploadSession(sessionKey: string) {
@@ -1217,6 +1219,54 @@ test('replacing a file while the session is still restoring stored uploads updat
   uploadHook.unmount();
 });
 
+test('undoing a file replacement by staging the previous file again keeps that file after a reload', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-undo-replace-session';
+
+  // --- Setup: offline, the user attaches a photo ---
+  network.setOffline();
+  const session = createOpfsUploadSession(sessionKey);
+  await flushAllTimers();
+  const originalPhoto = textFile('original photo', 'original.jpg', 1);
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({ id: 'photo', file: originalPhoto }),
+    )
+  ).unwrap();
+
+  // --- Action: they replace it with an edited photo, then undo the edit,
+  // which stages the same original `File` again ---
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({
+        id: 'photo',
+        file: textFile('edited photo, longer', 'edited.jpg', 2),
+      }),
+    )
+  ).unwrap();
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({ id: 'photo', file: originalPhoto }),
+    )
+  ).unwrap();
+
+  // --- Reload: the restored upload is the original photo, with its own
+  // bytes, not the edited photo's bytes under the original name ---
+  resetSessionForTests();
+  const reloadedSession = createOpfsUploadSession(sessionKey);
+  const restoredFile = (
+    await resolveAfterAllTimers(reloadedSession.loadOfflineUpload('photo'))
+  ).unwrap();
+
+  expect({
+    name: restoredFile?.name,
+    text: await resolveAfterAllTimers(Promise.resolve(restoredFile?.text())),
+  }).toMatchInlineSnapshot(`
+    name: 'original.jpg'
+    text: 'original photo'
+  `);
+});
+
 test('replacing an upload right after a restart keeps the metadata saved before the restart', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'offline-upload-metadata-replace-after-restart-session';
@@ -1384,6 +1434,10 @@ test('restoring staged uploads after a reload reads only their metadata, and a r
       id: 'video-1'
       type: 'video/mp4'
   `);
+  // Sending it is the first read of the staged video's bytes.
+  expect(getOpfsOperationPaths('readFile')).toMatchInlineSnapshot(
+    `['video-1/binary.blob']`,
+  );
   // Each state change of the upload (uploading, uploaded) only rewrites its
   // metadata: the staged video is never copied again.
   expect(getOpfsOperationPaths('writeFile')).toMatchInlineSnapshot(

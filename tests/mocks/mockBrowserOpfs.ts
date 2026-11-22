@@ -130,6 +130,45 @@ async function normalizeWritableData(
   return { bytes, raw: bytesToString(bytes) };
 }
 
+const NativeFile = globalThis.File;
+
+/**
+ * Files returned by a mocked `getFile()`, and files built from one, whose reads
+ * go through the instrumented reads of the snapshot.
+ */
+const opfsSnapshotFiles = new WeakSet<Blob>();
+
+/**
+ * In browsers a `File` built from an OPFS file snapshot stays backed by the
+ * stored file: reading it reads storage and fails once the file changed.
+ * happy-dom copies the bytes of blob parts instead, so a file built from a
+ * single snapshot forwards its reads to it.
+ */
+class MockOpfsBackedFile extends NativeFile {
+  readonly #snapshot: Blob | undefined;
+
+  constructor(parts: BlobPart[], name: string, options?: FilePropertyBag) {
+    super(parts, name, options);
+    const [part] = parts;
+    if (
+      parts.length === 1 &&
+      part instanceof Blob &&
+      opfsSnapshotFiles.has(part)
+    ) {
+      this.#snapshot = part;
+      opfsSnapshotFiles.add(this);
+    }
+  }
+
+  override arrayBuffer(): Promise<ArrayBuffer> {
+    return this.#snapshot ? this.#snapshot.arrayBuffer() : super.arrayBuffer();
+  }
+
+  override text(): Promise<string> {
+    return this.#snapshot ? this.#snapshot.text() : super.text();
+  }
+}
+
 function createDomException(name: string, message: string): DOMException {
   return new DOMException(message, name);
 }
@@ -783,11 +822,15 @@ export class MockBrowserOpfsEnvironment {
         }
 
         // A real `File`, like the browser returns, so it can be used as a
-        // part of other blobs. Reads through `arrayBuffer` / `text` are
-        // instrumented and fail once the snapshot is stale, as in browsers.
-        const snapshotFile = new File([snapshotBytes.slice()], node.name, {
-          lastModified: Date.now(),
-        });
+        // part of other blobs. Reads through `arrayBuffer` / `text`, also of
+        // files built from it, are instrumented and fail once the snapshot is
+        // stale, as in browsers.
+        const snapshotFile = new NativeFile(
+          [snapshotBytes.slice()],
+          node.name,
+          { lastModified: Date.now() },
+        );
+        opfsSnapshotFiles.add(snapshotFile);
         return Object.assign(snapshotFile, {
           async arrayBuffer(): Promise<ArrayBuffer> {
             let { completionTime: arrayBufferCompletionTime } =
@@ -961,6 +1004,11 @@ export async function flushMockBrowserOpfsLatenciesForTests(): Promise<void> {
 }
 
 function installMockBrowserOpfsForTests(): void {
+  Object.defineProperty(globalThis, 'File', {
+    value: MockOpfsBackedFile,
+    writable: true,
+    configurable: true,
+  });
   Object.defineProperty(globalThis.navigator, 'storage', {
     value: {
       getDirectory: async () =>
