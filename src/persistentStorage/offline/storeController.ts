@@ -161,7 +161,7 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
   }) => void;
   syncEntityOverlays?: (args: {
     sessionKey: string;
-    entities: GlobalOfflineEntity[];
+    entities: InternalGlobalOfflineEntity[];
   }) => void;
   /**
    * A queued mutation for these entities was discarded. Its optimistic
