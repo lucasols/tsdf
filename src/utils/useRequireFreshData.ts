@@ -13,7 +13,11 @@ type RequireFreshDataResultModifier = <
 export function useRequireFreshData(
   requireFreshData: boolean | undefined,
   enabled: boolean,
-  forceFetch: () => void,
+  /**
+   * Schedules the fetch, or calls `skipRefresh` when there is nothing to fetch
+   * (e.g. an item that only exists locally), so the result stops loading
+   */
+  forceFetch: (skipRefresh: () => void) => void,
 ): readonly [RequireFreshDataResultModifier, () => void] {
   const refreshSettledEvtEmitter = useConst(() =>
     evtmitter<{ refreshSettled: boolean }>(),
@@ -25,7 +29,7 @@ export function useRequireFreshData(
     requireFreshData && isWaitingForRefresh && enabled,
     ({ current }) => {
       if (current) {
-        forceFetch();
+        forceFetch(() => setIsWaitingForRefresh(false));
       }
     },
     { callOnMount: true },

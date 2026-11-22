@@ -2043,31 +2043,40 @@ export function createCollectionStore<
     return firstResult;
   }
 
+  /**
+   * Schedules a fetch hooks start on their own, skipping unsent creations;
+   * `onSkipped` is called when the fetch is skipped.
+   */
   function scheduleAutomaticFetch(
     fetchType: FetchType,
     payload: ItemPayload,
+    onSkipped?: () => void,
   ): void {
     // The unsent creations are only known once the queued work is read, e.g.
     // for a screen mounted at startup
     if (offlineController && !offlineController.isHydrated()) {
       const schedule = () => {
-        scheduleAutomaticFetchOfKnownItem(fetchType, payload);
+        scheduleAutomaticFetchOfKnownItem(fetchType, payload, onSkipped);
       };
       void offlineController.hydrateIfNeeded().then(schedule, schedule);
       return;
     }
 
-    scheduleAutomaticFetchOfKnownItem(fetchType, payload);
+    scheduleAutomaticFetchOfKnownItem(fetchType, payload, onSkipped);
   }
 
   function scheduleAutomaticFetchOfKnownItem(
     fetchType: FetchType,
     payload: ItemPayload,
+    onSkipped: (() => void) | undefined,
   ): void {
     const itemKey = getItemKey(payload);
     // Only exists locally until its creation is confirmed, so the server
     // doesn't know it yet
-    if (unsentCreationItemKeys.has(itemKey)) return;
+    if (unsentCreationItemKeys.has(itemKey)) {
+      onSkipped?.();
+      return;
+    }
 
     const scheduler = getScheduler(itemKey, payload);
     scheduler.scheduleFetch(itemKey, fetchType, payload);
@@ -2387,7 +2396,7 @@ export function createCollectionStore<
       payload,
       options,
       store,
-      scheduleFetch,
+      scheduleAutomaticFetch,
       useMultipleItems,
     );
   }

@@ -789,11 +789,20 @@ describe('tasks whose creation waits for a manual decision', () => {
         selector: (task) => task?.name ?? null,
       }),
     );
+    // A screen that requires fresh data always fetches the task when it
+    // mounts
+    const freshTaskScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Plan trip', {
+        selector: (task) => task?.name ?? null,
+        requireFreshData: true,
+      }),
+    );
     await flushAllTimers();
 
     // The server doesn't know the task until its creation is sent again, so
-    // it is not fetched: the screen shows the local task instead of a
-    // not-found error
+    // it is not fetched, not even by the screen that requires fresh data:
+    // both screens show the local task instead of a not-found error, and the
+    // one that requires fresh data doesn't keep loading
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
@@ -803,8 +812,15 @@ describe('tasks whose creation waits for a manual decision', () => {
       error: null
       status: 'success'
     `);
+    expect(pick(freshTaskScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Plan trip'
+      error: null
+      status: 'success'
+    `);
 
     taskScreen.unmount();
+    freshTaskScreen.unmount();
   });
 });
 

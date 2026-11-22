@@ -1193,11 +1193,19 @@ describe('collection items', () => {
         selector: (item) => item?.value.name ?? null,
       }),
     );
+    // A screen that requires fresh data always fetches the item when it mounts
+    const freshNoteScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Ideas', {
+        selector: (item) => item?.value.name ?? null,
+        requireFreshData: true,
+      }),
+    );
     await flushAllTimers();
 
     // The server doesn't know the note until its creation is confirmed, so it
-    // is not fetched: the screen shows the local note instead of a not-found
-    // error
+    // is not fetched, not even by the screen that requires fresh data: both
+    // screens show the local note instead of a not-found error, and the one
+    // that requires fresh data doesn't keep loading
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
@@ -1207,8 +1215,15 @@ describe('collection items', () => {
       error: null
       status: 'success'
     `);
+    expect(pick(freshNoteScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Ideas'
+      error: null
+      status: 'success'
+    `);
 
     noteScreen.unmount();
+    freshNoteScreen.unmount();
   });
 });
 

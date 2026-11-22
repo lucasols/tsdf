@@ -63,10 +63,11 @@ export function useItem<
     debouncePayload,
   }: UseItemOptions<ItemState, Selected>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
-  scheduleItemFetch: (
+  scheduleAutomaticItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
-    options?: { fields?: FieldsInput },
+    options: { fields?: FieldsInput } | undefined,
+    onSkipped: () => void,
   ) => ScheduleFetchResults,
   useMultipleItems: <S = ItemState | null>(
     items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
@@ -159,11 +160,14 @@ export function useItem<
   const [useModifyResult, markRefreshSettled] = useRequireFreshData(
     requireFreshData,
     hasPayload,
-    () => {
+    (skipRefresh) => {
       if (fetchQuery) {
-        scheduleItemFetch('highPriority', fetchQuery.payload, {
-          fields: fetchQuery.fields,
-        });
+        scheduleAutomaticItemFetch(
+          'highPriority',
+          fetchQuery.payload,
+          { fields: fetchQuery.fields },
+          skipRefresh,
+        );
       }
     },
   );
