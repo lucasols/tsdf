@@ -1182,6 +1182,12 @@ export type OfflineAccumulationConfig<TInput> = {
    * into an older one either, since that would send it before the newer work.
    * Later mutations can still merge into the separate entry.
    *
+   * A refused merge into a mutation held behind the creation of an entity
+   * that waits for a manual resolution is the exception: unless the incoming
+   * mutation depends on that entity too, it is sent first, and the held one is
+   * sent after it once the creation is retried, like a mutation of an
+   * operation without `accumulation`.
+   *
    * Omit it to always merge.
    */
   canMerge?: (ctx: OfflineAccumulationMergeContext<TInput>) => boolean;

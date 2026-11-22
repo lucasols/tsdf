@@ -4314,7 +4314,9 @@ export function createOfflineStoreController<
       };
 
       // A refused merge queues the incoming mutation as a separate entry
-      // after the existing work.
+      // after the existing work. Refused against held work, it is sent first
+      // unless it is held behind the same creation, like a mutation of an
+      // operation without `accumulation`.
       if (
         mergeContext &&
         operation.accumulation.canMerge?.(mergeContext) !== false
