@@ -616,6 +616,14 @@ Mutations already queued when the gate closes are neither deleted nor replayed. 
 
 The callback is read before every fetch and every mutation with an `offline` descriptor, on browser `online` / `offline` events, before each recovery check and before each queued mutation is replayed, so it must be synchronous and cheap (read a variable or a store, no I/O). The app does not have to call anything for a flip to apply to the next fetch or mutation. To apply it right away — clear the offline status in the UI as soon as the gate closes, or start replaying the queue as soon as it reopens on an idle screen — call `storeManager.setOfflineRuntimeConfig({})` after changing the value: every runtime config update re-reads the gate. Runtime overrides and the upload helpers are not affected by the gate.
 
+To stop queueing new work but still send the work already queued, e.g. when a workspace loses offline mode with changes still waiting, return `'replay-only'` instead of `false`:
+
+```ts
+enabled: () => (workspace.hasOfflineMode ? true : 'replay-only'),
+```
+
+The session then works as with the gate open — the offline status follows the connection, the queued work is replayed once online and pauses when the connection drops, and its resolutions can be resolved — except that mutations with an `offline` descriptor are not queued because the session is offline, as with `mutationQueueing: { network: 'disallow', outage: 'disallow' }` (`getOfflineRuntimeConfig()` reports it): they run as online mutations and fail with their normal errors. While online, a mutation of an entity with queued work still joins the queue behind it, so the older work does not overwrite it. Unlike a closed gate, fetches made while the session is offline are still answered from the cache.
+
 The tabs of a session key share its offline status and its replay, so `enabled()` must return the same value in every tab of that session key. A tab with the gate closed would clear an offline mode another tab still relies on, and a leading tab with the gate closed holds back the replay of every tab. To gate per workspace, include the workspace in the session key.
 
 ### Forced offline mode

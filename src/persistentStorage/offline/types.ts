@@ -366,6 +366,16 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * storage untouched (and stay visible through the offline entities /
      * resolutions) and are replayed after the gate reopens while online.
      *
+     * Return `'replay-only'` to stop queueing new work but keep sending the
+     * work already queued, e.g. when a workspace loses offline mode with
+     * changes still waiting. The session works as with the gate open (offline
+     * status, recovery, replay and resolutions), except that mutations with an
+     * `offline` descriptor are never queued because the session is offline,
+     * as with `mutationQueueing` `'disallow'` for both causes: they run as
+     * online mutations and fail with their normal errors. While online, a
+     * mutation of an entity with queued work still joins the queue behind it,
+     * so it is not overwritten by that older work.
+     *
      * It is read before every fetch and every mutation with an `offline`
      * descriptor, on browser online/offline events, before each recovery
      * check and before replaying queued mutations, so it must be synchronous
@@ -377,7 +387,7 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * per workspace, include the workspace in the session key).
      * @default () => true
      */
-    enabled?: () => boolean;
+    enabled?: () => boolean | 'replay-only';
     /**
      * Classify a remote failure as `outage`, `network`, or `ignore`.
      * `outage` activates outage recovery behavior.

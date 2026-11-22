@@ -732,7 +732,10 @@ export function createOfflineStoreController<
     touchedReplacedResolution: boolean;
   };
 
-  /** Reads the session gate (`offlineSession.enabled`). */
+  /**
+   * Reads the session gate (`offlineSession.enabled`). `'replay-only'` keeps it
+   * open: the session disallows the queueing instead.
+   */
   function isSessionEnabled(): boolean {
     return sessionConfig.enabled?.() !== false;
   }
