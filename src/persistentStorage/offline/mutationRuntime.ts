@@ -51,8 +51,11 @@ export type PreparedOfflineMutation = {
    * `null` when the operation declares none for this input.
    */
   resolveDirectUploads: (() => Promise<DirectMutationUploadsResolution>) | null;
-  /** Marks a dependency upload `failed` when its failure was not queued */
-  markUploadFailed: (uploadId: string) => Promise<void>;
+  /**
+   * Marks the dependency uploads `failed` when a failed upload was not queued,
+   * including the ones still being sent that fail too
+   */
+  markUploadsFailed: () => Promise<void>;
   /** Also releases the dependency uploads the direct request consumed */
   handleDirectSuccess: () => Promise<void>;
 };
@@ -131,9 +134,7 @@ export async function runHybridOfflineMutation<
   } catch (error) {
     const shouldQueue = await prepared.classifyError(error, failedUploadId);
     if (!shouldQueue) {
-      if (failedUploadId !== undefined) {
-        await prepared.markUploadFailed(failedUploadId);
-      }
+      if (failedUploadId !== undefined) await prepared.markUploadsFailed();
       throw error;
     }
 

@@ -5241,8 +5241,9 @@ export function createOfflineStoreController<
         dependencyUploadIds.length > 0
           ? () => current.session.resolveReplayUploadIds(dependencyUploadIds)
           : null,
-      markUploadFailed: (uploadId) =>
-        current.session.markUploadsFailed([uploadId]),
+      // Like replay: the uploads that did not fail are left untouched.
+      markUploadsFailed: () =>
+        current.session.markUploadsFailed(dependencyUploadIds),
       handleDirectSuccess: async () => {
         // Before the offline status is cleared, which resumes the replay, so
         // that the other stores drop their work for the deleted entities

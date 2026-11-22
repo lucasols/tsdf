@@ -883,10 +883,10 @@ Caching and URL lifetime:
 
 The file follows the upload record, not its upload state: it stays available while the upload is `pending`, `uploading` and `uploaded`. To move from the local file to the uploaded one without a gap, derive the id from the entity as in the example above, and write the server ref into the entity when the mutation replays:
 
-- Uploads staged with `saveOfflineUpload` are deleted once the last queued work that declares them leaves the queue (see [Upload lifecycle](#upload-lifecycle)). Files attached with `performMutation({ upload })` are removed once their mutation replayed. Uploads no queued work declared stay until `deleteOfflineUpload` or retention removes them.
+- Uploads staged with `saveOfflineUpload` are deleted once the last queued work that declares them leaves the queue (see [Upload lifecycle](#upload-lifecycle)). They are also deleted once a mutation that declares them [runs directly](#direct-runs). Files attached with `performMutation({ upload })` are removed once their mutation replayed. Uploads no mutation declared stay until `deleteOfflineUpload` or retention removes them.
 - A replayed mutation releases its uploads after its `onSuccessExecute` ran (and, for a temp entity create, after the result replaced the temp entity). When `onSuccessExecute` writes the server ref into the entity, the local file stays renderable until that render, and from then on the component passes a falsy id and renders the server file.
-- A [direct run](#direct-runs) releases its uploads once `mutation` resolves. Write the server ref into the entity inside `mutation` to get the same handoff.
-- Otherwise the entity keeps the local ref until it is revalidated after replay, so the hook can report `missing` for a moment in between. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
+- A [direct run](#direct-runs) releases its uploads once `mutation` resolves, before `onSuccess` and the `revalidateOnSuccess` refetch. Write the server ref into the entity inside `mutation` to get the same handoff.
+- Otherwise the entity keeps the local ref until it is revalidated after the replay or direct run, so the hook can report `missing` for a moment in between. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
 
 Outside of these windows, a local ref paired with `missing` and no `resolvedRef` means the staged file was deleted or expired, not that it is about to appear.
 

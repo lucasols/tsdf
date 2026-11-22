@@ -1,9 +1,10 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
 import { expect, test } from 'vitest';
 import type {
   CollectionOfflineOperationDefinition,
+  DocumentOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
   OfflineSessionConfig,
 } from '../../src/main';
@@ -478,6 +479,112 @@ test('an upload rejected during a direct run fails the mutation and keeps the st
   expect(actions.getUploads()).toMatchInlineSnapshot(`[]`);
 
   unmount();
+});
+
+test('when several uploads of a direct run are rejected, all of them become failed', async () => {
+  createMockBrowserOpfs();
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'direct-upload-several-rejected',
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      classifyFailure: classifyConnectionErrors,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id }) => {
+          // The second file is bigger: it is still uploading when the first
+          // one is rejected.
+          await new Promise((resolve) =>
+            setTimeout(resolve, id === 'asset-1' ? 200 : 400),
+          );
+          throw new RequestError('rejected', `File ${id} not accepted`);
+        },
+      },
+    },
+  });
+  const env = createDocumentStoreTestEnv<
+    number,
+    {
+      updateWithAttachments: DocumentOfflineOperationDefinition<
+        { value: number },
+        { input: { attachmentIds: string[] } }
+      >;
+    }
+  >(1, {
+    id: 'direct-upload-several-rejected-doc',
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateWithAttachments: {
+            inputSchema: rc_object({ attachmentIds: rc_array(rc_string) }),
+            kind: 'update',
+            dependsOnUploads: ({ input }) => input.attachmentIds,
+            execute: () => Promise.resolve({ value: 3 }),
+          },
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  for (const id of ['asset-1', 'asset-2']) {
+    (
+      await resolveWithin(
+        storeManager.saveOfflineUpload({ id, file: attachmentFile }),
+      )
+    ).unwrap();
+  }
+
+  let directRequestSent = false;
+  const result = await resolveWithin(
+    env.apiStore.performMutation({
+      mutation: () => {
+        directRequestSent = true;
+        return Promise.resolve({ value: 3 });
+      },
+      offline: {
+        operation: 'updateWithAttachments',
+        input: { attachmentIds: ['asset-1', 'asset-2'] },
+      },
+    }),
+    1_000,
+  );
+  // Lets the second upload settle after the mutation already failed
+  await advanceTime(1_000);
+
+  // The mutation fails with the first rejection and is not queued
+  expect(result.ok ? null : result.error).toMatchInlineSnapshot(`
+    Error#:
+      message: 'File asset-1 not accepted'
+      name: 'StoreMutationError'
+      kind: 'error'
+      code: 500
+      id: 'fetch-error'
+      cause:
+        Error#: { message: 'File asset-1 not accepted', name: 'Error', kind: 'rejected' }
+  `);
+  expect(directRequestSent).toBe(false);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+
+  // Nothing will retry either upload, so both are `failed`, not only the one
+  // that failed the mutation: a `pending` upload would look like it is
+  // waiting for an automatic retry.
+  expect(
+    storeManager
+      .getOfflineUploads()
+      .map((upload) => pick(upload, ['id', 'state', 'lastError'])),
+  ).toMatchInlineSnapshot(`
+    - id: 'asset-1'
+      lastError: { message: 'File asset-1 not accepted' }
+      state: 'failed'
+    - id: 'asset-2'
+      lastError: { message: 'File asset-2 not accepted' }
+      state: 'failed'
+  `);
 });
 
 test('a direct request that fails with its own error keeps the uploaded file staged', async () => {
