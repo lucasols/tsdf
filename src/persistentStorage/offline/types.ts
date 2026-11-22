@@ -8,6 +8,7 @@ import {
   rc_parse,
   rc_record,
   rc_string,
+  rc_union,
   rc_unknown,
 } from 'runcheck';
 import type { Result as ResultType } from 't-result';
@@ -59,6 +60,12 @@ export type OfflineEntityMutationKind =
   | 'update'
   | 'delete';
 
+/** Runtime schema of persisted upload refs, by upload id. */
+/** @internal */
+export const persistedUploadRefsSchema = rc_record(
+  rc_union(rc_string, rc_number, rc_record(rc_unknown)),
+);
+
 /** Runtime schema for validating serialized offline item entity references. */
 /** @internal */
 export const offlineItemEntityRefSchema = rc_object({
@@ -85,6 +92,7 @@ const offlineResolutionBaseFields = {
   updatedAt: rc_number,
   attachedUploadIds: rc_record(rc_string).optionalKey(),
   dependencyUploadIds: rc_array(rc_string).optionalKey(),
+  dependencyUploadRefs: persistedUploadRefsSchema.optionalKey(),
 };
 
 /** Runtime schema for validating persisted offline resolution records on hydration. */
@@ -750,6 +758,12 @@ type OfflineConflictResolutionRecordBase<
   attachedUploadIds?: OfflineAttachedUploadIds;
   /** Session upload ids that must resolve before replaying the mutation. */
   dependencyUploadIds?: string[];
+  /**
+   * Server refs of dependency uploads that were already sent and deleted when
+   * this work was queued (an id still held by draft data), kept so they
+   * resolve after a reload. Written by TSDF.
+   */
+  dependencyUploadRefs?: Record<string, ValidPayload>;
 };
 
 /** Derived dependency metadata exposed for offline manual resolutions. */
@@ -817,6 +831,12 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   attachedUploadIds?: OfflineAttachedUploadIds;
   /** Session upload ids that must resolve before replaying the mutation. */
   dependencyUploadIds?: string[];
+  /**
+   * Server refs of dependency uploads that were already sent and deleted when
+   * this work was queued (an id still held by draft data), kept so they
+   * resolve after a reload. Written by TSDF.
+   */
+  dependencyUploadRefs?: Record<string, ValidPayload>;
 };
 
 /**
@@ -1027,6 +1047,12 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   attachedUploadIds?: OfflineAttachedUploadIds;
   /** Session upload ids that must resolve before replaying the mutation. */
   dependencyUploadIds?: string[];
+  /**
+   * Server refs of dependency uploads that were already sent and deleted when
+   * this work was queued (an id still held by draft data), kept so they
+   * resolve after a reload. Written by TSDF.
+   */
+  dependencyUploadRefs?: Record<string, ValidPayload>;
   /** Last recorded sync error if replay failed. */
   lastError?: { message: string };
   /**

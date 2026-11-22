@@ -1702,6 +1702,11 @@ class SessionOfflineCoordinator {
    * staged upload in `uploaded` state, or of an upload released after it was
    * sent. `null` otherwise.
    */
+  /** Ref of an upload released after it was sent, kept in memory. */
+  getReleasedUploadRef(id: string): ValidPayload | undefined {
+    return this.#releasedUploadRefs.get(id);
+  }
+
   getResolvedUploadRef(id: string): ValidPayload | null {
     // The published list, so uploads another tab sent count too.
     const upload = this.store.state.uploads.find(
@@ -1952,6 +1957,11 @@ class SessionOfflineCoordinator {
      * active again.
      */
     canSendUploads?: () => boolean,
+    /**
+     * Refs the queued work persisted for uploads that were released before it
+     * was queued, used for ids the session no longer knows (after a reload).
+     */
+    keptRefs?: Record<string, ValidPayload>,
   ): Promise<
     | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
     | { failedUploadId: string; error: unknown }
@@ -1965,7 +1975,14 @@ class SessionOfflineCoordinator {
         try {
           return [
             id,
-            await this.#ensureUploadResolved(id, true, canSendUploads),
+            await this.#ensureUploadResolved(
+              id,
+              true,
+              canSendUploads,
+              keptRefs && Object.hasOwn(keptRefs, id)
+                ? keptRefs[id]
+                : undefined,
+            ),
           ] as const;
         } catch (error) {
           failures.push({ failedUploadId: id, error });
@@ -3317,10 +3334,12 @@ class SessionOfflineCoordinator {
      */
     forReplay = false,
     canSend?: () => boolean,
+    /** Ref the queued work kept for this upload, see `resolveReplayUploadIds` */
+    keptRef?: ValidPayload,
   ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
-      const releasedRef = this.#releasedUploadRefs.get(id);
+      const releasedRef = this.#getReleasedUploadRef(id, keptRef);
       if (releasedRef !== undefined) return releasedRef;
       throw new Error(`Unknown offline upload "${id}"`);
     }
@@ -3344,7 +3363,7 @@ class SessionOfflineCoordinator {
       .resultifyAdd(async () => {
         const queuedRecord = await this.#getUploadRecord(id);
         if (!queuedRecord) {
-          const releasedRef = this.#releasedUploadRefs.get(id);
+          const releasedRef = this.#getReleasedUploadRef(id, keptRef);
           if (releasedRef !== undefined) return releasedRef;
           throw new Error(`Unknown offline upload "${id}"`);
         }
@@ -3437,6 +3456,25 @@ class SessionOfflineCoordinator {
 
     this.#uploadPromisesById.set(id, uploadPromise);
     return uploadPromise;
+  }
+
+  /**
+   * Released ref of `id`, falling back to the ref queued work kept for it: it
+   * was read back from storage, so it is checked against `resolvedRefSchema`
+   * and then known as released for the rest of the app session.
+   */
+  #getReleasedUploadRef(
+    id: string,
+    keptRef: ValidPayload | undefined,
+  ): ValidPayload | undefined {
+    const releasedRef = this.#releasedUploadRefs.get(id);
+    if (releasedRef !== undefined || keptRef === undefined) return releasedRef;
+
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    const parsedRef =
+      schema === undefined ? keptRef : parseRestoredUploadRef(schema, keptRef);
+    if (parsedRef !== undefined) this.#releasedUploadRefs.set(id, parsedRef);
+    return parsedRef;
   }
 
   async #cleanupUnusedMutationUploads(): Promise<void> {

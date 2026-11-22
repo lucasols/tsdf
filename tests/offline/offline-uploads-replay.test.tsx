@@ -338,6 +338,127 @@ test('an upload id still held by the app after its mutation replayed resolves to
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 });
 
+test('an edit queued with the id of a file that was already sent still replays with its ref after an app reload', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-reuse-after-reload-session';
+  const replayEvents: string[] = [];
+
+  /** Opens the app: store manager and document store, as after a page load. */
+  async function openApp() {
+    const storeManager = createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: async ({ id }) => {
+            replayEvents.push(`upload:${id}`);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return `server:${id}`;
+          },
+        },
+      },
+    });
+    const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
+      1,
+      {
+        id: 'offline-upload-reuse-after-reload-doc',
+        storeManager,
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: docSchema,
+          offline: {
+            operations: {
+              updateWithAttachment: {
+                inputSchema: rc_object({
+                  attachmentId: rc_string,
+                  value: rc_number,
+                }),
+                kind: 'update',
+                dependsOnUploads: ({ input }) => [input.attachmentId],
+                execute: async (ctx) => {
+                  replayEvents.push(
+                    `execute:${ctx.input.value}:${JSON.stringify(
+                      ctx.uploads.resolvedRefsById[ctx.input.attachmentId],
+                    )}`,
+                  );
+                  await env.serverMock.delayedSetData(ctx.input.value);
+                  return { value: ctx.input.value };
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+    await flushAllTimers();
+    return { storeManager, env };
+  }
+
+  async function reconnect() {
+    await act(async () => {
+      network.goOnline();
+      await Promise.resolve();
+    });
+    await advanceTime(3_000);
+  }
+
+  network.setOffline();
+  const app = await openApp();
+
+  // --- Setup: an edit with a file is saved offline and sent on reconnect,
+  // which deletes the staged file ---
+  (
+    await resolveAfterAllTimers(
+      app.storeManager.saveOfflineUpload({
+        id: 'asset-1',
+        file: new File(['attachment body'], 'attachment.txt', {
+          type: 'text/plain',
+        }),
+      }),
+    )
+  ).unwrap();
+  const queueEditWithAttachment = (value: number) =>
+    resolveAfterAllTimers(
+      app.env.apiStore.performMutation({
+        mutation: () => Promise.resolve({ value }),
+        offline: {
+          operation: 'updateWithAttachment',
+          input: { attachmentId: 'asset-1', value },
+        },
+      }),
+    );
+  await queueEditWithAttachment(2);
+  await reconnect();
+  expect(app.storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+
+  // The connection drops before the app swapped the attachment id for the
+  // server ref, so the next edit is queued still declaring it.
+  network.setOffline();
+  await advanceTime(0);
+  await queueEditWithAttachment(3);
+
+  // --- Action: the user reloads the page before reconnecting ---
+  resetSessionForTests();
+  const reloadedApp = await openApp();
+  await reconnect();
+
+  // The edit queued before the reload kept the ref of the file it declared:
+  // it is sent with it, without uploading again or failing on an upload the
+  // reloaded app no longer knows.
+  expect(replayEvents).toMatchInlineSnapshot(
+    `['upload:asset-1', 'execute:2:"server:asset-1"', 'execute:3:"server:asset-1"']`,
+  );
+  expect(
+    reloadedApp.env.apiStore.getOfflineResolutions(),
+  ).toMatchInlineSnapshot(`[]`);
+  expect(
+    reloadedApp.storeManager.getResolvedOfflineUploadRef('asset-1'),
+  ).toMatchInlineSnapshot(`"server:asset-1"`);
+});
+
 type AccumulatedAttachmentsOperations = {
   setAttachments: DocumentOfflineOperationDefinition<
     { value: number },

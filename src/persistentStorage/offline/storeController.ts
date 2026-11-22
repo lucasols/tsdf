@@ -55,6 +55,7 @@ import {
   OfflineResolutionConflictParseError,
   offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
+  persistedUploadRefsSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
   type OfflineFailureClassification,
@@ -230,6 +231,7 @@ const compactOfflineQueueEntrySchema = rc_object({
   x: rc_array(rc_unknown).optionalKey(),
   z: rc_record(rc_string).optionalKey(),
   k: rc_array(rc_string).optionalKey(),
+  r: persistedUploadRefsSchema.optionalKey(),
   m: rc_string.optionalKey(),
   y: rc_literals(0, 1).optionalKey(),
   f: rc_unknown.optionalKey(),
@@ -673,6 +675,8 @@ export function createOfflineStoreController<
     upload?: OfflineMutationUploadsInput;
     /** Already stored direct uploads reused instead of `upload` (requeue). */
     attachedUploadIds?: OfflineAttachedUploadIds;
+    /** Released upload refs the replaced work kept (requeue). */
+    dependencyUploadRefs?: Record<string, ValidPayload>;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -690,6 +694,7 @@ export function createOfflineStoreController<
     dependencyUploadIds: string[];
     upload?: OfflineMutationUploadsInput;
     attachedUploadIds?: OfflineAttachedUploadIds;
+    dependencyUploadRefs?: Record<string, ValidPayload>;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
     /**
@@ -1137,6 +1142,9 @@ export function createOfflineStoreController<
                 ...(entry.dependencyUploadIds !== undefined
                   ? { k: entry.dependencyUploadIds }
                   : {}),
+                ...(entry.dependencyUploadRefs !== undefined
+                  ? { r: entry.dependencyUploadRefs }
+                  : {}),
                 ...(entry.lastError ? { m: entry.lastError.message } : {}),
                 ...(entry.allowReplayRetry !== undefined
                   ? { y: entry.allowReplayRetry ? 1 : 0 }
@@ -1185,6 +1193,9 @@ export function createOfflineStoreController<
                   : {}),
                 ...(compactEntry.k !== undefined
                   ? { dependencyUploadIds: compactEntry.k }
+                  : {}),
+                ...(compactEntry.r !== undefined
+                  ? { dependencyUploadRefs: compactEntry.r }
                   : {}),
                 ...(compactEntry.m !== undefined
                   ? { lastError: { message: compactEntry.m } }
@@ -1664,6 +1675,30 @@ export function createOfflineStoreController<
   }
 
   /**
+   * Refs of the dependency uploads that are only known as released (sent and
+   * deleted), to persist with the work that declares them: the session keeps
+   * released refs in memory only, so without them the work could not resolve
+   * those ids after a reload. The session's ref wins over the ones the
+   * replaced or merged work kept.
+   */
+  function getDependencyUploadRefs(
+    current: ActiveSessionState,
+    uploadIds: readonly string[],
+    ...keptRefs: (Record<string, ValidPayload> | undefined)[]
+  ): Record<string, ValidPayload> | undefined {
+    const refs: [string, ValidPayload][] = [];
+    for (const id of uploadIds) {
+      let ref = current.session.getReleasedUploadRef(id);
+      for (const kept of keptRefs) {
+        if (ref !== undefined) break;
+        if (kept && Object.hasOwn(kept, id)) ref = kept[id];
+      }
+      if (ref !== undefined) refs.push([id, ref]);
+    }
+    return refs.length > 0 ? Object.fromEntries(refs) : undefined;
+  }
+
+  /**
    * Resolves dependency uploads like `resolveReplayUploadIds`, leaving out the
    * optional ones the server refused. `classifyOptionalFailure` decides what
    * a failed optional upload means: `'refused'` leaves it out and resolves
@@ -1675,6 +1710,8 @@ export function createOfflineStoreController<
     uploadIds: readonly string[],
     operationName: string,
     input: unknown,
+    /** Refs the queued work kept for uploads released before it was queued */
+    keptRefs: Record<string, ValidPayload> | undefined,
     classifyOptionalFailure: (
       error: unknown,
       uploadId: string,
@@ -1695,6 +1732,7 @@ export function createOfflineStoreController<
     let resolution = await current.session.resolveReplayUploadIds(
       uploadIds,
       canSendUploads,
+      keptRefs,
     );
     let optionalIds: Set<string> | undefined;
     const refusedUploadErrors = new Map<string, unknown>();
@@ -1720,6 +1758,7 @@ export function createOfflineStoreController<
       resolution = await current.session.resolveReplayUploadIds(
         uploadIds.filter((id) => !refusedUploadErrors.has(id)),
         canSendUploads,
+        keptRefs,
       );
     }
 
@@ -2256,6 +2295,7 @@ export function createOfflineStoreController<
     attachedUploads?: OfflineMutationUploadsInput;
     attachedUploadIds?: OfflineAttachedUploadIds;
     dependencyUploadIds?: string[];
+    dependencyUploadRefs?: Record<string, ValidPayload>;
     tempIds?: ValidPayload[];
   }): OfflineQueueEntry {
     const now = Date.now();
@@ -2280,6 +2320,7 @@ export function createOfflineStoreController<
       syncState: 'pending',
       attachedUploadIds,
       dependencyUploadIds: args.dependencyUploadIds,
+      dependencyUploadRefs: args.dependencyUploadRefs,
       tempIds: args.tempIds,
     };
   }
@@ -2443,6 +2484,7 @@ export function createOfflineStoreController<
       tempIds: entry.tempIds,
       attachedUploadIds: entry.attachedUploadIds,
       dependencyUploadIds: entry.dependencyUploadIds,
+      dependencyUploadRefs: entry.dependencyUploadRefs,
     };
   }
 
@@ -4006,6 +4048,7 @@ export function createOfflineStoreController<
             queueOrder,
             attachedUploadIds: resolution.attachedUploadIds,
             dependencyUploadIds: resolution.dependencyUploadIds,
+            dependencyUploadRefs: resolution.dependencyUploadRefs,
             tempIds: resolution.tempIds,
           })
         : null;
@@ -4217,6 +4260,7 @@ export function createOfflineStoreController<
       }),
       upload: args.upload,
       attachedUploadIds: args.attachedUploadIds,
+      dependencyUploadRefs: args.dependencyUploadRefs,
       tempIds: args.tempIds,
       entityRefs: args.entityRefs,
     };
@@ -4283,6 +4327,7 @@ export function createOfflineStoreController<
         dependencyUploadIds,
         upload,
         attachedUploadIds,
+        dependencyUploadRefs: preparedDependencyUploadRefs,
         tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
         mayHaveBeenApplied,
@@ -4491,12 +4536,19 @@ export function createOfflineStoreController<
           mergedDependencyUploadIds.length > 0
             ? mergedDependencyUploadIds
             : undefined;
+        const dependencyUploadRefsOfMerge = getDependencyUploadRefs(
+          current,
+          mergedDependencyUploadIds,
+          existingWork.dependencyUploadRefs,
+          preparedDependencyUploadRefs,
+        );
 
         if (heldResolution) {
           const nextResolution: PersistedOfflineResolutionRecord = {
             ...heldResolution,
             input: validatedMergedInput,
             dependencyUploadIds: dependencyUploadIdsOfMerge,
+            dependencyUploadRefs: dependencyUploadRefsOfMerge,
             updatedAt: now,
           };
 
@@ -4521,6 +4573,7 @@ export function createOfflineStoreController<
             queueOrder,
             entityRefs: heldResolution.entityRefs,
             dependencyUploadIds: dependencyUploadIdsOfMerge,
+            dependencyUploadRefs: dependencyUploadRefsOfMerge,
           });
           workingQueue.set(nextEntry.id, nextEntry);
 
@@ -4541,6 +4594,7 @@ export function createOfflineStoreController<
             ...existingEntry,
             input: validatedMergedInput,
             dependencyUploadIds: dependencyUploadIdsOfMerge,
+            dependencyUploadRefs: dependencyUploadRefsOfMerge,
             updatedAt: now,
           };
 
@@ -4625,6 +4679,11 @@ export function createOfflineStoreController<
       attachedUploadIds,
       dependencyUploadIds:
         dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
+      dependencyUploadRefs: getDependencyUploadRefs(
+        current,
+        dependencyUploadIds,
+        preparedDependencyUploadRefs,
+      ),
       tempIds,
     });
     // The server may have created the item in an earlier request: a delete
@@ -5222,6 +5281,7 @@ export function createOfflineStoreController<
           entryToUse.dependencyUploadIds ?? [],
           entryToUse.operation,
           entryToUse.input,
+          entryToUse.dependencyUploadRefs,
           async (error, uploadId) => {
             const classified = await classifyReplayFailure(
               current,
@@ -5481,6 +5541,7 @@ export function createOfflineStoreController<
                 dependencyUploadIds,
                 prepared.operationName,
                 prepared.validatedInput,
+                undefined,
                 async (error, uploadId) => {
                   const { preparedCurrent, failureCtx, activeCause } =
                     await classifyDirectFailure(error, uploadId);
@@ -5760,6 +5821,7 @@ export function createOfflineStoreController<
         // The replacement is sent with the files attached to the original
         // mutation, which stay stored under their ids.
         attachedUploadIds: resolutionRecord.attachedUploadIds,
+        dependencyUploadRefs: resolutionRecord.dependencyUploadRefs,
         tempIds: resolutionRecord.tempIds,
         entityRefs: resolutionRecord.entityRefs,
       });
