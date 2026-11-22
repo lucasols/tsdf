@@ -583,12 +583,50 @@ describe('temp entities declared in list queries', () => {
     hook.unmount();
   });
 
-  test.each([
-    ['local storage', 'local-sync'],
-    ['async storage', opfsPersistentStorage],
-  ] as const)(
-    'a row created offline before its list is opened after a restart shows up in the list (%s)',
-    async (_, storageAdapter) => {
+  // The full users list is declared by its payload, or by a filter: e.g. a
+  // global "quick add" that can't name the lists the table page saved. Both
+  // leave the filtered list out.
+  const unloadedListCases = [
+    {
+      storage: 'local storage',
+      storageAdapter: 'local-sync',
+      declaration: 'payload',
+      addToQueries: { queries: usersQuery, appendTo: 'start' },
+    },
+    {
+      storage: 'async storage',
+      storageAdapter: opfsPersistentStorage,
+      declaration: 'payload',
+      addToQueries: { queries: usersQuery, appendTo: 'start' },
+    },
+    {
+      storage: 'local storage',
+      storageAdapter: 'local-sync',
+      declaration: 'filter',
+      addToQueries: {
+        queries: (payload) => payload.tableId === 'users' && !payload.filters,
+        appendTo: 'start',
+      },
+    },
+    {
+      storage: 'async storage',
+      storageAdapter: opfsPersistentStorage,
+      declaration: 'filter',
+      addToQueries: {
+        queries: (payload) => payload.tableId === 'users' && !payload.filters,
+        appendTo: 'start',
+      },
+    },
+  ] satisfies {
+    storage: string;
+    storageAdapter: 'local-sync' | typeof opfsPersistentStorage;
+    declaration: string;
+    addToQueries: CreateUserTempEntity['addToQueries'];
+  }[];
+
+  test.each(unloadedListCases)(
+    'a row created offline before its lists are opened after a restart shows up in the lists it is declared in ($storage, declared with a $declaration)',
+    async ({ storageAdapter, addToQueries }) => {
       if (storageAdapter !== 'local-sync') {
         createOpfsPersistentStorageTestStore();
       }
@@ -596,66 +634,74 @@ describe('temp entities declared in list queries', () => {
         sessionKey: 'temp-queries-unloaded-list-session',
         storeName: 'temp-queries-unloaded-list-store',
         testScenario: 'idle',
-        addToQueries: { queries: usersQuery, appendTo: 'start' },
+        addToQueries,
         storageAdapter,
       } as const;
 
-      // The user sees the list online once, so it is saved to storage.
+      function renderUsersLists(env: ReturnType<typeof createUsersEnv>['env']) {
+        return renderHook(() => ({
+          allUsers: env.apiStore.useListQuery(usersQuery, {
+            itemSelector: (item) => item.name,
+          }),
+          usersStartingWithA: env.apiStore.useListQuery(
+            usersStartingWithAQuery,
+            { itemSelector: (item) => item.name },
+          ),
+        }));
+      }
+
+      // The user sees both lists online once, so they are saved to storage.
       const first = createUsersEnv(envOptions);
-      const firstHook = renderHook(() =>
-        first.env.apiStore.useListQuery(usersQuery, {
-          itemSelector: (item) => item.name,
-        }),
-      );
+      const firstHook = renderUsersLists(first.env);
       await flushAllTimers();
-      expect(firstHook.result.current.items).toMatchInlineSnapshot(`
-        ['Ada', 'Grace']
+      expect({
+        allUsers: firstHook.result.current.allUsers.items,
+        usersStartingWithA: firstHook.result.current.usersStartingWithA.items,
+      }).toMatchInlineSnapshot(`
+        allUsers: ['Ada', 'Grace']
+        usersStartingWithA: ['Ada']
       `);
       firstHook.unmount();
       first.env.apiStore.dispose();
 
-      // The app restarts offline on a form screen: the saved list is not read
-      // from storage yet when the user creates a row.
+      // The app restarts offline on a form screen: the saved lists are not
+      // read from storage yet when the user creates a row.
       network.setOffline();
       resetSessionForTests();
       const restarted = createUsersEnv(envOptions);
       await flushAllTimers();
       await act(async () => {
         await resolveAfterAllTimers(
-          restarted.env.apiStore.performMutation('temp:Linus', {
-            mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
-            offline: { operation: 'createUser', input: { name: 'Linus' } },
+          restarted.env.apiStore.performMutation('temp:Alan', {
+            mutation: () => Promise.resolve({ id: 3, name: 'Alan' }),
+            offline: { operation: 'createUser', input: { name: 'Alan' } },
           }),
         );
       });
       await flushAllTimers();
 
-      // Going to the list shows the row created offline at its declared
+      // Going to the lists shows the row created offline at its declared
       // position, instead of a list without it until the next online fetch.
-      const hook = renderHook(() =>
-        restarted.env.apiStore.useListQuery(usersQuery, {
-          itemSelector: (item) => item.name,
-        }),
-      );
+      // The filtered list was not declared, so it keeps only its saved rows.
+      const hook = renderUsersLists(restarted.env);
       await flushAllTimers();
       expect({
-        items: hook.result.current.items,
-        pendingSync: hook.result.current.pendingSync,
+        allUsers: hook.result.current.allUsers.items,
+        allUsersPendingSync: hook.result.current.allUsers.pendingSync,
+        usersStartingWithA: hook.result.current.usersStartingWithA.items,
       }).toMatchInlineSnapshot(`
-        items: ['Linus', 'Ada', 'Grace']
-        pendingSync: '✅'
+        allUsers: ['Alan', 'Ada', 'Grace']
+        allUsersPendingSync: '✅'
+        usersStartingWithA: ['Ada']
       `);
 
       hook.unmount();
     },
   );
 
-  test.each([
-    ['local storage', 'local-sync'],
-    ['async storage', opfsPersistentStorage],
-  ] as const)(
-    'a row saved while its list is not open after a restart is in the list when it is opened offline (%s)',
-    async (_, storageAdapter) => {
+  test.each(unloadedListCases)(
+    'a row saved while its list is not open after a restart is in the list when it is opened offline ($storage, declared with a $declaration)',
+    async ({ storageAdapter, addToQueries }) => {
       if (storageAdapter !== 'local-sync') {
         createOpfsPersistentStorageTestStore();
       }
@@ -663,7 +709,7 @@ describe('temp entities declared in list queries', () => {
         sessionKey: 'temp-queries-unloaded-list-replay-session',
         storeName: 'temp-queries-unloaded-list-replay-store',
         testScenario: 'idle',
-        addToQueries: { queries: usersQuery, appendTo: 'start' },
+        addToQueries,
         storageAdapter,
         nextUserIdRef: { current: 3 },
       } as const;

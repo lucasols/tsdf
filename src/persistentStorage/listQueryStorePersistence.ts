@@ -253,6 +253,8 @@ type ListQueryPersistenceSetup<
   preloadItemsByDerivedQueryGroup(groupKeys: string[]): Promise<boolean[]>;
   getHydratedItemKeys(this: void): string[];
   getHydratedQueryKeys(this: void): string[];
+  /** Keys of every query saved in persistent storage for the session. */
+  listPersistedQueryKeys(this: void): Promise<string[]>;
   readHydratedItem(
     this: void,
     itemKey: string,
@@ -4152,6 +4154,9 @@ export function setupListQueryPersistence<
     preloadItemsByDerivedQueryGroup,
     getHydratedItemKeys: () => [...hydratedPersistedItemKeys],
     getHydratedQueryKeys: () => [...hydratedPersistedQueryKeys],
+    listPersistedQueryKeys: async () => [
+      ...(await ensureKnownPersistedQueryKeys()),
+    ],
     readHydratedItem,
     readHydratedQuery,
     hasAsyncPreload: localStorageAdapter === null,
