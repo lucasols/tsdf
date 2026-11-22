@@ -700,9 +700,9 @@ export function createDocumentStore<
   });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
-  // The document has a change waiting for a manual resolution: window focus
-  // and reconnect revalidations leave it alone, a refetch would replace the
-  // change the user still has to decide on
+  // The document has a change waiting for a manual resolution: the UI keeps
+  // its local version until the user decides, so window focus, reconnect and
+  // other background refetches leave it alone (see `skipsBackgroundRefetch`).
   let requiresResolution = false;
 
   function clearOfflineOverlay(nextSessionKey: string | null = null): void {
@@ -1356,7 +1356,25 @@ export function createDocumentStore<
     await persistence.preloadPersistentStorage();
   }
 
+  /**
+   * A background refetch (any priority but `highPriority`: a hook mount, a
+   * window focus, a realtime update) leaves the document alone while it has a
+   * change waiting for a manual resolution: a refetch would replace the local
+   * version the user still has to decide on. Explicit fetches still replace
+   * it. Once the change is handled, the store's recovery revalidation
+   * refetches it.
+   */
+  function skipsBackgroundRefetch(priority: FetchType): boolean {
+    return (
+      requiresResolution &&
+      priority !== 'highPriority' &&
+      (store.state.status === 'success' || store.state.status === 'refetching')
+    );
+  }
+
   function invalidateData(priority: FetchType = 'highPriority'): void {
+    if (skipsBackgroundRefetch(priority)) return;
+
     const currentRefetchOnMount = store.state.refetchOnMount;
     const currentInvalidationPriority = currentRefetchOnMount
       ? fetchTypePriority[currentRefetchOnMount]
@@ -1872,6 +1890,7 @@ export function createDocumentStore<
             !!disableRefetches,
             !!disableRefetchOnMount,
           ) &&
+          !skipsBackgroundRefetch(fetchType) &&
           tryClaimAutomaticFetchSlot(
             automaticRetryState,
             DOC_TARGET_KEY,
