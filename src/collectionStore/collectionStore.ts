@@ -606,7 +606,8 @@ type CollectionPerformMutation<
    * Runs a collection mutation whose `offline` descriptor may be `undefined`
    * (`offline: descriptor | undefined`), so one call covers mutations that
    * only queue offline in some cases. Pass `null` when there is no current
-   * item target; optimistic updates then receive no payload.
+   * item target; `optimisticUpdate` is not supported then, as with the other
+   * `null` overloads.
    *
    * The success value is the direct server result when `offline` is
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
