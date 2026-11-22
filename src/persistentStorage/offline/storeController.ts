@@ -682,6 +682,10 @@ export function createOfflineStoreController<
   const inMemoryOnlyRecordKeys = new Set<string>();
   let unblockWindowCloseForInMemoryOnlyRecords: (() => void) | null = null;
   let isRetryingInMemoryOnlyRecords = false;
+  // The last retry stored none of them (e.g. localStorage writes are disabled
+  // until a reload while removals still work): only a successful save, not a
+  // removal, tells storage takes writes again.
+  let didLastInMemoryOnlyRetryFail = false;
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -1077,6 +1081,7 @@ export function createOfflineStoreController<
     resolutions.clear();
     // Work only held in memory is dropped with the session's records
     inMemoryOnlyRecordKeys.clear();
+    didLastInMemoryOnlyRetryFail = false;
     syncInMemoryOnlyWindowCloseBlock();
     unknownOperationUploadIds.clear();
     nextQueueOrder = 0;
@@ -1456,6 +1461,7 @@ export function createOfflineStoreController<
       entryIdsFromAnotherTab.clear();
       resolutions.clear();
       inMemoryOnlyRecordKeys.clear();
+      didLastInMemoryOnlyRetryFail = false;
       syncInMemoryOnlyWindowCloseBlock();
       unknownOperationUploadIds.clear();
       // Records of an operation this deploy doesn't define were written by a
@@ -2922,9 +2928,18 @@ export function createOfflineStoreController<
    * Writes the records only held in memory again after a write of this
    * store's records succeeded: storage works again (e.g. the browser accepted
    * a new IndexedDB connection), so they can survive a reload too.
+   * `afterSave`: the write that succeeded saved a record, rather than only
+   * removing one.
    */
-  function persistInMemoryOnlyRecords(current: ActiveSessionState): void {
-    if (isRetryingInMemoryOnlyRecords || inMemoryOnlyRecordKeys.size === 0) {
+  function persistInMemoryOnlyRecords(
+    current: ActiveSessionState,
+    afterSave: boolean,
+  ): void {
+    if (
+      isRetryingInMemoryOnlyRecords ||
+      inMemoryOnlyRecordKeys.size === 0 ||
+      (didLastInMemoryOnlyRetryFail && !afterSave)
+    ) {
       return;
     }
     isRetryingInMemoryOnlyRecords = true;
@@ -2954,9 +2969,9 @@ export function createOfflineStoreController<
 
     void Promise.all(writes).finally(() => {
       isRetryingInMemoryOnlyRecords = false;
-      if (persistedAny && isActiveSessionState(current)) {
-        refreshDerivedState(current);
-      }
+      if (!isActiveSessionState(current)) return;
+      didLastInMemoryOnlyRetryFail = !persistedAny;
+      if (persistedAny) refreshDerivedState(current);
     });
   }
 
@@ -2986,7 +3001,7 @@ export function createOfflineStoreController<
       queueEntries.has(entry.id),
       isReplayStateUpdate,
     );
-    if (persisted) persistInMemoryOnlyRecords(session);
+    if (persisted) persistInMemoryOnlyRecords(session, true);
     if (!skipRefresh) refreshDerivedState(session);
   }
 
@@ -3027,7 +3042,7 @@ export function createOfflineStoreController<
     session.session.publishQueueEntryChange(storeName, entryId, null);
     const removed = await session.queueNamespace.remove(entryId);
     if (!isActiveSessionState(session)) return;
-    if (removed) persistInMemoryOnlyRecords(session);
+    if (removed) persistInMemoryOnlyRecords(session, false);
     if (!skipRefresh) refreshDerivedState(session);
   }
 
@@ -3056,7 +3071,7 @@ export function createOfflineStoreController<
       persisted,
       resolutions.has(resolution.id),
     );
-    if (persisted) persistInMemoryOnlyRecords(session);
+    if (persisted) persistInMemoryOnlyRecords(session, true);
     if (!skipRefresh) refreshDerivedState(session);
   }
 
@@ -3074,7 +3089,7 @@ export function createOfflineStoreController<
     const removed = await session.resolutionNamespace.remove(resolutionId);
     session.session.publishResolutionChange(storeName, resolutionId, null);
     if (!isActiveSessionState(session)) return;
-    if (removed) persistInMemoryOnlyRecords(session);
+    if (removed) persistInMemoryOnlyRecords(session, false);
     if (!skipRefresh) refreshDerivedState(session);
   }
 
