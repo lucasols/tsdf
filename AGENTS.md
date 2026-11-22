@@ -168,6 +168,17 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 - Rank findings by realistic user impact and likelihood, not theoretical severity alone; rare edge cases are not automatically merge blockers because their worst-case outcome is serious.
 - Treat TSDF runtime performance as part of correctness: before recommending a fix, account for added work on common paths (especially storage reads/writes, serialization, iteration, locking, memory), and defer the fix when its real-usage cost outweighs the issue unless a low-overhead solution exists.
 
+### Overhead in PR descriptions and explanations
+
+Every PR description (`gh pr create`, and `gh pr edit` when a push changes the overhead) and every PR explanation (e.g. `/explain-pr`) states whether apps using TSDF pay more after the PR. The reader must be able to see it at a glance.
+
+- Give it its own part with the same weight as breaking changes: an `## Overhead for apps` section in the PR description, a **Does it add overhead for apps?** part right after the breaking-changes part in an explanation, and a callout next to the breaking-changes verdict in an explanation artifact.
+- Open with a verdict: **yes**, **no**, or **only in <situation>**. Never leave the part out or fold it into another section, even when the answer is no.
+- Say which paths of an app pay and how often: every fetch, mutation, render or queued entry, or only in the situation the PR handles. Flag overhead on common paths prominently.
+- Name the added work concretely: storage reads/writes, serialization, iterations, session key reads, locks, timers, subscriptions or re-renders, and memory kept around. Give counts per operation when you can derive them from the code (e.g. "two extra session key reads per replayed entry").
+- Mention bundle size when the PR adds code that ships to production, and note what is tree-shaken behind `import.meta.env.DEV` / `TEST` guards.
+- When the overhead is real, say whether it looks avoidable with a cheaper implementation. When it is negligible, give the reason in one line.
+
 ## Feature implementation
 
 When adding a new feature, or adjust a existing one:
