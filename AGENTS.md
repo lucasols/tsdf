@@ -168,6 +168,15 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 - Rank findings by realistic user impact and likelihood, not theoretical severity alone; rare edge cases are not automatically merge blockers because their worst-case outcome is serious.
 - Treat TSDF runtime performance as part of correctness: before recommending a fix, account for added work on common paths (especially storage reads/writes, serialization, iteration, locking, memory), and defer the fix when its real-usage cost outweighs the issue unless a low-overhead solution exists.
 
+### Explaining PRs
+
+When explaining a PR (e.g. `/explain-pr`), include what it costs, mainly runtime performance, right after the breaking-changes part:
+
+- Say which paths pay for the change and how often: every fetch, mutation, render or queued entry, or only in the situation the PR handles.
+- Name the added work concretely: storage reads/writes, serialization, iterations, session key reads, locks, timers, subscriptions or re-renders, and memory kept around. Give counts per operation when you can derive them from the code (e.g. "two extra session key reads per replayed entry").
+- Mention bundle size when the PR adds code that ships to production, and note what is tree-shaken behind `import.meta.env.DEV` / `TEST` guards.
+- If the cost is negligible, say so in one line with the reason. If it is significant, say whether a cheaper implementation looks possible.
+
 ## Feature implementation
 
 When adding a new feature, or adjust a existing one:
