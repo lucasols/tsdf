@@ -33,6 +33,7 @@ import {
 import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/offlineResolution.typeGuards';
 import {
   captureOfflineOverlayEntries,
+  getRecapturableOfflineOverlayKeys,
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
@@ -2363,6 +2364,11 @@ export function createListQueryStore<
     },
     unsentCreationItemKeys,
     persistence !== null,
+    (itemKeys) => {
+      captureOfflineOverlays(
+        getRecapturableOfflineOverlayKeys(offlineOverlayStore.state, itemKeys),
+      );
+    },
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {

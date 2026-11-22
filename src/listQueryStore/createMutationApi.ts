@@ -310,6 +310,11 @@ export function createMutationApi<
    * storage, which optimistic list updates must not replace.
    */
   hasPersistentStorage: boolean,
+  /**
+   * Captures again the offline overlays of items with queued work after a
+   * local optimistic change, so hooks show the change before it is queued.
+   */
+  recaptureOfflineOverlays: (itemKeys: Iterable<string>) => void,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -748,6 +753,8 @@ export function createMutationApi<
           );
         }
       });
+
+      recaptureOfflineOverlays(revertedItems.keys());
     }
 
     if (keptDataItemKeys.size > 0) addQueriesShowingKeptData();
@@ -2014,9 +2021,22 @@ export function createMutationApi<
             );
 
             try {
-              return runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(payloadToUse),
+              const updateResult = runWithBroadcastConsistency(
+                'optimistic',
+                () => optimisticUpdate(payloadToUse),
               );
+
+              if (updateResult !== false) {
+                recaptureOfflineOverlays(
+                  filterAndMap(itemSnapshots, ({ itemKey, before }) =>
+                    store.state.items[itemKey] !== before.item
+                      ? itemKey
+                      : false,
+                  ),
+                );
+              }
+
+              return updateResult;
             } finally {
               optimisticMutationQueryContextStack.pop();
               deferredOptimisticQueryInvalidationsStack.pop();

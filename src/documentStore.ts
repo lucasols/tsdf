@@ -702,6 +702,18 @@ export function createDocumentStore<
     offlineOverlayStore.setState(null);
   }
 
+  /**
+   * Captures the overlay again after a local optimistic change of a document
+   * with queued work: hooks show the overlay instead of the store state, so
+   * until the change is queued (e.g. during a debounce) they would show the
+   * version queued before.
+   */
+  function recaptureOfflineOverlay(): void {
+    if (offlineOverlayStore.state === null) return;
+
+    offlineOverlayStore.setState({ data: klona(store.state.data) });
+  }
+
   let initialData: State | null = null;
   let initialRefetchOnMount: FetchType | false = false;
   let initialStatus: DocumentStatus = 'idle';
@@ -1575,6 +1587,7 @@ export function createDocumentStore<
       if (reverted) {
         runWithBroadcastConsistency('confirmed', () => {
           store.setKey('data', data, { action: 'rollback-mutation-error' });
+          recaptureOfflineOverlay();
           // Data kept until the revalidation, or still carrying another
           // in-flight optimistic update, isn't confirmed by the server, so
           // other tabs must not treat it as such
@@ -1625,9 +1638,16 @@ export function createDocumentStore<
             const before = store.state.data;
             optimisticMutations.start(DOC_REQUEST_ID, mutationId);
             try {
-              return runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(store.state.data),
+              const updateResult = runWithBroadcastConsistency(
+                'optimistic',
+                () => optimisticUpdate(store.state.data),
               );
+
+              if (updateResult !== false && store.state.data !== before) {
+                recaptureOfflineOverlay();
+              }
+
+              return updateResult;
             } finally {
               addRollback({ before, after: store.state.data, mutationId });
             }

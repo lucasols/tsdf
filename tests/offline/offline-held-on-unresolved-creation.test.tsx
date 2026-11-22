@@ -909,8 +909,8 @@ describe('tasks created with a client-generated id whose creation waits for a ma
       .      | Write report, Review budget, Plan summer trip | offline:createTaskWithId resolution-required
       .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan summer trip | -- online: rename the task whose creation waits for a decision
-      .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan winter trip | [tasks] ui-changed
+      .      | Write report, Review budget, Plan winter trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan winter trip | offline:renameTask queued
       15.01s | Write report, Review budget, Plan winter trip | -- the user asks to send the creation again
       .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-started

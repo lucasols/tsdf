@@ -38,6 +38,7 @@ import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/
 import { isOfflineStoreError } from '../persistentStorage/offline/offlineStoreError.typeGuards';
 import {
   captureOfflineOverlayEntries,
+  getRecapturableOfflineOverlayKeys,
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
@@ -2789,6 +2790,13 @@ export function createCollectionStore<
           }
         });
 
+        captureOfflineOverlays(
+          getRecapturableOfflineOverlayKeys(
+            offlineOverlayStore.state,
+            revertedItems.keys(),
+          ),
+        );
+
         if (restoredItemKeys.length > 0) {
           touchItemsAndMaybeEnforceLimits(restoredItemKeys);
         }
@@ -2848,9 +2856,28 @@ export function createCollectionStore<
               },
             );
             try {
-              return runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(payloadToUse),
+              const updateResult = runWithBroadcastConsistency(
+                'optimistic',
+                () => optimisticUpdate(payloadToUse),
               );
+
+              if (updateResult !== false) {
+                // Hooks show the offline overlay of an item with queued work
+                // instead of its state, so it must show this change before
+                // it is queued too
+                captureOfflineOverlays(
+                  getRecapturableOfflineOverlayKeys(
+                    offlineOverlayStore.state,
+                    filterAndMap(affectedItemEntries, ({ itemKey }, index) =>
+                      store.state[itemKey] !== before[index]?.item
+                        ? itemKey
+                        : false,
+                    ),
+                  ),
+                );
+              }
+
+              return updateResult;
             } finally {
               addRollback(
                 affectedItemEntries.map(

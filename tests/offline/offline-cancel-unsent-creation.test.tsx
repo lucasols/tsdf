@@ -134,7 +134,7 @@ describe('list-query rows', () => {
       .      | Write final report, Review budget, Plan summer trip, Book cheap flights | [tasks] ui-changed
       .      | Write final report, Review budget, Plan summer trip, Book cheap flights | offline:renameTask queued
       .      | Write final report, Review budget, Plan summer trip, Book cheap flights | -- offline: delete the task that was never sent
-      .      | Write final report, Review budget                                       | [tasks] ui-changed
+      .      | Write final report, Review budget                                       | [tasks, tasks] ui-changed
       .      | Write final report, Review budget                                       | offline:deleteTask queued
       .      | Write final report, Review budget                                       | -- back online: only the rename of the existing task is sent
       .      | Write final report, Review budget                                       | offline:renameTask replay-started
