@@ -2346,19 +2346,24 @@ class SessionOfflineCoordinator {
     const token = ++this.#networkStateToken;
     // A closed session gate ignores network detection: it only keeps
     // `isNetworkDetectedOffline` up to date, without holding back the fetch or
-    // mutation that asked for the refresh
+    // mutation that asked for the refresh, even when the detection fails
     if (!sessionEnabled) {
-      if (this.#canonicalConfig.hasNetworkConfig) {
-        const detection = this.#getCurrentOfflineState();
-        if (typeof detection === 'boolean') {
-          this.#setNetworkDetectedOffline(token, detection);
+      if (!this.#canonicalConfig.hasNetworkConfig) return false;
+
+      let detection: boolean | Promise<boolean>;
+      try {
+        detection = this.#getCurrentOfflineState();
+      } catch {
+        return false;
+      }
+      if (typeof detection === 'boolean') {
+        this.#setNetworkDetectedOffline(token, detection);
+        this.#syncNetworkDetectedStatus();
+      } else {
+        detection.then((detectedOffline) => {
+          this.#setNetworkDetectedOffline(token, detectedOffline);
           this.#syncNetworkDetectedStatus();
-        } else {
-          detection.then((detectedOffline) => {
-            this.#setNetworkDetectedOffline(token, detectedOffline);
-            this.#syncNetworkDetectedStatus();
-          }, noop);
-        }
+        }, noop);
       }
       return false;
     }

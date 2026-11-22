@@ -1639,3 +1639,53 @@ test('closed gate: an async connectivity check updates the reported connection w
     isOfflineMode: '❌'
   `);
 });
+
+test('closed gate: a connectivity check that throws does not fail fetches of users without offline mode', async () => {
+  const sessionKey = 'gate-closed-throwing-connectivity';
+  // The app's connectivity check reads a realtime connection that is not set
+  // up yet, so it throws
+  const getIsOffline = vi.fn((): boolean => {
+    throw new Error('realtime connection not ready');
+  });
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => false,
+      network: { enabled: true, getIsOffline },
+    },
+  });
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+  await flushAllTimers();
+
+  // -- The app refetches --
+  const fetchesBeforeRefetch = env.serverMock.fetchHistory.length;
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // The closed gate only runs the check to report the connection, so its
+  // error doesn't reach the fetch: the fetch still loads from the server, and
+  // the status keeps its last known connection
+  expect(getIsOffline).toHaveBeenCalled();
+  expect(env.serverMock.fetchHistory).toHaveLength(fetchesBeforeRefetch + 1);
+  expect(env.store.state.status).toBe('success');
+  expect(env.store.state.error).toBe(null);
+  expect(
+    pick(getGlobalOfflineStatus(sessionKey), [
+      'isNetworkDetectedOffline',
+      'isOfflineMode',
+    ]),
+  ).toMatchInlineSnapshot(`
+    isNetworkDetectedOffline: '❌'
+    isOfflineMode: '❌'
+  `);
+});
