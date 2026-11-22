@@ -505,7 +505,7 @@ Each store also exposes scoped APIs:
 - `resolveOfflineResolution(...)`
 - `parseOfflineResolutionConflict(...)`
 
-List-query stores additionally expose `usePendingOfflineItems(...)`, which returns pending creates/updates and pending deletes without mounting or fetching a query.
+List-query stores additionally expose `usePendingOfflineItems(...)`, which returns pending creates/updates and pending deletes without mounting or fetching a query. Its `selector` receives each item's [per-item state](#per-item-state) as a third argument, so a "pending changes" list can tell items created offline (`isUnsentCreation`) from edited ones without reading `useOfflineEntities()`.
 
 ### Per-item state
 

@@ -4476,6 +4476,53 @@ export function useOfflineStoreItemState(
   });
 }
 
+const EMPTY_ATTEMPTED_CREATION_ENTITY_IDS: readonly string[] = [];
+
+/**
+ * React hook returning the ids of a store's unsent creations whose creation
+ * was already sent or waits for a manual resolution (see
+ * `ItemOfflineState.creationAttempted`). Only the ids of the store's own
+ * entities are selected, so creations of other stores don't re-render it.
+ * Returns an empty list while `storeName` is `undefined`.
+ */
+export function useOfflineStoreAttemptedCreationEntityIds(
+  sessionKey: string | false,
+  inactiveScope: string,
+  storeName: string | undefined,
+): readonly string[] {
+  const coordinator = useSessionOfflineCoordinator(
+    resolveOfflineSessionScope(sessionKey, inactiveScope),
+    false,
+  );
+  const attemptedIdsSelector = useCallback(
+    (state: SessionStoreState): readonly string[] => {
+      const attemptedIds = state.attemptedCreationEntityIds;
+      if (storeName === undefined || attemptedIds.length === 0) {
+        return EMPTY_ATTEMPTED_CREATION_ENTITY_IDS;
+      }
+
+      const storeAttemptedIds: string[] = [];
+      for (const entity of getOfflineStoreEntityLookup(
+        state.entities,
+        storeName,
+      ).values()) {
+        if (attemptedIds.includes(entity.id)) {
+          storeAttemptedIds.push(entity.id);
+        }
+      }
+
+      return storeAttemptedIds.length === 0
+        ? EMPTY_ATTEMPTED_CREATION_ENTITY_IDS
+        : storeAttemptedIds;
+    },
+    [storeName],
+  );
+
+  return coordinator.store.useSelector(attemptedIdsSelector, {
+    equalityFn: deepEqual,
+  });
+}
+
 /**
  * React hook returning whether a session or inactive scope is in offline mode.
  * Only this flag is selected, so the other status changes (e.g. `updatedAt`)

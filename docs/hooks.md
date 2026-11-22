@@ -318,7 +318,21 @@ Behavior:
 
 ### Options
 
-- `selector` - Maps each visible pending item before returning it
+- `selector` - Maps each visible pending item before returning it. Receives
+  `(item, itemPayload, offlineState)`, where `offlineState` is the item's
+  [`ItemOfflineState`](#useitemofflinestate), e.g. to tell items created
+  offline (`isUnsentCreation`) from edited ones:
+
+  ```tsx
+  const { items } = store.usePendingOfflineItems({
+    selector: (item, itemPayload, offlineState) => ({
+      itemPayload,
+      name: item.name,
+      isNew: offlineState.isUnsentCreation,
+    }),
+  });
+  ```
+
 - `filterPayload` - Filters entries by item payload before they are added to
   `items` or `deletedItems`
 - `includeResolutionRequired` - Includes entries currently blocked in

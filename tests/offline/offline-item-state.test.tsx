@@ -1,6 +1,6 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { render, renderHook } from '@testing-library/react';
-import { act, memo } from 'react';
+import { act, memo, useEffect } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
@@ -466,6 +466,107 @@ describe('list-query rows', () => {
     `);
 
     list.unmount();
+  });
+
+  test('a pending changes panel tells rows created offline from rows edited offline through the offline state its selector receives', async () => {
+    const env = createUsersEnv('item-offline-state-pending-items-session');
+    const renders = createRenderLog();
+
+    // A "pending changes" panel built from `usePendingOfflineItems`: the
+    // selector receives each entry's offline state, so the panel can label it
+    // "new" or "edited" without joining the hook with `useOfflineEntities()`.
+    const panel = renderHook(() => {
+      const { items } = env.apiStore.usePendingOfflineItems({
+        selector: (item, itemPayload, offlineState) => ({
+          itemPayload,
+          name: item.name,
+          offlineState,
+        }),
+      });
+
+      // One line each time the panel's entries change
+      useEffect(() => {
+        renders.add({
+          panel:
+            items
+              .map(
+                ({ name, offlineState }) =>
+                  `${offlineState.isUnsentCreation ? 'new' : 'edited'} ${name} (${offlineState.syncState}${offlineState.creationAttempted ? ', creation attempted' : ''})`,
+              )
+              .join(' | ') || 'no pending changes',
+        });
+      }, [items]);
+
+      return items;
+    });
+    await flushAllTimers();
+
+    renders.addMark('offline: create Margaret and rename Ada');
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Margaret', {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Margaret',
+            { id: -1, name: 'Margaret' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: async () => {
+          const result = { id: 4, name: 'Margaret' };
+          await env.serverTable.delayedSetItem('users||4', result);
+          return result;
+        },
+        offline: { operation: 'createUser', input: { name: 'Margaret' } },
+      });
+    });
+    await renameUserOffline(env, 'users||1', 'Ada Lovelace');
+
+    // The selector receives the same state `getItemOfflineState(...)` returns
+    // for each entry, so the panel and the rows' badges always agree.
+    expect(panel.result.current.map((entry) => entry.offlineState)).toEqual(
+      panel.result.current.map((entry) =>
+        env.apiStore.getItemOfflineState(entry.itemPayload),
+      ),
+    );
+
+    renders.addMark('back online: the creation replays, then the rename');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // - Offline, Margaret is a "new" entry not sent yet and Ada an "edited"
+    //   one.
+    // - While the creation is sent the selector runs again with
+    //   `creationAttempted: true`: the server may already have Margaret.
+    // - Once the server assigns `users||4` the creation leaves the panel (the
+    //   hook reports an equal `items` list once more because the temp row is
+    //   briefly in `deletedItems` while the final row replaces it), then Ada's
+    //   rename syncs and the panel empties.
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      -> panel: no pending changes
+
+      >>> offline: create Margaret and rename Ada
+
+      -> panel: new Margaret (pending)
+      -> panel: new Margaret (pending) | edited Ada Lovelace (pending)
+
+      >>> back online: the creation replays, then the rename
+
+      -> panel: new Margaret (syncing, creation attempted) | edited Ada Lovelace (pending)
+      -> panel: edited Ada Lovelace (pending)
+      -> panel: edited Ada Lovelace (pending)
+      -> panel: edited Ada Lovelace (syncing)
+      -> panel: no pending changes
+      "
+    `);
+
+    panel.unmount();
   });
 
   test('rows of a store without offline support never report an offline state', async () => {
