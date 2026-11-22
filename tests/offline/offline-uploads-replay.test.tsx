@@ -338,6 +338,216 @@ test('an upload id still held by the app after its mutation replayed resolves to
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 });
 
+/**
+ * App whose edits declare the attachment they reference, opened again after
+ * a page reload with `reopen()`.
+ */
+function createReloadableAttachmentApp(args: {
+  sessionKey: string;
+  /**
+   * How a new edit replaces the edit still queued for the document: the new
+   * one supersedes it, or it is merged into it (`accumulation.mergeInput`).
+   */
+  replacesQueuedEdit?: 'supersedes' | 'merges';
+}) {
+  const replayEvents: string[] = [];
+
+  /** Opens the app: store manager and document store, as after a page load. */
+  async function openApp() {
+    const storeManager = createStoreManager({
+      getSessionKey: () => args.sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: async ({ id }) => {
+            replayEvents.push(`upload:${id}`);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return `server:${id}`;
+          },
+        },
+      },
+    });
+    const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
+      1,
+      {
+        id: `${args.sessionKey}-doc`,
+        storeManager,
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: docSchema,
+          offline: {
+            operations: {
+              updateWithAttachment: {
+                inputSchema: rc_object({
+                  attachmentId: rc_string,
+                  value: rc_number,
+                }),
+                kind: 'update',
+                ...(args.replacesQueuedEdit === 'supersedes'
+                  ? { supersedes: { scope: 'same-entity' } }
+                  : {}),
+                ...(args.replacesQueuedEdit === 'merges'
+                  ? {
+                      accumulation: {
+                        mergeInput: ({ incomingInput }) => incomingInput,
+                      },
+                    }
+                  : {}),
+                dependsOnUploads: ({ input }) => [input.attachmentId],
+                execute: async (ctx) => {
+                  replayEvents.push(
+                    `execute:${ctx.input.value}:${JSON.stringify(
+                      ctx.uploads.resolvedRefsById[ctx.input.attachmentId],
+                    )}`,
+                  );
+                  await env.serverMock.delayedSetData(ctx.input.value);
+                  return { value: ctx.input.value };
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+    await flushAllTimers();
+
+    const queueEditWithAttachment = (value: number) =>
+      resolveAfterAllTimers(
+        env.apiStore.performMutation({
+          mutation: () => Promise.resolve({ value }),
+          offline: {
+            operation: 'updateWithAttachment',
+            input: { attachmentId: 'asset-1', value },
+          },
+        }),
+      );
+
+    return { storeManager, env, queueEditWithAttachment };
+  }
+
+  async function reconnect() {
+    await act(async () => {
+      network.goOnline();
+      await Promise.resolve();
+    });
+    await advanceTime(3_000);
+  }
+
+  /**
+   * Opens the app offline, saves an edit with a file and sends it on
+   * reconnect, which deletes the staged file. The connection then drops
+   * before the app swapped the attachment id for the server ref, so the next
+   * edit (`value: 3`) is queued still declaring it.
+   */
+  async function sendFileThenQueueEditDeclaringIt() {
+    network.setOffline();
+    const app = await openApp();
+    (
+      await resolveAfterAllTimers(
+        app.storeManager.saveOfflineUpload({
+          id: 'asset-1',
+          file: new File(['attachment body'], 'attachment.txt', {
+            type: 'text/plain',
+          }),
+        }),
+      )
+    ).unwrap();
+    await app.queueEditWithAttachment(2);
+    await reconnect();
+    expect(app.storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+
+    network.setOffline();
+    await advanceTime(0);
+    await app.queueEditWithAttachment(3);
+  }
+
+  async function reopen() {
+    resetSessionForTests();
+    return openApp();
+  }
+
+  return { replayEvents, reconnect, sendFileThenQueueEditDeclaringIt, reopen };
+}
+
+test('an edit queued with the id of a file that was already sent still replays with its ref after an app reload', async () => {
+  createMockBrowserOpfs();
+  const app = createReloadableAttachmentApp({
+    sessionKey: 'offline-upload-reuse-after-reload-session',
+  });
+  await app.sendFileThenQueueEditDeclaringIt();
+
+  // --- Action: the user reloads the page before reconnecting ---
+  const reloadedApp = await app.reopen();
+  // The draft still renders the attachment by its id. Its file is gone and
+  // the reloaded app does not know its ref yet.
+  const attachmentHook = renderHook(() =>
+    reloadedApp.storeManager.useOfflineUploadFile('asset-1'),
+  );
+  await flushAllTimers();
+  expect(pick(attachmentHook.result.current, ['status', 'resolvedRef']))
+    .toMatchInlineSnapshot(`
+    resolvedRef: null
+    status: 'missing'
+  `);
+
+  await app.reconnect();
+
+  // The edit queued before the reload kept the ref of the file it declared:
+  // it is sent with it, without uploading again or failing on an upload the
+  // reloaded app no longer knows.
+  expect(app.replayEvents).toMatchInlineSnapshot(
+    `['upload:asset-1', 'execute:2:"server:asset-1"', 'execute:3:"server:asset-1"']`,
+  );
+  expect(
+    reloadedApp.env.apiStore.getOfflineResolutions(),
+  ).toMatchInlineSnapshot(`[]`);
+  // The replay made the ref known again, to the app and to the rendered
+  // attachment, which can now show the server file.
+  expect(
+    reloadedApp.storeManager.getResolvedOfflineUploadRef('asset-1'),
+  ).toMatchInlineSnapshot(`"server:asset-1"`);
+  expect(pick(attachmentHook.result.current, ['status', 'resolvedRef']))
+    .toMatchInlineSnapshot(`
+    resolvedRef: 'server:asset-1'
+    status: 'missing'
+  `);
+
+  attachmentHook.unmount();
+});
+
+test.each(['supersedes', 'merges'] as const)(
+  'an edit that replaces a queued edit declaring an already sent file keeps that file ref after an app reload (%s)',
+  async (replacesQueuedEdit) => {
+    createMockBrowserOpfs();
+    // Each edit of the document replaces the edit still queued for it, by
+    // superseding it or by being merged into it.
+    const app = createReloadableAttachmentApp({
+      sessionKey: `offline-upload-${replacesQueuedEdit}-after-reload-session`,
+      replacesQueuedEdit,
+    });
+    await app.sendFileThenQueueEditDeclaringIt();
+
+    // --- Action: after a reload, still offline, the user edits the document
+    // again. The reloaded app only knows the file ref from the queued edit 3,
+    // which edit 4 replaces ---
+    const reloadedApp = await app.reopen();
+    await reloadedApp.queueEditWithAttachment(4);
+    await app.reconnect();
+
+    // Edit 4 took over the ref edit 3 kept: it is sent with it instead of
+    // failing on an upload the reloaded app no longer knows.
+    expect(app.replayEvents).toMatchInlineSnapshot(
+      `['upload:asset-1', 'execute:2:"server:asset-1"', 'execute:4:"server:asset-1"']`,
+    );
+    expect(
+      reloadedApp.env.apiStore.getOfflineResolutions(),
+    ).toMatchInlineSnapshot(`[]`);
+  },
+);
+
 type AccumulatedAttachmentsOperations = {
   setAttachments: DocumentOfflineOperationDefinition<
     { value: number },
@@ -671,6 +881,8 @@ test('online mutations can resolve staged upload ids after reconnect and use the
       }),
     )
   ).unwrap();
+  // Staged but not sent yet: there is no server ref to read.
+  expect(session.getResolvedOfflineUploadRef('asset-1')).toBeNull();
 
   await act(async () => {
     network.goOnline();
@@ -723,6 +935,8 @@ test('online mutations can resolve staged upload ids after reconnect and use the
       source: 'manual'
       state: 'uploaded'
   `);
+  // Synchronous code reads the ref of the uploaded file without uploading.
+  expect(session.getResolvedOfflineUploadRef('asset-1')).toBe('server:asset-1');
 });
 
 test('upload metadata is exposed by the upload status APIs and handed to the transport when a queued mutation replays its upload dependency', async () => {

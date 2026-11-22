@@ -8,6 +8,7 @@ import {
   rc_parse,
   rc_record,
   rc_string,
+  rc_union,
   rc_unknown,
 } from 'runcheck';
 import type { Result as ResultType } from 't-result';
@@ -21,6 +22,7 @@ import type {
   OfflineOperationUploadsContext,
   OfflineSessionUploadsConfig,
   OfflineUpload,
+  OfflineUploadDependency,
   OfflineUploadFile,
   ReplaceOfflineUploadArgs,
   SaveOfflineUploadArgs,
@@ -58,6 +60,18 @@ export type OfflineEntityMutationKind =
   | 'update'
   | 'delete';
 
+/** Runtime schema of a persisted upload ref. */
+/** @internal */
+export const persistedUploadRefSchema = rc_union(
+  rc_string,
+  rc_number,
+  rc_record(rc_unknown),
+);
+
+/** Runtime schema of persisted upload refs, by upload id. */
+/** @internal */
+export const persistedUploadRefsSchema = rc_record(persistedUploadRefSchema);
+
 /** Runtime schema for validating serialized offline item entity references. */
 /** @internal */
 export const offlineItemEntityRefSchema = rc_object({
@@ -84,6 +98,7 @@ const offlineResolutionBaseFields = {
   updatedAt: rc_number,
   attachedUploadIds: rc_record(rc_string).optionalKey(),
   dependencyUploadIds: rc_array(rc_string).optionalKey(),
+  dependencyUploadRefs: persistedUploadRefsSchema.optionalKey(),
 };
 
 /** Runtime schema for validating persisted offline resolution records on hydration. */
@@ -477,7 +492,12 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * When `ctx.uploadId` is set the failure came from a dependency upload and
      * the mutation was not sent: return `true` to run the upload again on the
      * `replayRetry` cadence, or `false` for a permanent failure (file rejected),
-     * which moves the operation to manual resolution right away.
+     * which moves the operation to manual resolution right away (an optional
+     * upload is left out instead, see `OfflineUploadDependency`).
+     *
+     * It is also called for a failed optional upload of a mutation that runs
+     * directly (`ctx.phase: 'mutation'`) and stayed online: `true` fails the
+     * mutation with the upload error instead of sending it without the file.
      */
     classifyRetryableFailure?: (
       error: unknown,
@@ -786,6 +806,12 @@ type OfflineConflictResolutionRecordBase<
   attachedUploadIds?: OfflineAttachedUploadIds;
   /** Session upload ids that must resolve before replaying the mutation. */
   dependencyUploadIds?: string[];
+  /**
+   * Server refs of dependency uploads that were already sent and deleted when
+   * this work was queued (an id still held by draft data), kept so they
+   * resolve after a reload. Written by TSDF.
+   */
+  dependencyUploadRefs?: Record<string, ValidPayload>;
 };
 
 /** Derived dependency metadata exposed for offline manual resolutions. */
@@ -853,6 +879,12 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   attachedUploadIds?: OfflineAttachedUploadIds;
   /** Session upload ids that must resolve before replaying the mutation. */
   dependencyUploadIds?: string[];
+  /**
+   * Server refs of dependency uploads that were already sent and deleted when
+   * this work was queued (an id still held by draft data), kept so they
+   * resolve after a reload. Written by TSDF.
+   */
+  dependencyUploadRefs?: Record<string, ValidPayload>;
 };
 
 /**
@@ -911,6 +943,11 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns the latest session-scoped offline uploads for the session. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /**
+   * Returns the server ref an upload id resolves to without uploading, or
+   * `null`. See `storeManager.getResolvedOfflineUploadRef`.
+   */
+  getResolvedOfflineUploadRef: (id: string) => TUploadRef | null;
   /**
    * Resolves a staged upload id to its latest final ref, uploading first if
    * needed. Rejects with the error thrown by the `upload` transport, leaving
@@ -1068,6 +1105,12 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   attachedUploadIds?: OfflineAttachedUploadIds;
   /** Session upload ids that must resolve before replaying the mutation. */
   dependencyUploadIds?: string[];
+  /**
+   * Server refs of dependency uploads that were already sent and deleted when
+   * this work was queued (an id still held by draft data), kept so they
+   * resolve after a reload. Written by TSDF.
+   */
+  dependencyUploadRefs?: Record<string, ValidPayload>;
   /** Last recorded sync error if replay failed. */
   lastError?: { message: string };
   /**
@@ -1924,7 +1967,7 @@ export type AnyOfflineOperationDefinition<
   ) => __LEGIT_ANY__[];
   dependsOnUploads?: (
     ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
-  ) => string[];
+  ) => readonly OfflineUploadDependency[];
   cancelledWith?: (
     ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
   ) => OfflineExternalEntityRef[];
@@ -2030,10 +2073,15 @@ export type DocumentOfflineOperationDefinition<
    * Declares which upload ids must finish before replaying this operation.
    * A staged upload is deleted once the last queued operation or resolution
    * record that declares it leaves the queue.
+   *
+   * Return `{ id, optional: true }` for an upload the operation can be sent
+   * without: when the server refuses that file, `execute` runs without its
+   * ref instead of the operation moving to manual resolution. See
+   * {@link OfflineUploadDependency}.
    */
   dependsOnUploads?: (
     ctx: OperationEntityRefsContext<DocumentOperationInput<TOptions>>,
-  ) => string[];
+  ) => readonly OfflineUploadDependency[];
 } & ([State] extends [never] ? never : unknown);
 
 /**
@@ -2162,8 +2210,15 @@ export type CollectionOfflineOperationDefinition<
    * Declares which upload ids must finish before replaying this operation.
    * A staged upload is deleted once the last queued operation or resolution
    * record that declares it leaves the queue.
+   *
+   * Return `{ id, optional: true }` for an upload the operation can be sent
+   * without: when the server refuses that file, `execute` runs without its
+   * ref instead of the operation moving to manual resolution. See
+   * {@link OfflineUploadDependency}.
    */
-  dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
+  dependsOnUploads?: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => readonly OfflineUploadDependency[];
   /**
    * Declares the entities of OTHER stores this operation belongs to (for
    * example the task a queued comment was written on).
@@ -2322,8 +2377,15 @@ export type ListQueryOfflineOperationDefinition<
    * Declares which upload ids must finish before replaying this operation.
    * A staged upload is deleted once the last queued operation or resolution
    * record that declares it leaves the queue.
+   *
+   * Return `{ id, optional: true }` for an upload the operation can be sent
+   * without: when the server refuses that file, `execute` runs without its
+   * ref instead of the operation moving to manual resolution. See
+   * {@link OfflineUploadDependency}.
    */
-  dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
+  dependsOnUploads?: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => readonly OfflineUploadDependency[];
   /**
    * Declares the entities of OTHER stores this operation belongs to (for
    * example the task a queued comment was written on).

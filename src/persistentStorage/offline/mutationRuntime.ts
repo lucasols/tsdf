@@ -44,8 +44,20 @@ export type OfflineMutationResult<T> =
 
 /** Outcome of resolving the dependency uploads of a direct run. */
 type DirectMutationUploadsResolution =
-  | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
-  | { failedUploadId: string; error: unknown };
+  | {
+      failedUploadId?: undefined;
+      refs: Record<string, ValidPayload>;
+      refusedUploadErrorsById: Record<string, unknown>;
+    }
+  | {
+      failedUploadId: string;
+      error: unknown;
+      /**
+       * `classifyError` result for this failure when it was already
+       * classified (an optional upload), so it is not classified again.
+       */
+      shouldQueue: boolean | undefined;
+    };
 
 export type PreparedOfflineMutation = {
   initialAction: 'run' | 'queue';
@@ -69,7 +81,10 @@ export type PreparedOfflineMutation = {
    * including the ones still being sent that fail too
    */
   markUploadsFailed: () => Promise<void>;
-  /** Also releases the dependency uploads the direct request consumed */
+  /**
+   * Also releases the dependency uploads the direct request consumed, which
+   * excludes the refused optional ones
+   */
   handleDirectSuccess: () => Promise<void>;
   /**
    * The mutation no longer holds its reserved queue position: it was queued
@@ -100,8 +115,9 @@ export type OfflineAwareMutationController<
 
 export function createDirectMutationContext(
   resolvedRefsById: Record<string, ValidPayload>,
+  refusedUploadErrorsById: Record<string, unknown> = {},
 ): OfflineDirectMutationContext {
-  return { uploads: { resolvedRefsById } };
+  return { uploads: { resolvedRefsById, refusedUploadErrorsById } };
 }
 
 export async function runHybridOfflineMutation<
@@ -136,25 +152,31 @@ export async function runHybridOfflineMutation<
   // Set when resolving a dependency upload failed, which means the direct
   // request was never sent.
   let failedUploadId: string | undefined;
+  let classifiedShouldQueue: boolean | undefined;
 
   try {
     let resolvedRefsById: Record<string, ValidPayload> = {};
+    let refusedUploadErrorsById: Record<string, unknown> = {};
     if (prepared.resolveDirectUploads) {
       const resolution = await prepared.resolveDirectUploads();
       if (resolution.failedUploadId !== undefined) {
         failedUploadId = resolution.failedUploadId;
+        classifiedShouldQueue = resolution.shouldQueue;
         throw resolution.error;
       }
       resolvedRefsById = resolution.refs;
+      refusedUploadErrorsById = resolution.refusedUploadErrorsById;
     }
 
     const data = await directMutation(
-      createDirectMutationContext(resolvedRefsById),
+      createDirectMutationContext(resolvedRefsById, refusedUploadErrorsById),
     );
     await prepared.handleDirectSuccess();
     return { kind: 'online', data };
   } catch (error) {
-    const shouldQueue = await prepared.classifyError(error, failedUploadId);
+    const shouldQueue =
+      classifiedShouldQueue ??
+      (await prepared.classifyError(error, failedUploadId));
     if (!shouldQueue) {
       if (failedUploadId !== undefined) await prepared.markUploadsFailed();
       throw error;

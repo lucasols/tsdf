@@ -920,6 +920,7 @@ class SessionOfflineCoordinator {
   #uploadsConfig: OfflineSessionUploadsConfig | undefined;
   #uploads = new Map<string, OfflineStoredUploadRecord>();
   #storedUploadsRestore: Promise<void> | null = null;
+  #storedUploadsListed = false;
   /**
    * Ids other tabs deleted while this tab's stored uploads were being listed,
    * so the list result can't bring them back. `null` outside the listing.
@@ -953,6 +954,13 @@ class SessionOfflineCoordinator {
    * for the rest of the session instead of failing.
    */
   #releasedUploadRefs = new Map<string, ValidPayload>();
+  /**
+   * Errors of the optional uploads the server refused, by id, so later work
+   * declaring them as optional leaves them out without sending the file
+   * again. Only honored while the record is still `failed`: staging the id
+   * again, an upload that succeeded, or a removed record ends the refusal.
+   */
+  #refusedUploadErrors = new Map<string, unknown>();
   /** Adapter removals in flight, awaited before the same id is read or saved. */
   #uploadRemovals = new Map<string, Promise<void>>();
   /** Adapter saves in flight, awaited before the same id is removed. */
@@ -1706,6 +1714,27 @@ class SessionOfflineCoordinator {
     return this.store.state.uploads;
   }
 
+  /** Ref of an upload released after it was sent, kept in memory. */
+  getReleasedUploadRef(id: string): ValidPayload | undefined {
+    return this.#releasedUploadRefs.get(id);
+  }
+
+  /**
+   * Server ref `id` resolves to without uploading anything: the ref of a
+   * staged upload in `uploaded` state, or of an upload released after it was
+   * sent. `null` otherwise.
+   */
+  getResolvedUploadRef(id: string): ValidPayload | null {
+    // The published list, so uploads another tab sent count too.
+    const upload = this.store.state.uploads.find(
+      (candidate) => candidate.id === id,
+    );
+    if (upload) {
+      return upload.state === 'uploaded' ? (upload.resolvedRef ?? null) : null;
+    }
+    return this.#releasedUploadRefs.get(id) ?? null;
+  }
+
   async saveUpload(args: {
     id: string;
     file: Blob | File;
@@ -1917,6 +1946,8 @@ class SessionOfflineCoordinator {
   ): Promise<Record<string, ValidPayload>> {
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
+        // Resolving an id on purpose sends it again even if it was refused.
+        this.#refusedUploadErrors.delete(id);
         const resolvedRef = await this.#ensureUploadResolved(
           id,
           false,
@@ -1945,6 +1976,17 @@ class SessionOfflineCoordinator {
      * active again.
      */
     canSendUploads?: () => boolean,
+    /**
+     * Refs the queued work persisted for uploads that were released before it
+     * was queued, used for ids the session no longer knows (after a reload).
+     */
+    keptRefs?: Record<string, ValidPayload>,
+    /**
+     * Upload attempts of earlier calls for the same run, by id: an upload
+     * that already settled there (or is still running) is not sent again, so
+     * a failure that settled after the first reported one is returned as is.
+     */
+    attempts?: Map<string, Promise<ValidPayload>>,
   ): Promise<
     | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
     | { failedUploadId: string; error: unknown }
@@ -1955,11 +1997,18 @@ class SessionOfflineCoordinator {
     // without waiting for the uploads that are still running.
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
-        try {
-          return [
+        let attempt = attempts?.get(id);
+        if (!attempt) {
+          attempt = this.#ensureUploadResolved(
             id,
-            await this.#ensureUploadResolved(id, true, canSendUploads),
-          ] as const;
+            true,
+            canSendUploads,
+            keptRefs && Object.hasOwn(keptRefs, id) ? keptRefs[id] : undefined,
+          );
+          attempts?.set(id, attempt);
+        }
+        try {
+          return [id, await attempt] as const;
         } catch (error) {
           failures.push({ failedUploadId: id, error });
           throw error;
@@ -1997,6 +2046,36 @@ class SessionOfflineCoordinator {
     await Promise.all(
       settledIds.map((id) => this.#markUploadFailed(id).catch(reportError)),
     );
+  }
+
+  /**
+   * Marks optional uploads the server refused as `failed` (like
+   * `markUploadsFailed`) and keeps their errors, so later work that declares
+   * them as optional leaves them out instead of sending the file again.
+   */
+  async markUploadsRefused(errorsById: Map<string, unknown>): Promise<void> {
+    for (const [id, error] of errorsById) {
+      this.#refusedUploadErrors.set(id, error);
+    }
+    await this.markUploadsFailed([...errorsById.keys()]);
+  }
+
+  hasRefusedUploads(): boolean {
+    return this.#refusedUploadErrors.size > 0;
+  }
+
+  /**
+   * The error the server refused optional upload `id` with, while its record
+   * is still `failed`. `undefined` when it was not refused, or was staged
+   * again, uploaded or removed since.
+   */
+  getRefusedUploadError(id: string): { error: unknown } | undefined {
+    if (!this.#refusedUploadErrors.has(id)) return undefined;
+    if (this.#uploads.get(id)?.state !== 'failed') {
+      this.#refusedUploadErrors.delete(id);
+      return undefined;
+    }
+    return { error: this.#refusedUploadErrors.get(id) };
   }
 
   async #markUploadFailed(id: string): Promise<void> {
@@ -2513,16 +2592,21 @@ class SessionOfflineCoordinator {
    * a failed direct mutation does before deciding whether to queue it: the
    * network detection is read again first, and the failure is only classified
    * when that did not put the session in an offline mode. Resolves with the
-   * mode the session's operations follow afterwards, `null` while online.
+   * mode the session's operations follow afterwards, `null` while online,
+   * or `'overtaken'` when a newer classification dropped the classifier's
+   * answer and the session stayed online: the failure is left unclassified.
    */
   async classifyRequestFailure(
     error: unknown,
     ctx: OfflineFailureContext,
-  ): Promise<OfflineMutationQueueingCause | null> {
+  ): Promise<OfflineMutationQueueingCause | 'overtaken' | null> {
     await this.refreshNetworkState();
 
-    if (this.getActiveOfflineCause() === null) {
-      await this.classifyFailure(error, ctx);
+    if (
+      this.getActiveOfflineCause() === null &&
+      (await this.classifyFailure(error, ctx)) === 'overtaken'
+    ) {
+      return this.getActiveOfflineCause() ?? 'overtaken';
     }
 
     return this.getActiveOfflineCause();
@@ -2540,10 +2624,16 @@ class SessionOfflineCoordinator {
     return null;
   }
 
+  /**
+   * Classifies a failure, activating the offline mode it points to. Resolves
+   * with `'overtaken'` when the classifier's explicit answer was dropped
+   * because a newer classification started meanwhile, which callers that
+   * only read the session mode treat as `'ignore'`.
+   */
   async classifyFailure(
     error: unknown,
     ctx: OfflineFailureContext,
-  ): Promise<OfflineFailureClassification> {
+  ): Promise<OfflineFailureClassification | 'overtaken'> {
     if (!this.#canClassifyFailures()) return 'ignore';
 
     const { classifyFailure, healthCheck } = this.#canonicalConfig;
@@ -2560,7 +2650,7 @@ class SessionOfflineCoordinator {
       // An `unknown` one decides nothing by itself: it goes on to the health
       // check, whose answer is shared by every failure waiting for it
       if (result !== 'unknown' && !this.isCurrentClassificationToken(token)) {
-        return 'ignore';
+        return 'overtaken';
       }
     }
 
@@ -2684,10 +2774,15 @@ class SessionOfflineCoordinator {
     );
   }
 
+  /**
+   * Whether `classifyRetryableFailure` considers the failure retryable.
+   * Resolves with `'overtaken'` when a newer call started while it ran, which
+   * drops its answer: callers that need a yes treat it as `false`.
+   */
   async classifyRetriableFailure(
     error: unknown,
     ctx: OfflineStoreFailureContext,
-  ): Promise<boolean> {
+  ): Promise<boolean | 'overtaken'> {
     if (!this.#canonicalConfig.classifyRetriableFailure) return false;
 
     const token = this.getRetriableFailureToken();
@@ -2697,7 +2792,7 @@ class SessionOfflineCoordinator {
     );
 
     if (!this.isCurrentRetriableFailureToken(token)) {
-      return false;
+      return 'overtaken';
     }
 
     return result;
@@ -2815,7 +2910,19 @@ class SessionOfflineCoordinator {
       this.#onPersistentStorageError?.(error);
     } finally {
       this.#uploadsRemovedWhileListing = null;
+      this.#storedUploadsListed = true;
     }
+  }
+
+  /**
+   * Waits for the stored uploads to be listed, which right after a reload
+   * leaves `getUploads()` empty for a moment. `undefined` once they are (or
+   * without uploads), so callers only yield when there is something to wait
+   * for.
+   */
+  waitForStoredUploads(): Promise<void> | undefined {
+    if (this.#storedUploadsListed) return undefined;
+    return this.#restoreStoredUploads();
   }
 
   async #getUploadRecord(
@@ -3338,10 +3445,12 @@ class SessionOfflineCoordinator {
      */
     forReplay = false,
     canSend?: () => boolean,
+    /** Ref the queued work kept for this upload, see `resolveReplayUploadIds` */
+    keptRef?: ValidPayload,
   ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
-      const releasedRef = this.#releasedUploadRefs.get(id);
+      const releasedRef = this.#resolveReleasedOrKeptRef(id, keptRef);
       if (releasedRef !== undefined) return releasedRef;
       throw new Error(`Unknown offline upload "${id}"`);
     }
@@ -3365,7 +3474,7 @@ class SessionOfflineCoordinator {
       .resultifyAdd(async () => {
         const queuedRecord = await this.#getUploadRecord(id);
         if (!queuedRecord) {
-          const releasedRef = this.#releasedUploadRefs.get(id);
+          const releasedRef = this.#resolveReleasedOrKeptRef(id, keptRef);
           if (releasedRef !== undefined) return releasedRef;
           throw new Error(`Unknown offline upload "${id}"`);
         }
@@ -3458,6 +3567,30 @@ class SessionOfflineCoordinator {
 
     this.#uploadPromisesById.set(id, uploadPromise);
     return uploadPromise;
+  }
+
+  /**
+   * Released ref of `id`, falling back to the ref queued work kept for it: it
+   * was read back from storage, so it is checked against `resolvedRefSchema`
+   * and then known as released for the rest of the app session.
+   */
+  #resolveReleasedOrKeptRef(
+    id: string,
+    keptRef: ValidPayload | undefined,
+  ): ValidPayload | undefined {
+    const releasedRef = this.#releasedUploadRefs.get(id);
+    if (releasedRef !== undefined || keptRef === undefined) return releasedRef;
+
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    const parsedRef =
+      schema === undefined ? keptRef : parseRestoredUploadRef(schema, keptRef);
+    if (parsedRef === undefined) return undefined;
+
+    this.#releasedUploadRefs.set(id, parsedRef);
+    // A rendered file of the id now exposes the ref.
+    const fileEntry = this.#uploadFiles.get(id);
+    if (fileEntry) this.#syncUploadFile(id, fileEntry);
+    return parsedRef;
   }
 
   async #cleanupUnusedMutationUploads(): Promise<void> {
@@ -4431,7 +4564,8 @@ export function createOfflineSession<
         ctx.operationName = options.operationName;
       }
 
-      return (await coordinator.classifyRequestFailure(error, ctx)) ?? 'ignore';
+      const cause = await coordinator.classifyRequestFailure(error, ctx);
+      return cause === null || cause === 'overtaken' ? 'ignore' : cause;
     },
     getOfflineEntities: () => {
       const sessionKey = getSessionKey();
@@ -4458,6 +4592,15 @@ export function createOfflineSession<
       return castUploads<TUploadRef>(
         getActiveCoordinator(false)?.getUploads() ?? [],
       );
+    },
+    getResolvedOfflineUploadRef: (id) => {
+      if (getSessionKey() === false) return null;
+
+      const resolvedRef =
+        getActiveCoordinator(false)?.getResolvedUploadRef(id) ?? null;
+      return resolvedRef === null
+        ? null
+        : castResolvedUploadRef<TUploadRef>(resolvedRef);
     },
     resolveOfflineUpload: async (id) => {
       const coordinator = getActiveCoordinator();

@@ -768,10 +768,13 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `deleteOfflineUpload(id)`
 - `resolveOfflineUpload(id)`
 - `resolveOfflineUploads(ids)`
+- `getResolvedOfflineUploadRef(id)` — see [Following a released upload to its server ref](#following-a-released-upload-to-its-server-ref)
 - `useOfflineUploads()`
 - `useOfflineUploadFile(id)` — see [Rendering staged files](#rendering-staged-files)
 
-Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. An upload the operation can be sent without is declared as `{ id, optional: true }`, see [Optional uploads](#optional-uploads).
+
+Right after a reload the session lists its stored uploads in the background, so `getOfflineUploads()` is empty for a moment. A mutation (queued, run directly, or a `requeue`) whose operation declares `dependsOnUploads` waits for that list before calling it, so a `dependsOnUploads` that only returns the ids `getOfflineUploads()` still lists sees the restored uploads. Operations without `dependsOnUploads` only wait when called while an older mutation of the same store is still waiting, so they keep their place in the queue behind it. A mutation of another store called during that wait (a few milliseconds) does not wait and can replay first: when a change of another store needs the waiting one on the server first, await the first mutation before making it. If the app switches to another session meanwhile, the waiting mutation fails instead of running in the new session. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
 ### Direct runs
 
@@ -873,7 +876,7 @@ Set `resolvedRefSchema` to validate those refs. It accepts the same schemas as a
 - Refs restored from the upload adapter are parsed once when their record is loaded, and refs received from another tab once per record version.
 - A ref that fails the schema is dropped and its upload goes back to `pending`. The staged file is kept with the record, so the next `resolveOfflineUpload(s)` call or the replay of an operation that depends on the upload sends the file through the transport again and stores the new ref. The dependent operation is not failed, and `execute` never receives the invalid ref. The file uploaded under the old ref is not cleaned up by TSDF.
 - The exception is a ref another tab sends when it deletes an upload that was already sent: its staged file is gone, so a ref that fails the schema can't be uploaded again, and its id stops resolving (`resolveOfflineUpload(s)` returns an unknown upload error).
-- Queued operations only persist upload ids. Their refs are resolved when the operation replays, so they are covered by the same validation.
+- Queued operations only persist upload ids, plus the refs of uploads that were already sent and deleted when the operation was queued (see [Upload lifecycle](#upload-lifecycle)). Their refs are resolved when the operation replays, so they are covered by the same validation: a kept ref that fails the schema can't be uploaded again (its file is gone), so the id is unknown.
 - Without `resolvedRefSchema`, restored refs are exposed as they were stored.
 
 ### Upload metadata
@@ -936,7 +939,7 @@ A staged upload follows the queued work that depends on it:
 - References are session-wide. An upload declared by queued mutations of several stores is deleted only after the last of them is gone. Only stores created in the tab count: an upload staged with `saveOfflineUpload` and shared with a store that is not created in the tab yet (a code-split screen, or the app restarted on another screen) can be deleted when the stores already created release it, and that store's queued mutation then fails to replay. If an upload id is shared across lazily created stores, create those stores before their queued work replays, or stage a separate upload for each store. Files attached directly to a mutation don't have this limit: they record the store that queued them (see `storeName` above).
 - An upload that no queued work declared yet is never deleted for being unreferenced: the app stages the file first and queues the mutation afterwards. It stays until a mutation that declares it is queued and leaves the queue or runs directly, until the app calls `deleteOfflineUpload(id)`, or until it expires. Unreferenced uploads expire after the session has been online for one week without interruption (going offline restarts the window). This also applies to uploads the app resolves itself with `resolveOfflineUpload(s)`, e.g. for a mutation without `offline` descriptor, because they never enter the queue.
 
-After an upload that was already sent is deleted, its id keeps resolving to the same server ref for the rest of the app session, in every tab open when it was deleted: a mutation queued later that still declares it (for example from optimistic or draft data that was not updated with the server ref yet) replays with that ref without uploading again, and `resolveOfflineUpload(id)` returns it. This ref is kept in memory only: after a reload, in a tab opened later, or after `deleteOfflineUpload(id)`, the id is unknown again, so stage the file again with `saveOfflineUpload` before reusing it. Uploads deleted before they were sent (discarded, superseded or cancelled work) are not kept.
+After an upload that was already sent is deleted, its id keeps resolving to the same server ref for the rest of the app session, in every tab open when it was deleted: a mutation queued later that still declares it (for example from optimistic or draft data that was not updated with the server ref yet) replays with that ref without uploading again, and `resolveOfflineUpload(id)` returns it. The session keeps this ref in memory only, but a mutation queued in that window persists the ref with its queue entry (and with the resolution it may turn into), so it still replays with it after a reload or from a tab opened later. Elsewhere (a new mutation after a reload, in a tab opened later, or after `deleteOfflineUpload(id)`) the id is unknown again, so write the server ref into the data, or stage the file again with `saveOfflineUpload` before reusing it. Uploads deleted before they were sent (discarded, superseded or cancelled work) are not kept.
 
 Files attached directly to a mutation (`upload: { ... }` in `performMutation`) belong to that single queued mutation and are deleted with it in the same situations.
 
@@ -1006,7 +1009,17 @@ function ImageNode({ uploadId }: { uploadId: string }) {
 }
 ```
 
-`resolvedRef` is the ref `resolveOfflineUpload(id)` returns for a sent upload that was deleted (see [Upload lifecycle](#upload-lifecycle)) and is kept for as long: in memory, for the rest of the app session, in every tab open when the upload was deleted. Tabs that show the staged file switch to the ref as soon as it is deleted, and components mounted later get it on their first render. It is `null` after a reload, in a tab opened later, after `deleteOfflineUpload(id)`, and for uploads deleted before they were sent, so data that must keep its file across reloads still needs the server ref written into it.
+Code that runs outside of render (building a mutation input, replacing ids in editor content, cleaning up removed files) reads the same ref synchronously with `storeManager.getResolvedOfflineUploadRef(id)`. It returns the `resolvedRef` of a staged upload in `uploaded` state (the entry `getOfflineUploads()` lists, also when another tab sent it), or the ref of a sent upload that was deleted, and `null` otherwise: not sent yet, last attempt failed, unknown id, or while the session is still restoring its stored uploads after a reload. It is typed with the upload ref of the manager.
+
+```ts
+function serializeBody(body: EditorContent) {
+  return replaceImageIds(body, (uploadId) =>
+    storeManager.getResolvedOfflineUploadRef(uploadId),
+  );
+}
+```
+
+`resolvedRef` is the ref `resolveOfflineUpload(id)` returns for a sent upload that was deleted (see [Upload lifecycle](#upload-lifecycle)) and is kept for as long: in memory, for the rest of the app session, in every tab open when the upload was deleted. Tabs that show the staged file switch to the ref as soon as it is deleted, and components mounted later get it on their first render. It is `null` after a reload, in a tab opened later (until queued work that kept the ref replays there), after `deleteOfflineUpload(id)`, and for uploads deleted before they were sent, so data that must keep its file across reloads still needs the server ref written into it.
 
 ### Upload failure handling
 
@@ -1018,7 +1031,7 @@ When a queued operation with `dependsOnUploads` replays, a transport failure is 
 
 - **Connection problem or outage** - `classifyFailure` returns `'network'` or `'outage'` (and that mode is enabled, as for any other failure). The session enters that mode, the upload goes back to `pending` (with `lastError` set) and the operation stays queued. Replay runs the upload again when the session recovers. The replay retry budget is not consumed, however long the outage lasts.
 - **Transient failure that is safe to repeat** - `classifyFailure` returns `'ignore'` and `classifyRetryableFailure` returns `true`. The upload goes back to `pending` and is sent again on the `replayRetry` cadence (`intervalMs`, 5s by default). After `maxFailures` attempts (3 by default) it is handled as a permanent failure.
-- **Permanent failure** (file too large, type not accepted) - no hook recognizes the error, which is the default. The upload becomes `failed` and the operation moves right away to a `retry-exhausted` resolution: `lastReplayError` carries the upload error and `dependencyUploadIds` lists the uploads it depends on. Resolving it with `retry` requeues the operation, which runs the upload again; `discard` removes the operation and, when no other queued work declares the upload, deletes the staged file (see "Upload lifecycle").
+- **Permanent failure** (file too large, type not accepted) - no hook recognizes the error, which is the default. The upload becomes `failed` and the operation moves right away to a `retry-exhausted` resolution: `lastReplayError` carries the upload error and `dependencyUploadIds` lists the uploads it depends on. Resolving it with `retry` requeues the operation, which runs the upload again; `discard` removes the operation and, when no other queued work declares the upload, deletes the staged file (see "Upload lifecycle"). An [optional upload](#optional-uploads) is left out instead, and the operation is sent without it.
 
 `lastError` is cleared when an upload succeeds.
 
@@ -1069,6 +1082,35 @@ A transport failure while a [direct run](#direct-runs) resolves its uploads is c
 
 With the session gate closed, the failure is not classified: the mutation fails with it.
 
+#### Optional uploads
+
+An operation that can be sent without one of its files declares it as optional: `dependsOnUploads` returns `{ id, optional: true }` for it instead of the plain id. For example a document whose editor images can keep their local reference, while its cover is required:
+
+```ts
+dependsOnUploads: ({ input }) => [
+  input.coverId,
+  ...input.imageIds.map((id) => ({ id, optional: true })),
+],
+execute: ({ input, uploads }) =>
+  api.saveDoc({
+    ...input,
+    // A refused image is missing from `resolvedRefsById`: its local id stays
+    // in the body.
+    body: replaceImageIds(input.body, uploads.resolvedRefsById),
+  }),
+```
+
+When the server refuses an optional upload, the operation is sent without it instead of moving to manual resolution or failing:
+
+- Refused means the failure is permanent, as classified above. During replay: `classifyFailure` keeps the session online and `classifyRetryableFailure` returns `false`, or the replay retries of a retryable failure are used up. During a direct run: the session stays online and `classifyRetryableFailure`, called with `phase: 'mutation'` and `uploadId` set, returns `false`.
+- `execute` (or the direct `mutation`) runs with the other uploads. The refused id is missing from `uploads.resolvedRefsById` and listed in `uploads.refusedUploadErrorsById` with the error the transport threw, so the app can keep the local reference, drop it, or tell the user.
+- The refused upload is not deleted with the work that declared it, since it was not sent: it stays staged as `failed` with `lastError`, so `useOfflineUploadFile(id)` keeps rendering the file. Later work of the session that declares it as optional is sent without it the same way, without uploading the file again (an autosaving editor does not resend a rejected image on every save), and lists it in `refusedUploadErrorsById` with the same error. It is uploaded again when work declares it as required, when `resolveOfflineUpload(id)` is called, or once the id is staged again. After a reload the session no longer knows it was refused, so the next work declaring it uploads it once more. Delete it with `deleteOfflineUpload(id)` once the app no longer needs it, otherwise it expires like the uploads no mutation used.
+- A connection problem, an outage, or a retryable failure with retries left is handled as for a required upload: the operation waits and is sent with the file once it uploads. In a direct run a retryable failure fails the mutation with the upload error, so running it again uploads the file again.
+- A required upload that fails permanently still sends the operation to manual resolution, whatever happened to its optional uploads. An id returned both as a plain id and as optional is required.
+- With the session gate closed, upload failures are not classified, so a failed optional upload fails the mutation like a required one.
+- An async classifier answer is dropped when a newer classification (of any request of the session) starts before it answers, and the dropped answer decides nothing. A failed optional upload whose answer was dropped is handled like a required one, never as refused: a direct run fails with the upload error, and a replayed operation is retried or moves to manual resolution as for a required upload.
+- Queued work only persists the upload ids: the optional marks are read from the `dependsOnUploads` of the running deploy when an upload fails.
+
 #### `resolveOfflineUpload(s)`
 
 When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again. To let the session classify the failure (and possibly enter offline mode), pass the error to `storeManager.reportOfflineFailure(error)`; see [Failures of the app's own requests](#failures-of-the-apps-own-requests).
@@ -1078,6 +1120,6 @@ When the app uploads a staged file itself, a transport failure is returned to th
 - `pending` - staged and waiting to be uploaded, including uploads waiting for an automatic retry (those have `lastError` set).
 - `uploading` - the transport is running.
 - `uploaded` - the transport returned the final ref (`resolvedRef`).
-- `failed` - the last attempt failed and TSDF will not retry on its own. A `failed` upload is never blocked: it is uploaded again the next time an operation that depends on it is replayed or runs directly, or `resolveOfflineUpload(s)` is called for it.
+- `failed` - the last attempt failed and TSDF will not retry on its own. A `failed` upload is never blocked: it is uploaded again the next time an operation that depends on it is replayed or runs directly, or `resolveOfflineUpload(s)` is called for it. The exception is an optional upload the server refused: work of the same session declaring it as optional leaves it out without uploading it (see [Optional uploads](#optional-uploads)).
 
 Queued mutations and staged uploads live in browser storage (localStorage, IndexedDB, OPFS), which the browser may evict under storage pressure unless the origin was granted persistent storage. TSDF does not request it: `navigator.storage.persist()` is an origin-wide permission and some browsers prompt for it, so the app should call it at a moment of its choosing (for example when the first change is queued).
