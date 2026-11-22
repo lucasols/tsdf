@@ -163,11 +163,12 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * the request. The mode does not account for `mutationQueueing`: check that
    * the mode's policy is not `'disallow'` before staging work for a queued
    * mutation. A mode that is disabled is never entered, and it resolves to
-   * `'ignore'` without calling any hook while the session gate is closed,
-   * there is no active session key or no `offlineSession` is configured.
+   * `'ignore'` without calling `classifyFailure` or `healthCheck` while the
+   * session gate is closed, there is no active session key or no
+   * `offlineSession` is configured.
    *
-   * It rejects only when `classifyFailure` or an async `network.getIsOffline`
-   * throws.
+   * It rejects only when `classifyFailure` or `network.getIsOffline` throws
+   * (or returns a promise that rejects).
    */
   reportOfflineFailure: (
     error: unknown,

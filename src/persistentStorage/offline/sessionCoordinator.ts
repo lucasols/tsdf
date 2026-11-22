@@ -2490,14 +2490,18 @@ class SessionOfflineCoordinator {
   ): Promise<OfflineMutationQueueingCause | null> {
     await this.refreshNetworkState();
 
-    if (this.#getActiveOfflineCause() === null) {
+    if (this.getActiveOfflineCause() === null) {
       await this.classifyFailure(error, ctx);
     }
 
-    return this.#getActiveOfflineCause();
+    return this.getActiveOfflineCause();
   }
 
-  #getActiveOfflineCause(): OfflineMutationQueueingCause | null {
+  /**
+   * The offline mode the session's operations follow: `network` first, then
+   * `outage`, each only while enabled and active; `null` while online.
+   */
+  getActiveOfflineCause(): OfflineMutationQueueingCause | null {
     const { network, outage } = this.store.state.status;
 
     if (isModeEffectivelyActive(network)) return 'network';

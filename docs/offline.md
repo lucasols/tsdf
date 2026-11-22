@@ -235,7 +235,7 @@ async function attachFile(id: string, file: File) {
 }
 ```
 
-The answer is the session's mode, whatever `mutationQueueing` says: when that mode's policy is `'disallow'`, the mutation that would use the staged file runs online and fails, so check it before staging, as above. A mode that is disabled is never entered. It rejects only when `classifyFailure` or an async `network.getIsOffline` throws. While the session gate is closed, when there is no active session key or when no `offlineSession` is configured, it resolves to `'ignore'` without calling any hook. There is nothing to report on success: the session leaves offline mode through its usual recovery checks.
+The answer is the session's mode, whatever `mutationQueueing` says: when that mode's policy is `'disallow'`, the mutation that would use the staged file runs online and fails, so check it before staging, as above. A mode that is disabled is never entered. It rejects only when `classifyFailure` or `network.getIsOffline` throws (or returns a promise that rejects). While the session gate is closed, when there is no active session key or when no `offlineSession` is configured, it resolves to `'ignore'` without calling `classifyFailure` or `healthCheck`. There is nothing to report on success: the session leaves offline mode through its usual recovery checks.
 
 ## Reading While Offline
 

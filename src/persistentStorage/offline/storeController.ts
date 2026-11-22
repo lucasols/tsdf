@@ -52,7 +52,6 @@ import {
   getOrCreateSessionOfflineCoordinator,
 } from './sessionCoordinator';
 import {
-  isModeEffectivelyActive,
   OfflineResolutionConflictParseError,
   offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
@@ -737,22 +736,10 @@ export function createOfflineStoreController<
     return sessionConfig.enabled?.() !== false;
   }
 
-  function getActiveMutationQueueingCause(
-    current: ActiveSessionState,
-  ): OfflineMutationQueueingCause | null {
-    const status = current.session.getStatus();
-
-    if (isModeEffectivelyActive(status.network)) return 'network';
-
-    if (isModeEffectivelyActive(status.outage)) return 'outage';
-
-    return null;
-  }
-
   function shouldTreatFutureOperationsAsOffline(
     current: ActiveSessionState,
   ): boolean {
-    return getActiveMutationQueueingCause(current) !== null;
+    return current.session.getActiveOfflineCause() !== null;
   }
 
   function isMutationQueueingAllowed(
@@ -915,7 +902,7 @@ export function createOfflineStoreController<
       return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
     }
 
-    const cause = getActiveMutationQueueingCause(current);
+    const cause = current.session.getActiveOfflineCause();
     if (cause === null) return 'run';
 
     if (isMutationQueueingAllowed(cause)) return 'queue';
