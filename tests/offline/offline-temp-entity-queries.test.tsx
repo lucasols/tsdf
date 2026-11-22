@@ -24,6 +24,7 @@ import {
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type CreateListQueryUserOperations,
@@ -36,6 +37,8 @@ import {
 } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
+
+const HOUR_MS = 60 * 60 * 1000;
 
 type CreateUserTempEntity = NonNullable<
   CreateListQueryUserOperations['createUser']['tempEntity']
@@ -772,6 +775,152 @@ describe('temp entities declared in list queries', () => {
       `);
 
       hook.unmount();
+    },
+  );
+
+  test.each([
+    { storage: 'local storage', storageAdapter: 'local-sync' },
+    { storage: 'async storage', storageAdapter: opfsPersistentStorage },
+  ] as const)(
+    'saved lists a filter does not match keep their last access time, so storage expiry and eviction still see them as unused ($storage)',
+    async ({ storageAdapter }) => {
+      const sessionKey = 'temp-queries-filter-access-session';
+      const storeName = 'temp-queries-filter-access-store';
+      const asyncStorage =
+        storageAdapter === 'local-sync'
+          ? null
+          : createOpfsPersistentStorageTestStore();
+      const localStorageScope = createLocalStoragePersistentTestStore().scope(
+        storeName,
+        sessionKey,
+      );
+      const asyncStorageScope = asyncStorage?.scope(storeName, sessionKey);
+
+      function formatAccessTime(lastAccessAt: number | undefined) {
+        if (lastAccessAt === undefined) return 'missing';
+        return `${Math.floor((lastAccessAt - TEST_INITIAL_TIME) / HOUR_MS)}h`;
+      }
+
+      function readListAccessTime(query: ListQueryParams) {
+        return formatAccessTime(
+          asyncStorage && asyncStorageScope
+            ? asyncStorage.readMetadata(
+                asyncStorageScope.listQuery.queryStorageKey(query),
+              )?.lastAccessAt
+            : localStorageScope.listQuery.readQueryEntry(query).timestamp,
+        );
+      }
+
+      function readRowAccessTime(id: number) {
+        return formatAccessTime(
+          asyncStorage && asyncStorageScope
+            ? asyncStorage.readMetadata(
+                asyncStorageScope.listQuery.itemStorageKey('users', id),
+              )?.lastAccessAt
+            : localStorageScope.listQuery.readItemEntry('users', id).timestamp,
+        );
+      }
+
+      /** Last access time saved for each entry, in hours since the start */
+      function readSavedAccessTimes() {
+        return {
+          allUsersList: readListAccessTime(usersQuery),
+          usersStartingWithAList: readListAccessTime(usersStartingWithAQuery),
+          // Ada is in both lists, Grace only in the full one
+          adaRow: readRowAccessTime(1),
+          graceRow: readRowAccessTime(2),
+        };
+      }
+
+      // A quick add on the "A" tab of the users page: it lists the users
+      // whose name starts with A, so the created row is declared into the
+      // saved lists filtered to them.
+      const envOptions = {
+        sessionKey,
+        storeName,
+        testScenario: 'idle',
+        addToQueries: {
+          queries: (payload) =>
+            payload.filters?.some(
+              (filter) => filter.op === 'startsWith' && filter.value === 'A',
+            ) ?? false,
+          appendTo: 'start',
+        },
+        storageAdapter,
+      } satisfies Parameters<typeof createUsersEnv>[0];
+
+      function renderUsersList(
+        env: ReturnType<typeof createUsersEnv>['env'],
+        query: ListQueryParams,
+      ) {
+        return renderHook(() =>
+          env.apiStore.useListQuery(query, {
+            itemSelector: (item) => item.name,
+          }),
+        );
+      }
+
+      // At 0h the user sees both lists online, so they are saved
+      const first = createUsersEnv(envOptions);
+      const firstAllUsers = renderUsersList(first.env, usersQuery);
+      const firstUsersStartingWithA = renderUsersList(
+        first.env,
+        usersStartingWithAQuery,
+      );
+      await flushAllTimers();
+      firstAllUsers.unmount();
+      firstUsersStartingWithA.unmount();
+      first.env.apiStore.dispose();
+      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+        adaRow: '0h'
+        allUsersList: '0h'
+        graceRow: '0h'
+        usersStartingWithAList: '0h'
+      `);
+
+      // At 7h the app restarts offline on the quick add form. Every saved
+      // list is read to match the filter, but only the "A" list gets the
+      // row, so only it and its rows count as used. The full list and the
+      // row only it has keep their 0h access time.
+      await advanceTime(7 * HOUR_MS);
+      network.setOffline();
+      resetSessionForTests();
+      const restarted = createUsersEnv(envOptions);
+      await flushAllTimers();
+      await act(async () => {
+        await resolveAfterAllTimers(
+          restarted.env.apiStore.performMutation('temp:Alan', {
+            mutation: () => Promise.resolve({ id: 3, name: 'Alan' }),
+            offline: { operation: 'createUser', input: { name: 'Alan' } },
+          }),
+        );
+      });
+      await flushAllTimers();
+      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+        adaRow: '7h'
+        allUsersList: '0h'
+        graceRow: '0h'
+        usersStartingWithAList: '7h'
+      `);
+
+      // At 14h the user opens the full list, already in memory from the
+      // filter match. Opening it is a real use, so it and its rows now count
+      // as used.
+      await advanceTime(7 * HOUR_MS);
+      const allUsers = renderUsersList(restarted.env, usersQuery);
+      await flushAllTimers();
+      // The filter left the full list out, so it doesn't have the row
+      expect(allUsers.result.current.items).toMatchInlineSnapshot(
+        `['Ada', 'Grace']`,
+      );
+      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+        adaRow: '7h'
+        allUsersList: '14h'
+        graceRow: '14h'
+        usersStartingWithAList: '7h'
+      `);
+
+      allUsers.unmount();
     },
   );
 

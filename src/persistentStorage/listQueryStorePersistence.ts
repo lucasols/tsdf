@@ -248,8 +248,21 @@ type ListQueryPersistenceSetup<
   ): void;
   maybeHydrateItems(itemKeys: string[]): Promise<boolean[]>;
   maybeHydrateQueries(queryKeys: string[]): Promise<boolean[]>;
-  preloadItems(itemKeys: string[]): Promise<boolean[]>;
-  preloadQueries(queryKeys: string[]): Promise<boolean[]>;
+  /**
+   * Loads items from persistent storage. With `touch: false` they don't count
+   * as used until `touchItemsLoadedWithoutTouch` is called for them.
+   */
+  preloadItems(itemKeys: string[], touch?: boolean): Promise<boolean[]>;
+  /**
+   * Loads queries and their rows from persistent storage. With `touch: false`
+   * they don't count as used until `touchQueriesLoadedWithoutTouch` is called
+   * for them.
+   */
+  preloadQueries(queryKeys: string[], touch?: boolean): Promise<boolean[]>;
+  /** Records in storage the use of queries (and their rows) loaded without touch. */
+  touchQueriesLoadedWithoutTouch(this: void, queryKeys: string[]): void;
+  /** Records in storage the use of items loaded without touch. */
+  touchItemsLoadedWithoutTouch(this: void, itemKeys: string[]): void;
   preloadItemsByDerivedQueryGroup(groupKeys: string[]): Promise<boolean[]>;
   getHydratedItemKeys(this: void): string[];
   getHydratedQueryKeys(this: void): string[];
@@ -617,6 +630,11 @@ export function setupListQueryPersistence<
   let suppressedPersistedStateFlushes = 0;
   const pendingItemPreloads = new Map<string, Promise<boolean>>();
   const pendingQueryPreloads = new Map<string, Promise<boolean>>();
+  // Entries loaded for internal work (e.g. matching a temp entity's filter)
+  // without counting as used: their storage access time is updated only once
+  // the app uses them
+  const itemKeysLoadedWithoutTouch = new Set<string>();
+  const queryKeysLoadedWithoutTouch = new Set<string>();
   const itemSnapshotByKey = new Map<string, string>();
   const querySnapshotByKey = new Map<string, string>();
   const itemSizeBytesByKey = new Map<string, number>();
@@ -1521,6 +1539,7 @@ export function setupListQueryPersistence<
 
   function readHydratedLocalStorageItem(
     itemKey: string,
+    touch = true,
   ):
     | {
         item: ItemState;
@@ -1597,12 +1616,17 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    scheduleIdleCleanup(() =>
-      refreshLocalStorageTimestamp(storageKey, {
-        metadata: 'namespace',
-        namespacePrefix: prefix,
-      }),
-    );
+    if (touch) {
+      itemKeysLoadedWithoutTouch.delete(itemKey);
+      scheduleIdleCleanup(() =>
+        refreshLocalStorageTimestamp(storageKey, {
+          metadata: 'namespace',
+          namespacePrefix: prefix,
+        }),
+      );
+    } else {
+      itemKeysLoadedWithoutTouch.add(itemKey);
+    }
     rememberHydratedItem(itemKey, cacheEntry.data);
     return itemState;
   }
@@ -1724,6 +1748,7 @@ export function setupListQueryPersistence<
 
   function readHydratedLocalStorageQuery(
     queryKey: string,
+    touch = true,
   ): ParsedPersistedListQueryData<QueryPayload> | undefined {
     if (syncHydrationQueryMissCache.has(queryKey)) return undefined;
 
@@ -1769,9 +1794,14 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    scheduleIdleCleanup(() => {
-      void touchLocalStorageQueryEntry(queryKey);
-    });
+    if (touch) {
+      queryKeysLoadedWithoutTouch.delete(queryKey);
+      scheduleIdleCleanup(() => {
+        void touchLocalStorageQueryEntry(queryKey);
+      });
+    } else {
+      queryKeysLoadedWithoutTouch.add(queryKey);
+    }
     rememberHydratedQuery(
       queryKey,
       {
@@ -1926,7 +1956,37 @@ export function setupListQueryPersistence<
     return true;
   }
 
-  async function preloadItem(itemKey: string): Promise<boolean> {
+  function trackItemLoadTouch(
+    itemKey: string,
+    loaded: boolean,
+    touch: boolean,
+  ): boolean {
+    if (!loaded) return loaded;
+    if (touch) {
+      itemKeysLoadedWithoutTouch.delete(itemKey);
+    } else {
+      itemKeysLoadedWithoutTouch.add(itemKey);
+    }
+    return loaded;
+  }
+
+  /**
+   * A touching load that joins a pending one without touch records the use
+   * itself once it resolves.
+   */
+  function joinItemPreload(
+    itemKey: string,
+    pending: Promise<boolean>,
+    touch: boolean,
+  ): Promise<boolean> {
+    if (!touch) return pending;
+    return pending.then((loaded) => {
+      if (loaded) touchItemsLoadedWithoutTouch([itemKey]);
+      return loaded;
+    });
+  }
+
+  async function preloadItem(itemKey: string, touch = true): Promise<boolean> {
     if (!storeRef) return false;
     const existingItemQuery = storeRef.state.itemQueries[itemKey];
     const existingItem = storeRef.state.items[itemKey];
@@ -1939,7 +1999,9 @@ export function setupListQueryPersistence<
     if (existingItemQuery === null) return false;
 
     if (localStorageAdapter !== null) {
-      const itemState = readHydratedItem(itemKey);
+      const itemState =
+        readRememberedHydratedItem(itemKey) ??
+        readHydratedLocalStorageItem(itemKey, touch);
       if (!itemState) return false;
 
       materializeHydratedItemState(itemKey, itemState);
@@ -1948,13 +2010,18 @@ export function setupListQueryPersistence<
     }
 
     const existingPromise = pendingItemPreloads.get(itemKey);
-    if (existingPromise) return existingPromise;
+    if (existingPromise)
+      return joinItemPreload(itemKey, existingPromise, touch);
 
     const currentGeneration = generation;
     const promise = itemNamespace
-      .load(itemKey, { touch: 'coarse' })
+      .load(itemKey, { touch: touch ? 'coarse' : 'never' })
       .then((cached) =>
-        resolveAsyncPreloadedItem(itemKey, cached, currentGeneration),
+        trackItemLoadTouch(
+          itemKey,
+          resolveAsyncPreloadedItem(itemKey, cached, currentGeneration),
+          touch,
+        ),
       )
       .finally(() => {
         if (currentGeneration === generation) {
@@ -1966,9 +2033,14 @@ export function setupListQueryPersistence<
     return promise;
   }
 
-  async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
+  async function preloadItems(
+    itemKeys: string[],
+    touch = true,
+  ): Promise<boolean[]> {
     if (localStorageAdapter !== null || itemKeys.length <= 1) {
-      return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+      return Promise.all(
+        itemKeys.map((itemKey) => preloadItem(itemKey, touch)),
+      );
     }
     if (!storeRef) return itemKeys.map(() => false);
 
@@ -1989,7 +2061,10 @@ export function setupListQueryPersistence<
 
       const existingPromise = pendingItemPreloads.get(itemKey);
       if (existingPromise !== undefined) {
-        resultsByKey.set(itemKey, existingPromise);
+        resultsByKey.set(
+          itemKey,
+          joinItemPreload(itemKey, existingPromise, touch),
+        );
         continue;
       }
 
@@ -1999,16 +2074,20 @@ export function setupListQueryPersistence<
     if (batchKeys.length > 0) {
       const currentGeneration = generation;
       const batchPromise = itemNamespace
-        .loadMany(batchKeys, { touch: 'coarse' })
+        .loadMany(batchKeys, { touch: touch ? 'coarse' : 'never' })
         .then((cachedEntries) => {
           const resolved = new Map<string, boolean>();
           for (const [index, itemKey] of batchKeys.entries()) {
             resolved.set(
               itemKey,
-              resolveAsyncPreloadedItem(
+              trackItemLoadTouch(
                 itemKey,
-                cachedEntries[index] ?? null,
-                currentGeneration,
+                resolveAsyncPreloadedItem(
+                  itemKey,
+                  cachedEntries[index] ?? null,
+                  currentGeneration,
+                ),
+                touch,
               ),
             );
           }
@@ -2035,18 +2114,23 @@ export function setupListQueryPersistence<
     );
   }
 
-  async function preloadQuery(queryKey: string): Promise<boolean> {
+  async function preloadQuery(
+    queryKey: string,
+    touch = true,
+  ): Promise<boolean> {
     if (!storeRef) return false;
     if (storeRef.state.queries[queryKey] !== undefined) return true;
 
     if (localStorageAdapter !== null) {
-      const persistedQuery = readPersistedQueryData(queryKey);
+      const persistedQuery =
+        readRememberedPersistedQueryData(queryKey) ??
+        readHydratedLocalStorageQuery(queryKey, touch);
       if (!persistedQuery) return false;
 
       const activeStore = storeRef;
 
       for (const itemKey of persistedQuery.items) {
-        void preloadItem(itemKey);
+        void preloadItem(itemKey, touch);
       }
 
       const filteredItemKeys = persistedQuery.items.filter((itemKey) => {
@@ -2064,11 +2148,19 @@ export function setupListQueryPersistence<
     }
 
     const existingPromise = pendingQueryPreloads.get(queryKey);
-    if (existingPromise) return existingPromise;
+    if (existingPromise) {
+      // A touching load that joins one without touch records the use itself
+      return touch
+        ? existingPromise.then((loaded) => {
+            if (loaded) touchQueriesLoadedWithoutTouch([queryKey]);
+            return loaded;
+          })
+        : existingPromise;
+    }
 
     const currentGeneration = generation;
     const promise = queryNamespace
-      .load(queryKey, { touch: 'coarse' })
+      .load(queryKey, { touch: touch ? 'coarse' : 'never' })
       .then(async (cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;
@@ -2085,9 +2177,14 @@ export function setupListQueryPersistence<
 
         rememberHydratedQuery(queryKey, cached);
 
-        await preloadItems(persistedQuery.items);
+        await preloadItems(persistedQuery.items, touch);
         if (currentGeneration !== generation || activeStore !== storeRef) {
           return false;
+        }
+        if (touch) {
+          queryKeysLoadedWithoutTouch.delete(queryKey);
+        } else {
+          queryKeysLoadedWithoutTouch.add(queryKey);
         }
         if (activeStore.state.queries[queryKey] !== undefined) {
           return true;
@@ -2124,8 +2221,68 @@ export function setupListQueryPersistence<
     return promise;
   }
 
-  async function preloadQueries(queryKeys: string[]): Promise<boolean[]> {
-    return Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
+  async function preloadQueries(
+    queryKeys: string[],
+    touch = true,
+  ): Promise<boolean[]> {
+    return Promise.all(
+      queryKeys.map((queryKey) => preloadQuery(queryKey, touch)),
+    );
+  }
+
+  function touchItemsLoadedWithoutTouch(itemKeys: string[]): void {
+    if (itemKeysLoadedWithoutTouch.size === 0) return;
+
+    const touchedItemKeys = itemKeys.filter((itemKey) =>
+      itemKeysLoadedWithoutTouch.delete(itemKey),
+    );
+    if (touchedItemKeys.length === 0) return;
+
+    if (localStorageAdapter === null) {
+      void itemNamespace
+        .commit({ touches: touchedItemKeys.map((key) => ({ key })) })
+        .catch(() => {});
+      return;
+    }
+
+    const prefix = getItemPrefix();
+    if (prefix === false) return;
+    scheduleIdleCleanup(() => {
+      for (const itemKey of touchedItemKeys) {
+        refreshLocalStorageTimestamp(`${prefix}${itemKey}`, {
+          metadata: 'namespace',
+          namespacePrefix: prefix,
+        });
+      }
+    });
+  }
+
+  function touchQueriesLoadedWithoutTouch(queryKeys: string[]): void {
+    if (queryKeysLoadedWithoutTouch.size === 0) return;
+
+    const touchedQueryKeys = queryKeys.filter((queryKey) =>
+      queryKeysLoadedWithoutTouch.delete(queryKey),
+    );
+    if (touchedQueryKeys.length === 0) return;
+
+    if (localStorageAdapter === null) {
+      void queryNamespace
+        .commit({ touches: touchedQueryKeys.map((key) => ({ key })) })
+        .catch(() => {});
+    } else {
+      scheduleIdleCleanup(() => {
+        for (const queryKey of touchedQueryKeys) {
+          void touchLocalStorageQueryEntry(queryKey);
+        }
+      });
+    }
+
+    // A used query also uses the rows it lists
+    touchItemsLoadedWithoutTouch(
+      touchedQueryKeys.flatMap(
+        (queryKey) => storeRef?.state.queries[queryKey]?.items ?? [],
+      ),
+    );
   }
 
   async function preloadItemsByDerivedQueryGroup(
@@ -4102,6 +4259,8 @@ export function setupListQueryPersistence<
     generation++;
     pendingItemPreloads.clear();
     pendingQueryPreloads.clear();
+    itemKeysLoadedWithoutTouch.clear();
+    queryKeysLoadedWithoutTouch.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
     incompleteRestoredQueryKeys.clear();
@@ -4145,6 +4304,8 @@ export function setupListQueryPersistence<
     querySizeBytesByKey.clear();
     budgetEvictedItemRecency.clear();
     budgetEvictedQueryRecency.clear();
+    itemKeysLoadedWithoutTouch.clear();
+    queryKeysLoadedWithoutTouch.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
     incompleteRestoredQueryKeys.clear();
@@ -4160,6 +4321,8 @@ export function setupListQueryPersistence<
     maybeHydrateQueries,
     preloadItems,
     preloadQueries,
+    touchQueriesLoadedWithoutTouch,
+    touchItemsLoadedWithoutTouch,
     preloadItemsByDerivedQueryGroup,
     getHydratedItemKeys: () => [...hydratedPersistedItemKeys],
     getHydratedQueryKeys: () => [...hydratedPersistedQueryKeys],

@@ -1828,12 +1828,14 @@ export function createListQueryStore<
     queryCacheRuntime.touch(queryKeys, (queryKey) => {
       return store.state.queries[queryKey] !== undefined;
     });
+    persistence?.touchQueriesLoadedWithoutTouch(queryKeys);
   }
 
   function touchItems(itemKeys: string[]): void {
     itemCacheRuntime.touch(itemKeys, (itemKey) => {
       return store.state.itemQueries[itemKey] !== undefined;
     });
+    persistence?.touchItemsLoadedWithoutTouch(itemKeys);
   }
 
   function registerActiveQueryRefs(queryKeys: string[]): () => void {
@@ -2066,21 +2068,28 @@ export function createListQueryStore<
     }));
   }
 
+  /**
+   * With `touch: false` the queries are loaded for internal work and don't
+   * count as used, in memory or in storage, until the app uses them.
+   */
   async function preloadQueriesFromPersistentStorage(
     queryKeys: string[],
+    touch = true,
   ): Promise<boolean[]> {
     if (!persistence) return queryKeys.map(() => false);
-    const results = await persistence.preloadQueries(queryKeys);
+    const results = await persistence.preloadQueries(queryKeys, touch);
     const preloadedQueryKeys = queryKeys.filter(
       (_key, index) => results[index],
     );
     if (preloadedQueryKeys.length > 0) {
-      touchQueries(preloadedQueryKeys);
-      touchItems(
-        preloadedQueryKeys.flatMap(
-          (queryKey) => store.state.queries[queryKey]?.items ?? [],
-        ),
-      );
+      if (touch) {
+        touchQueries(preloadedQueryKeys);
+        touchItems(
+          preloadedQueryKeys.flatMap(
+            (queryKey) => store.state.queries[queryKey]?.items ?? [],
+          ),
+        );
+      }
       if (shouldScheduleCacheLimitEnforcement()) {
         scheduleCacheLimitEnforcement();
       }
@@ -2729,6 +2738,9 @@ export function createListQueryStore<
       return store.state.items[itemKey] === undefined ? itemKey : false;
     });
     const unloadedQueryKeys = new Set<string>();
+    // Loaded only to be matched against a filter, so they don't count as used
+    // unless they get the item
+    const filterCandidateQueryKeys = new Set<string>();
     let isDeclaredWithFilter = false;
     for (const { queries } of addToQueries) {
       // A filter needs each query's state, so it runs once they are loaded
@@ -2742,12 +2754,15 @@ export function createListQueryStore<
     }
     // A filter can match any saved query, so all the ones that are only in
     // persistent storage are loaded for it
-    const addUnloadedPersistedQueryKeys = (
+    const addFilterCandidateQueryKeys = (
       persistedQueryKeys: ReadonlySet<string>,
     ): void => {
       for (const queryKey of persistedQueryKeys) {
-        if (store.state.queries[queryKey] === undefined) {
-          unloadedQueryKeys.add(queryKey);
+        if (
+          store.state.queries[queryKey] === undefined &&
+          !unloadedQueryKeys.has(queryKey)
+        ) {
+          filterCandidateQueryKeys.add(queryKey);
         }
       }
     };
@@ -2757,12 +2772,13 @@ export function createListQueryStore<
       if (persistedQueryKeys instanceof Promise) {
         persistedQueryKeysLoad = persistedQueryKeys;
       } else {
-        addUnloadedPersistedQueryKeys(persistedQueryKeys);
+        addFilterCandidateQueryKeys(persistedQueryKeys);
       }
     }
     if (
       unloadedItemKeys.length === 0 &&
       unloadedQueryKeys.size === 0 &&
+      filterCandidateQueryKeys.size === 0 &&
       !persistedQueryKeysLoad
     ) {
       return undefined;
@@ -2770,10 +2786,17 @@ export function createListQueryStore<
 
     const loadQueries = async (): Promise<void> => {
       if (persistedQueryKeysLoad) {
-        addUnloadedPersistedQueryKeys(await persistedQueryKeysLoad);
+        addFilterCandidateQueryKeys(await persistedQueryKeysLoad);
       }
-      if (unloadedQueryKeys.size === 0) return;
-      await preloadQueriesFromPersistentStorage([...unloadedQueryKeys]);
+      await Promise.all([
+        unloadedQueryKeys.size > 0 &&
+          preloadQueriesFromPersistentStorage([...unloadedQueryKeys]),
+        filterCandidateQueryKeys.size > 0 &&
+          preloadQueriesFromPersistentStorage(
+            [...filterCandidateQueryKeys],
+            false,
+          ),
+      ]);
     };
 
     return Promise.all([
