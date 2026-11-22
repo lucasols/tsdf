@@ -89,6 +89,7 @@ test('classified network failures activate network mode and shift fetches into o
 
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -164,6 +165,7 @@ test('classified network recovery uses network-specific probes and clears networ
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -183,6 +185,7 @@ test('classified network recovery uses network-specific probes and clears networ
 
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -241,6 +244,7 @@ test('network classifications are ignored when network mode is disabled', async 
   // session stays online.
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -299,6 +303,7 @@ test('browser offline events stop classified-network probing and hand control to
   await advanceTime(25);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -332,6 +337,7 @@ test('browser offline events stop classified-network probing and hand control to
   ]);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '✅'
@@ -409,6 +415,7 @@ test('coming back online after browser-driven network takeover clears the interr
   await advanceTime(25);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -451,6 +458,7 @@ test('coming back online after browser-driven network takeover clears the interr
   });
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'

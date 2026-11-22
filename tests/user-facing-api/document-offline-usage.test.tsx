@@ -212,6 +212,7 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '✅'
@@ -238,6 +239,7 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '✅'
@@ -273,6 +275,7 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '✅'
@@ -631,6 +634,7 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
@@ -793,6 +797,7 @@ test('direct document store offline public api', async () => {
   `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '✅'
@@ -937,6 +942,7 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    inMemoryOnlyMutations: 0
     isForcedOffline: '❌'
     isLeader: '✅'
     isNetworkDetectedOffline: '❌'
