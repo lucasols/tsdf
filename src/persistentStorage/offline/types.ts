@@ -1185,8 +1185,9 @@ export type OfflineAccumulationConfig<TInput> = {
    * A refused merge into a mutation held behind the creation of an entity
    * that waits for a manual resolution is the exception: unless the incoming
    * mutation depends on that entity too, it is sent first, and the held one is
-   * sent after it once the creation is retried, like a mutation of an
-   * operation without `accumulation`.
+   * sent after it once the creation is retried (overwriting fields both
+   * changed), like a mutation of an operation without `accumulation`. Later
+   * mutations keep merging into the held one, not the separate entry.
    *
    * Omit it to always merge.
    */

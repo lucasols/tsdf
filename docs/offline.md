@@ -303,7 +303,7 @@ updateRecord: {
 },
 ```
 
-Only the newest queued mutation is a merge candidate. When it is refused, the incoming mutation is not merged into an older one either, since that would send it before the newer work: a table edit, an app block edit and another table edit are sent as three requests, in that order. Later mutations can merge into the separate entry. A refused merge into a mutation held behind the creation of an entity that waits for a resolution is the exception: the incoming mutation is sent first (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)).
+Only the newest queued mutation is a merge candidate. When it is refused, the incoming mutation is not merged into an older one either, since that would send it before the newer work: a table edit, an app block edit and another table edit are sent as three requests, in that order. Later mutations can merge into the separate entry. A refused merge into a mutation held behind the creation of an entity that waits for a resolution is the exception: the incoming mutation is sent first, the held one is sent after it and overwrites the fields both changed, and later mutations keep merging into the held one (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)).
 
 ### Temp Entities in List Queries
 
