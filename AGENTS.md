@@ -170,12 +170,13 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 
 ### Explaining PRs
 
-When explaining a PR (e.g. `/explain-pr`), include what it costs, mainly runtime performance, right after the breaking-changes part:
+When explaining a PR (e.g. `/explain-pr`), always include a **Does it add overhead for apps?** part, right after the breaking-changes part and with the same weight. The reader must be able to see at a glance whether apps using TSDF pay more after the PR.
 
-- Say which paths pay for the change and how often: every fetch, mutation, render or queued entry, or only in the situation the PR handles.
+- Open with a verdict: **yes**, **no**, or **only in <situation>**. Never leave the part out or fold it into another section, even when the answer is no. In the artifact, show it as a callout next to the breaking-changes verdict.
+- Say which paths of an app pay and how often: every fetch, mutation, render or queued entry, or only in the situation the PR handles. Flag overhead on common paths prominently.
 - Name the added work concretely: storage reads/writes, serialization, iterations, session key reads, locks, timers, subscriptions or re-renders, and memory kept around. Give counts per operation when you can derive them from the code (e.g. "two extra session key reads per replayed entry").
 - Mention bundle size when the PR adds code that ships to production, and note what is tree-shaken behind `import.meta.env.DEV` / `TEST` guards.
-- If the cost is negligible, say so in one line with the reason. If it is significant, say whether a cheaper implementation looks possible.
+- When the overhead is real, say whether it looks avoidable with a cheaper implementation. When it is negligible, give the reason in one line.
 
 ## Feature implementation
 
