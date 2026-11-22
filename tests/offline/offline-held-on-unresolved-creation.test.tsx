@@ -1232,6 +1232,65 @@ describe('tasks whose creation waits for a conflict decision', () => {
     );
   });
 
+  test('a subtask held behind the creation of its task stays in the list while it is sent after the user keeps the server task', async () => {
+    // Offline, the user creates a task and a subtask under it, then
+    // reconnects while the server reports that a task with that name already
+    // exists: the subtask waits for the decision about its task.
+    network.setOffline();
+    const env = createTasksEnv(
+      'commit-held-subtask',
+      'commit-held-subtask-tasks',
+    );
+    env.renderTaskList();
+    await flushAllTimers();
+    await env.createTask('Plan trip');
+    await env.createSubtask('Pack bags', 'temp:Plan trip');
+    env.conflicts.createTask = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.conflicts.createTask = false;
+
+    const conflict = env.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the task creation conflict');
+    }
+
+    // The user keeps the task another device created with that name.
+    env.serverTable.setItem('tasks||9', { id: 9, name: 'Plan trip' });
+    env.clearTimeline();
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(conflict.id, 'createTask', {
+        action: 'commit',
+        result: { id: 9, name: 'Plan trip' },
+      });
+    });
+    await flushAllTimers();
+
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createSubtask "Pack bags" of tasks||9']`,
+    );
+    // The subtask is queued again as the decision is made, so the list is not
+    // refetched before the subtask is sent: a list fetched then would not
+    // have it, and the subtask would disappear once its creation is sent,
+    // until the list is fetched again. It is fetched once the subtask is
+    // created, and "Pack bags" never leaves the list.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | tasks                                             |
+      4.82s | Write report, Review budget, Plan trip, Pack bags | -- timeline-cleared
+      .     | Write report, Review budget, Plan trip, Pack bags | [tasks, tasks] ui-changed
+      .     | Write report, Review budget, Plan trip, Pack bags | offline:createSubtask replay-started
+      6.02s | Write report, Review budget, Plan trip, Pack bags | [tasks||3] server-data-changed (value: {"id":3,"name":"Pack bags","parentId":"tasks||9"})
+      .     | Write report, Review budget, Plan trip, Pack bags | offline:createSubtask replay-finished
+      .     | Write report, Review budget, Plan trip, Pack bags | [tasks, tasks] ui-changed
+      6.03s | Write report, Review budget, Plan trip, Pack bags | 🟠 >list-fetch-started
+      6.83s | Write report, Review budget, Plan trip, Pack bags | 🟠 <list-fetch-finished (value: {"count":4})
+      "
+    `);
+  });
+
   test('a move held behind two waiting creations is sent only once the user decides both of them', async () => {
     // Offline, the user creates two tasks and moves the second under the
     // first.

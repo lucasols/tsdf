@@ -5536,7 +5536,17 @@ export function createOfflineStoreController<
             .slice(1)
             .map((descendant) => descendant.id)
         : [];
-    const requeueHeldDescendants = async (): Promise<void> => {
+    /**
+     * Queues the held descendants again and resolves to them. Called before
+     * this resolution is removed (`decidedResolutionId`, which they are held
+     * behind), so no state without the decided creation and without its
+     * descendants queued is published: the stores would revalidate their
+     * lists while the descendants are neither held nor queued, and the
+     * fetched lists would leave them out.
+     */
+    const requeueHeldDescendants = async (
+      decidedResolutionId: string | undefined,
+    ): Promise<PersistedOfflineResolutionRecord[]> => {
       // Read again: the decision rewrote their temp refs.
       const heldDescendants = new Map<
         string,
@@ -5553,23 +5563,16 @@ export function createOfflineStoreController<
         dropDescendantsHeldElsewhere(
           heldDescendants,
           createResolutionDependencySnapshot(),
-          undefined,
+          decidedResolutionId,
         );
       }
 
       // Kept in the order collected, which sends parents first.
-      if (heldDescendants.size > 0) {
-        await requeueResolutions(
-          current,
-          [...heldDescendants.values()],
-          undefined,
-        );
+      const requeuedDescendants = [...heldDescendants.values()];
+      if (requeuedDescendants.length > 0) {
+        await requeueResolutions(current, requeuedDescendants, undefined);
       }
-      // The work other stores held behind these creations follows them.
-      await notifyCreationsReleased(current, [
-        resolutionRecord,
-        ...heldDescendants.values(),
-      ]);
+      return requeuedDescendants;
     };
 
     if (action === 'requeue') {
@@ -5617,7 +5620,12 @@ export function createOfflineStoreController<
           replacementEntityKeys.includes(entityKey),
         )
       ) {
-        await requeueHeldDescendants();
+        const requeuedDescendants = await requeueHeldDescendants(undefined);
+        // The work other stores held behind these creations follows them.
+        await notifyCreationsReleased(current, [
+          resolutionRecord,
+          ...requeuedDescendants,
+        ]);
       }
       return;
     }
@@ -5642,9 +5650,15 @@ export function createOfflineStoreController<
           result: committedResult,
         });
       }
+      const requeuedDescendants = await requeueHeldDescendants(resolutionId);
       await removeResolution(resolutionId, current);
       await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
-      await requeueHeldDescendants();
+      // The work other stores held behind these creations follows them. It
+      // stays held while this resolution exists, so it is released after.
+      await notifyCreationsReleased(current, [
+        resolutionRecord,
+        ...requeuedDescendants,
+      ]);
       return;
     }
 
