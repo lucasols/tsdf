@@ -1043,6 +1043,15 @@ export function createOfflineStoreController<
     return activeSession?.sessionKey === current.sessionKey;
   }
 
+  /**
+   * Whether the app still uses the session of `current`. Unlike
+   * `isActiveSessionState`, it reads the session key again, so it notices an
+   * in-place switch (e.g. to another org) that nothing reported yet.
+   */
+  function isSessionStillActive(current: ActiveSessionState): boolean {
+    return ensureActiveSession()?.sessionKey === current.sessionKey;
+  }
+
   function teardownActiveSession(): void {
     activeSession?.unregister?.();
     activeSession = null;
@@ -4965,8 +4974,18 @@ export function createOfflineStoreController<
       // Set when the replay failed while resolving a dependency upload, which
       // means `execute` was never called for this attempt.
       let failedUploadId: string | undefined;
+      let executeStarted = false;
+      // The app can switch to another session (e.g. another org) without a
+      // reload while the replay awaits: the work of the old session must not
+      // be sent, nor judged by app callbacks, from the new one.
+      const throwIfSessionChanged = (): void => {
+        if (!isSessionStillActive(current)) {
+          throw new OfflineSessionUnavailableError();
+        }
+      };
 
       try {
+        throwIfSessionChanged();
         const shouldPrepareReplayCheckCtx = Boolean(
           (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) ||
           conflictHandling,
@@ -4980,11 +4999,14 @@ export function createOfflineStoreController<
             }
           : null;
 
+        if (replayCheckCtx) throwIfSessionChanged();
+
         if (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) {
           if (!replayCheckCtx) {
             throw new Error('Replay check context was not prepared');
           }
           const shouldSkip = await operation.shouldSkipSync(replayCheckCtx);
+          throwIfSessionChanged();
 
           if (shouldSkip) {
             // The server already has the change: a delete is done.
@@ -5003,6 +5025,7 @@ export function createOfflineStoreController<
                 ({ ...replayCheckBaseCtx, serverSnapshot: undefined } as const),
             )
           : false;
+        if (conflictHandling) throwIfSessionChanged();
 
         if (conflict) {
           if (!conflictHandling) {
@@ -5040,6 +5063,7 @@ export function createOfflineStoreController<
 
         const dependencyUploads = await current.session.resolveReplayUploadIds(
           entryToUse.dependencyUploadIds ?? [],
+          () => isSessionStillActive(current),
         );
         if (dependencyUploads.failedUploadId !== undefined) {
           failedUploadId = dependencyUploads.failedUploadId;
@@ -5059,6 +5083,8 @@ export function createOfflineStoreController<
             resolvedRefsById: dependencyUploads.refs,
           }),
         );
+        throwIfSessionChanged();
+        executeStarted = true;
         const result = await operation.execute(executeContext);
 
         if (entryToUse.tempIds) {
@@ -5093,6 +5119,15 @@ export function createOfflineStoreController<
         // the files does not hold back the next queued entry.
         void deleteOrphanedDependencyUploads(current, [entryToUse]);
       } catch (error) {
+        // The session changed before the entry was sent: whatever failed
+        // (the check above, or an upload sent before the switch) says nothing
+        // about the entry, so it stays queued for its session as it was, to
+        // be replayed once that session is active again.
+        if (!executeStarted && !isSessionStillActive(current)) {
+          await persistEntry(nextEntry, current, true);
+          return;
+        }
+
         const lastError = { message: unknownToError(error).message };
         const failureCtx: OfflineFailureContext = {
           phase: 'sync',
