@@ -58,7 +58,7 @@ import {
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
-  type OfflineFailureContext,
+  type OfflineStoreFailureContext,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
   type ItemOfflineState,
@@ -5094,7 +5094,7 @@ export function createOfflineStoreController<
         void deleteOrphanedDependencyUploads(current, [entryToUse]);
       } catch (error) {
         const lastError = { message: unknownToError(error).message };
-        const failureCtx: OfflineFailureContext = {
+        const failureCtx: OfflineStoreFailureContext = {
           phase: 'sync',
           storeType,
           operationName: entryToUse.operation,
@@ -5275,28 +5275,20 @@ export function createOfflineStoreController<
           throw new OfflineSessionUnavailableError();
         }
 
-        await preparedCurrent.session.refreshNetworkState();
-        const activeCauseAfterRefresh =
-          getActiveMutationQueueingCause(preparedCurrent);
-        if (activeCauseAfterRefresh) {
-          return isMutationQueueingAllowed(activeCauseAfterRefresh);
-        }
-
-        const failureCtx: OfflineFailureContext = {
+        const failureCtx: OfflineStoreFailureContext = {
           phase: 'mutation',
           storeType,
           operationName: prepared.operationName,
           sessionKey: preparedCurrent.sessionKey,
         };
         if (uploadId !== undefined) failureCtx.uploadId = uploadId;
-        await preparedCurrent.session.classifyFailure(error, failureCtx);
+        const activeCause =
+          await preparedCurrent.session.classifyRequestFailure(
+            error,
+            failureCtx,
+          );
 
-        const activeCauseAfterClassification =
-          getActiveMutationQueueingCause(preparedCurrent);
-
-        return activeCauseAfterClassification
-          ? isMutationQueueingAllowed(activeCauseAfterClassification)
-          : false;
+        return activeCause ? isMutationQueueingAllowed(activeCause) : false;
       },
     };
   }

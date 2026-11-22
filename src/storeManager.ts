@@ -19,6 +19,7 @@ import {
 import type {
   GlobalOfflineEntity,
   GlobalOfflineStatus,
+  OfflineFailureClassification,
   OfflineResolutionGenericAction,
   OfflineResolutionGenericActionFailure,
   OfflineResolutionRecord,
@@ -26,6 +27,7 @@ import type {
   OfflineRuntimeConfigUpdate,
   OfflineSession,
   OfflineSessionConfig,
+  ReportOfflineFailureOptions,
 } from './persistentStorage/offline/types';
 import {
   defaultOfflineRuntimeConfig,
@@ -145,6 +147,29 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   setForcedOfflineMode: (forced: boolean) => Promise<ResultType<void, Error>>;
   /** Returns the latest aggregated offline status for this manager. */
   getOfflineStatus: () => GlobalOfflineStatus;
+  /**
+   * Hands the failure of a request the app ran outside the stores (e.g. a
+   * file upload made with its own API client) to the session, which treats it
+   * like the failure of an offline-enabled mutation: the network detection is
+   * read again, then, unless that already put the session offline,
+   * `classifyFailure(error, ctx)` runs with `ctx.phase: 'app'`, followed by
+   * `healthCheck` when it answers `'unknown'` (sharing a check in flight and
+   * `reuseUpForFailuresMs`). A `network` / `outage` answer puts the session
+   * in that mode, as it would for a store request.
+   *
+   * Resolves to the offline mode the session is in afterwards: `'network'` or
+   * `'outage'` (for example, to stage the file for a queued mutation instead
+   * of failing), or `'ignore'` when it stays online and the failure belongs to
+   * the request. A mode that is disabled is never entered, and it resolves to
+   * `'ignore'` without calling any hook while the session gate is closed,
+   * there is no active session key or no `offlineSession` is configured.
+   *
+   * It rejects only when `classifyFailure` throws.
+   */
+  reportOfflineFailure: (
+    error: unknown,
+    options?: ReportOfflineFailureOptions,
+  ) => Promise<OfflineFailureClassification>;
   /** Returns the latest aggregated offline entities for this manager. */
   getOfflineEntities: () => readonly GlobalOfflineEntity[];
   /** Returns the latest aggregated offline resolutions for this manager. */
@@ -178,8 +203,9 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    *
    * When the `upload` transport fails, the result is `Result.err` with the
    * transport error and the upload becomes `failed` with `lastError` set. The
-   * session failure classifiers are not consulted and nothing is retried
-   * automatically: call it again to run the upload again.
+   * session failure classifiers are not consulted (pass the error to
+   * `reportOfflineFailure` for that) and nothing is retried automatically:
+   * call it again to run the upload again.
    */
   resolveOfflineUpload: (id: string) => Promise<ResultType<TUploadRef, Error>>;
   /**
@@ -376,6 +402,7 @@ function createDisabledStoreManagerOfflineApi<
     setForcedOfflineMode: () =>
       Promise.resolve(Result.err(createForcedOfflineModeUnavailableError())),
     getOfflineStatus,
+    reportOfflineFailure: () => Promise.resolve('ignore'),
     getOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
     getOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
     resolveOfflineResolution: (resolutionId) =>
@@ -538,6 +565,8 @@ export function createStoreManager<
             normalizeStoreManagerOfflineError,
           ),
         getOfflineStatus: () => resolvedOfflineSession.getOfflineStatus(),
+        reportOfflineFailure: (error, reportOptions) =>
+          resolvedOfflineSession.reportOfflineFailure(error, reportOptions),
         getOfflineEntities: () => resolvedOfflineSession.getOfflineEntities(),
         getOfflineResolutions: () =>
           resolvedOfflineSession.getOfflineResolutions(),
