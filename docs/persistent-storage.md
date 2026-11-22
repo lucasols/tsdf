@@ -367,6 +367,8 @@ When a row before one of the rows that are left is missing, or no row is left, t
 - `clearSessionStorage(sessionKey, adapter)`:
   remove all TSDF entries for one session and adapter.
 - `clearAllSessionStorage(sessionKey)`:
-  remove TSDF entries for one session across the built-in `local-sync`, OPFS, and IndexedDB adapters.
+  remove TSDF entries for one session across the built-in `local-sync`, OPFS, and IndexedDB adapters, and the files staged for that session with the built-in `opfsOfflineUploadAdapter`, even when the offline session of that key was not started in the page.
+
+Both also remove the staged offline uploads of the session from the upload adapter it was configured with, when the offline session of that key was started in the page. Files staged with a custom upload adapter for a session not opened in the page are not reached: clear them with that adapter's `clearSession(sessionKey)`.
 
 Use these on logout, user switch, or explicit privacy actions. They clear every store of the session, so do not use them to clean up after a deleted store: declare it in `removedStores` instead (see [Deleting a store](#deleting-a-store)).

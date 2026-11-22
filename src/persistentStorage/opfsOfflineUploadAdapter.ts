@@ -19,6 +19,7 @@ import {
   getDirectoryHandleIfExists,
   getFileHandleIfExists,
   getNavigatorStorageDirectory,
+  getNavigatorStorageDirectoryIfAvailable,
 } from './opfsHelpers';
 
 const OPFS_UPLOADS_ROOT_DIR = 'tsdf-uploads';
@@ -220,7 +221,9 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
   }
 
   async clearSession(sessionKey: string): Promise<void> {
-    const rootDir = await this.#getRootDir();
+    const rootDir = await this.#getExistingRootDir();
+    if (!rootDir) return;
+
     try {
       await rootDir.removeEntry(encodePathSegment(sessionKey), {
         recursive: true,
@@ -275,6 +278,26 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Root directory for reads and removals, which must not create storage:
+   * `null` when OPFS is unavailable or nothing was ever staged, since no
+   * upload can be stored there either way.
+   */
+  async #getExistingRootDir(): Promise<FileSystemDirectoryHandle | null> {
+    if (this.#rootDirPromise !== null) return this.#rootDirPromise;
+
+    const navigatorRoot = await getNavigatorStorageDirectoryIfAvailable();
+    if (navigatorRoot === null) return null;
+
+    const root = await getDirectoryHandleIfExists(
+      navigatorRoot,
+      OPFS_UPLOADS_ROOT_DIR,
+    );
+    // An existing root is reused by later calls instead of opened again
+    if (root !== null) this.#rootDirPromise ??= Promise.resolve(root);
+    return root;
   }
 
   async #getRootDir(): Promise<FileSystemDirectoryHandle> {

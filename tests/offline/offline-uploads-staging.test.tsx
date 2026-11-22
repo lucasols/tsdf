@@ -5,6 +5,7 @@ import { rc_number, rc_object } from 'runcheck';
 import { expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
+  clearAllSessionStorage,
   clearSessionStorage,
   createStoreManager,
   opfsOfflineUploadAdapter,
@@ -23,6 +24,10 @@ import {
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
+// `clearAllSessionStorage` loads the built-in async adapters with a dynamic
+// import, which can't finish while the fake timers are advanced unless the
+// module is already loaded.
+import '../../src/persistentStorage/asyncStorageAdapters';
 import { docSchema } from './offlineTestShared';
 import {
   getOfflineUploadOpfsPath,
@@ -792,6 +797,79 @@ test('clearSessionStorage removes registered offline uploads for local-sync sess
 
   expect(restartedSession.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
+test('clearAllSessionStorage on logout removes the staged uploads of a session not opened since the page loaded', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const openedOrg = 'offline-upload-logout-opened-org';
+  const otherOrg = 'offline-upload-logout-other-org';
+  const keptOrg = 'offline-upload-logout-kept-org';
+
+  function createOrgSession(sessionKey: string) {
+    return createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id }) => Promise.resolve(`server:${id}`),
+        },
+      },
+    });
+  }
+
+  async function stagePhoto(
+    session: ReturnType<typeof createOrgSession>,
+  ): Promise<void> {
+    (
+      await resolveAfterAllTimers(
+        session.saveOfflineUpload({
+          id: 'photo',
+          file: new File(['photo bytes'], 'photo.jpg', {
+            type: 'image/jpeg',
+            lastModified: 1,
+          }),
+        }),
+      )
+    ).unwrap();
+  }
+
+  // --- Setup: in an earlier page load the user staged a photo in each org ---
+  for (const sessionKey of [openedOrg, otherOrg, keptOrg]) {
+    await stagePhoto(createOrgSession(sessionKey));
+  }
+
+  // --- Reload: only one of the orgs is opened in this page ---
+  resetSessionForTests();
+  const openedSession = createOrgSession(openedOrg);
+  // A screen of the opened org lists its staged photo
+  const openedUploads = renderHook(() =>
+    openedSession.useOfflineUploads().map(({ id }) => id),
+  );
+  // Not long enough for the one-week retention to delete the photo
+  await advanceTime(1_000);
+  expect(openedUploads.result.current).toMatchInlineSnapshot(`['photo']`);
+
+  // --- Action: logout clears the storage of the opened org and of an org
+  // the user didn't open since the page loaded ---
+  await resolveAfterAllTimers(
+    Promise.all([
+      clearAllSessionStorage(openedOrg),
+      clearAllSessionStorage(otherOrg),
+    ]),
+  );
+
+  // The staged photos of both cleared orgs are gone, including the one of the
+  // org no offline session was created for in this page. The org that was not
+  // cleared keeps its own.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
+    "tsdf-uploads (0.47 kb)
+    └ offline-upload-logout-kept-org (0.45 kb)
+      └ photo (0.39 kb)
+        ├ binary.blob (0.04 kb)
+        └ metadata.json (0.34 kb)"
+  `);
 });
 
 test('uploads named metadata.json still rehydrate their original bytes after restart', async () => {
