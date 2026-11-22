@@ -1513,8 +1513,9 @@ export function createListQueryStore<
   >({ debugName: `${id}:list-query-offline-overlays`, state: () => ({}) });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
-  // Items that only exist locally: offline creations not sent to the server
-  // yet (still queued, or waiting for a manual resolution). They cannot be
+  // Items that only exist locally: offline creations the server has not
+  // confirmed yet (still queued, or waiting for a manual resolution), of a
+  // temp entity or of an item with an id the app generated. They cannot be
   // refetched, so invalidations skip them.
   const unsentCreationItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
@@ -2544,7 +2545,11 @@ export function createListQueryStore<
             clearOfflineOverlays(sessionKey);
           unsentCreationItemKeys.clear();
           for (const entity of entities) {
-            if (entity.entityKind === 'item' && entity.tempId !== undefined) {
+            if (
+              entity.entityKind === 'item' &&
+              (entity.tempId !== undefined ||
+                entity.isClientIdCreation === true)
+            ) {
               unsentCreationItemKeys.add(entity.entityKey);
             }
           }
@@ -2561,6 +2566,11 @@ export function createListQueryStore<
               }
             }
           });
+        },
+        confirmClientIdCreations: (entityKeys) => {
+          for (const entityKey of entityKeys) {
+            unsentCreationItemKeys.delete(entityKey);
+          }
         },
       },
       resolvedOfflineConfig.session,
