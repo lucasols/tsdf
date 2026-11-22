@@ -711,7 +711,7 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `useOfflineUploads()`
 - `useOfflineUploadFile(id)` — see [Rendering staged files](#rendering-staged-files)
 
-Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. An upload the operation can be sent without is declared as `{ id, optional: true }`, see [Optional uploads](#optional-uploads). When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
 ### Direct runs
 
@@ -956,7 +956,7 @@ When a queued operation with `dependsOnUploads` replays, a transport failure is 
 
 - **Connection problem or outage** - `classifyFailure` returns `'network'` or `'outage'` (and that mode is enabled, as for any other failure). The session enters that mode, the upload goes back to `pending` (with `lastError` set) and the operation stays queued. Replay runs the upload again when the session recovers. The replay retry budget is not consumed, however long the outage lasts.
 - **Transient failure that is safe to repeat** - `classifyFailure` returns `'ignore'` and `classifyRetryableFailure` returns `true`. The upload goes back to `pending` and is sent again on the `replayRetry` cadence (`intervalMs`, 5s by default). After `maxFailures` attempts (3 by default) it is handled as a permanent failure.
-- **Permanent failure** (file too large, type not accepted) - no hook recognizes the error, which is the default. The upload becomes `failed` and the operation moves right away to a `retry-exhausted` resolution: `lastReplayError` carries the upload error and `dependencyUploadIds` lists the uploads it depends on. Resolving it with `retry` requeues the operation, which runs the upload again; `discard` removes the operation and, when no other queued work declares the upload, deletes the staged file (see "Upload lifecycle").
+- **Permanent failure** (file too large, type not accepted) - no hook recognizes the error, which is the default. The upload becomes `failed` and the operation moves right away to a `retry-exhausted` resolution: `lastReplayError` carries the upload error and `dependencyUploadIds` lists the uploads it depends on. Resolving it with `retry` requeues the operation, which runs the upload again; `discard` removes the operation and, when no other queued work declares the upload, deletes the staged file (see "Upload lifecycle"). An [optional upload](#optional-uploads) is left out instead, and the operation is sent without it.
 
 `lastError` is cleared when an upload succeeds.
 
@@ -1006,6 +1006,34 @@ A transport failure while a [direct run](#direct-runs) resolves its uploads is c
 - Otherwise the mutation fails with the upload error, like a failed request (`onMutationError` is called and the optimistic update is rolled back), and the upload becomes `failed`. Running the mutation again uploads it again.
 
 With the session gate closed, the failure is not classified: the mutation fails with it.
+
+#### Optional uploads
+
+An operation that can be sent without one of its files declares it as optional: `dependsOnUploads` returns `{ id, optional: true }` for it instead of the plain id. For example a document whose editor images can keep their local reference, while its cover is required:
+
+```ts
+dependsOnUploads: ({ input }) => [
+  input.coverId,
+  ...input.imageIds.map((id) => ({ id, optional: true })),
+],
+execute: ({ input, uploads }) =>
+  api.saveDoc({
+    ...input,
+    // A refused image is missing from `resolvedRefsById`: its local id stays
+    // in the body.
+    body: replaceImageIds(input.body, uploads.resolvedRefsById),
+  }),
+```
+
+When the server refuses an optional upload, the operation is sent without it instead of moving to manual resolution or failing:
+
+- Refused means the failure is permanent, as classified above. During replay: `classifyFailure` keeps the session online and `classifyRetryableFailure` returns `false`, or the replay retries of a retryable failure are used up. During a direct run: the session stays online and `classifyRetryableFailure`, called with `phase: 'mutation'` and `uploadId` set, returns `false`.
+- `execute` (or the direct `mutation`) runs with the other uploads. The refused id is missing from `uploads.resolvedRefsById` and listed in `uploads.refusedUploadErrorsById` with the error the transport threw, so the app can keep the local reference, drop it, or tell the user.
+- The refused upload is not deleted with the work that declared it, since it was not sent: it stays staged as `failed` with `lastError`, so `useOfflineUploadFile(id)` keeps rendering the file. It is uploaded again when other work that declares it runs, or when `resolveOfflineUpload(id)` is called. Delete it with `deleteOfflineUpload(id)` once the app no longer needs it, otherwise it expires like the uploads no mutation used.
+- A connection problem, an outage, or a retryable failure with retries left is handled as for a required upload: the operation waits and is sent with the file once it uploads. In a direct run a retryable failure fails the mutation with the upload error, so running it again uploads the file again.
+- A required upload that fails permanently still sends the operation to manual resolution, whatever happened to its optional uploads. An id returned both as a plain id and as optional is required.
+- With the session gate closed, upload failures are not classified, so a failed optional upload fails the mutation like a required one.
+- Queued work only persists the upload ids: the optional marks are read from the `dependsOnUploads` of the running deploy when an upload fails.
 
 #### `resolveOfflineUpload(s)`
 
