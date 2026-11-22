@@ -287,6 +287,47 @@ describe('document store', () => {
     `);
     expect(env.serverMock.numOfFinishedFetches).toBe(2);
   });
+
+  test('an editor opening during the retry of a failed refresh waits for it', async () => {
+    seedDoc('doc-retry-in-flight', 'stale');
+    const env = createDocEnv('doc-retry-in-flight');
+
+    // The first refresh fails, so the document keeps the restored data with
+    // an error
+    env.errorInNextFetch('server unavailable');
+    const firstEditor = renderHook(() =>
+      env.apiStore.useDocument({ requireFreshData: 'ifFromStorage' }),
+    );
+    await flushAllTimers();
+    firstEditor.unmount();
+
+    // A new mount retries; the retry reports `loading` (not `refetching`)
+    // because the last fetch failed
+    renderHook(() =>
+      env.apiStore.useDocument({ requireFreshData: 'ifFromStorage' }),
+    );
+    await advanceTime(DEFAULT_FETCH_DURATION_MS / 2);
+
+    // Another editor opens while the retry is in flight
+    const lateRenders = createLoggerStore();
+    renderHook(() => {
+      const { status, data } = env.apiStore.useDocument({
+        requireFreshData: 'ifFromStorage',
+      });
+      lateRenders.add({ status, text: data?.value.text ?? null });
+    });
+    await flushAllTimers();
+
+    // It settles with the retry's result
+    expect(lateRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ text: stale
+      -> status: success ⋅ text: server
+      "
+    `);
+    // Only the failed refresh and the retry reach the server
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
+  });
 });
 
 describe('document store with other setups', () => {

@@ -1870,10 +1870,13 @@ export function createDocumentStore<
       !!persistence?.isRestoredFromStorage(),
       () => {
         // A refresh already in flight brings server data newer than the
-        // restored one, so it settles this hook without another request
+        // restored one, so it settles this hook without another request. A
+        // retry after a failed fetch is in flight as `loading`, not
+        // `refetching`
+        const status = store.state.status;
         if (
           requireFreshData === 'ifFromStorage' &&
-          store.state.status === 'refetching'
+          (status === 'refetching' || status === 'loading')
         ) {
           return;
         }
