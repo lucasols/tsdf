@@ -517,6 +517,60 @@ test('an optional image failing with a retryable error during an online save fai
   expect(getUploads()).toMatchInlineSnapshot(`[]`);
 });
 
+test('an optional image whose connection error is classified while another failure is reported fails the online save instead of being dropped', async () => {
+  createMockBrowserOpfs();
+  const { env, storeManager, requests, getUploads, ...actions } =
+    createDocWithImagesEnv({
+      sessionKey: 'optional-upload-overtaken-classification',
+      uploadOutcomes: {
+        'img-1': [new UploadError('connection', 'Connection lost')],
+      },
+      // The classifiers answer 100ms after being called.
+      classifiersDelayMs: 100,
+    });
+  await flushAllTimers();
+
+  await actions.stageFiles();
+  // The image fails at 200ms and its classification answers at 300ms. At
+  // 250ms the app reports the failure of one of its own requests, which the
+  // classifier ignores: its newer classification overtakes the image's one,
+  // whose `network` answer is then dropped.
+  setTimeout(() => {
+    void storeManager.reportOfflineFailure(
+      new UploadError('refused', 'Not found'),
+    );
+  }, 250);
+  const result = await actions.saveDoc();
+
+  // The image failure was left unclassified, not found permanent: the save
+  // fails with it as for a required upload, instead of being sent without an
+  // image that only failed for lack of connection.
+  expect(result.ok ? null : result.error).toMatchInlineSnapshot(`
+    Error#:
+      message: 'Connection lost'
+      name: 'StoreMutationError'
+      kind: 'error'
+      code: 500
+      id: 'fetch-error'
+      cause:
+        Error#: { message: 'Connection lost', name: 'Error', kind: 'connection' }
+  `);
+  expect(requests).toMatchInlineSnapshot(`
+    - 'upload cover -> server:cover'
+    - 'upload img-1 -> Connection lost'
+    - 'upload img-2 -> server:img-2'
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  // Nothing was sent, so every file stays staged for the next save.
+  expect(getUploads()).toMatchInlineSnapshot(`
+    - { id: 'cover', state: 'uploaded' }
+    - id: 'img-1'
+      lastError: { message: 'Connection lost' }
+      state: 'failed'
+    - { id: 'img-2', state: 'uploaded' }
+  `);
+});
+
 test('with the session gate closed, an optional image the server refuses fails the online save instead of being dropped', async () => {
   createMockBrowserOpfs();
   const { env, requests, getUploads, ...actions } = createDocWithImagesEnv({

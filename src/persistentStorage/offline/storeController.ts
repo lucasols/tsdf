@@ -1803,6 +1803,8 @@ export function createOfflineStoreController<
     classification: OfflineFailureClassification;
     sessionEnabled: boolean;
     allowReplayRetry: boolean;
+    /** A newer classification dropped a classifier answer for this failure */
+    overtaken: boolean;
   };
 
   async function classifyReplayFailure(
@@ -1819,22 +1821,30 @@ export function createOfflineStoreController<
     };
     if (uploadId !== undefined) failureCtx.uploadId = uploadId;
 
-    const classification = await current.session.classifyFailure(
+    const failureClassification = await current.session.classifyFailure(
       error,
       failureCtx,
     );
+    const classification =
+      failureClassification === 'overtaken' ? 'ignore' : failureClassification;
     // A session gate closed while the entry was in flight leaves the
     // failure unclassified: the entry stays queued as it was, to be
     // replayed once the gate reopens
     const sessionEnabled = isSessionEnabled();
-    const allowReplayRetry =
+    const retriable =
       sessionEnabled &&
       classification === 'ignore' &&
       !current.session.getStatus().isOfflineMode
         ? await current.session.classifyRetriableFailure(error, failureCtx)
         : false;
 
-    return { classification, sessionEnabled, allowReplayRetry };
+    return {
+      classification,
+      sessionEnabled,
+      allowReplayRetry: retriable === true,
+      overtaken:
+        failureClassification === 'overtaken' || retriable === 'overtaken',
+    };
   }
 
   /**
@@ -5414,8 +5424,11 @@ export function createOfflineStoreController<
             );
             // Refused: a permanent failure, or a retryable one out of
             // retries, the cases that send the operation of a required upload
-            // to manual resolution.
+            // to manual resolution. A failure left unclassified because a
+            // newer classification dropped its answer is handled like the one
+            // of a required upload instead.
             return isReplayFailureKeptOnline(current, classified) &&
+              !classified.overtaken &&
               (!classified.allowReplayRetry ||
                 getNextReplayFailureCount(replayedEntry.id) >=
                   replayRetryMaxFailures)
@@ -5604,8 +5617,9 @@ export function createOfflineStoreController<
         uploadDependenciesWait = undefined;
       });
     }
-    // A mutation called while an older one waits for that list waits too, so
-    // it can't take a queue position before it.
+    // A mutation called while an older one of this store waits for that list
+    // waits too, so it can't take a queue position before it. Mutations of
+    // other stores don't wait, so one called meanwhile can replay first.
     const wait = storedUploadsListed ?? uploadDependenciesWait;
     if (!wait) return current;
     await wait;
@@ -5732,18 +5746,20 @@ export function createOfflineStoreController<
                 async (error, uploadId) => {
                   const { preparedCurrent, failureCtx, activeCause } =
                     await classifyDirectFailure(error, uploadId);
-                  if (activeCause)
-                    return isMutationQueueingAllowed(activeCause);
-                  // A session gate closed during the run leaves the failure
+                  // A classifier answer dropped by a newer classification, or
+                  // a session gate closed during the run, leaves the failure
                   // unclassified, so it fails the mutation like a required
                   // upload. Retryable: running the mutation again may upload
-                  // it.
+                  // it. Only a failure found permanent drops the upload.
+                  if (activeCause === 'overtaken') return false;
+                  if (activeCause)
+                    return isMutationQueueingAllowed(activeCause);
                   if (
                     !isSessionEnabled() ||
                     (await preparedCurrent.session.classifyRetriableFailure(
                       error,
                       failureCtx,
-                    )) ||
+                    )) !== false ||
                     !isSessionEnabled()
                   ) {
                     return false;
@@ -5803,7 +5819,9 @@ export function createOfflineStoreController<
       },
       classifyError: async (error, uploadId) => {
         const { activeCause } = await classifyDirectFailure(error, uploadId);
-        return activeCause ? isMutationQueueingAllowed(activeCause) : false;
+        return activeCause && activeCause !== 'overtaken'
+          ? isMutationQueueingAllowed(activeCause)
+          : false;
       },
     };
   }

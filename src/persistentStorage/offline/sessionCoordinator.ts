@@ -2544,16 +2544,21 @@ class SessionOfflineCoordinator {
    * a failed direct mutation does before deciding whether to queue it: the
    * network detection is read again first, and the failure is only classified
    * when that did not put the session in an offline mode. Resolves with the
-   * mode the session's operations follow afterwards, `null` while online.
+   * mode the session's operations follow afterwards, `null` while online,
+   * or `'overtaken'` when a newer classification dropped the classifier's
+   * answer and the session stayed online: the failure is left unclassified.
    */
   async classifyRequestFailure(
     error: unknown,
     ctx: OfflineFailureContext,
-  ): Promise<OfflineMutationQueueingCause | null> {
+  ): Promise<OfflineMutationQueueingCause | 'overtaken' | null> {
     await this.refreshNetworkState();
 
-    if (this.getActiveOfflineCause() === null) {
-      await this.classifyFailure(error, ctx);
+    if (
+      this.getActiveOfflineCause() === null &&
+      (await this.classifyFailure(error, ctx)) === 'overtaken'
+    ) {
+      return this.getActiveOfflineCause() ?? 'overtaken';
     }
 
     return this.getActiveOfflineCause();
@@ -2571,10 +2576,16 @@ class SessionOfflineCoordinator {
     return null;
   }
 
+  /**
+   * Classifies a failure, activating the offline mode it points to. Resolves
+   * with `'overtaken'` when the classifier's explicit answer was dropped
+   * because a newer classification started meanwhile, which callers that
+   * only read the session mode treat as `'ignore'`.
+   */
   async classifyFailure(
     error: unknown,
     ctx: OfflineFailureContext,
-  ): Promise<OfflineFailureClassification> {
+  ): Promise<OfflineFailureClassification | 'overtaken'> {
     if (!this.#canClassifyFailures()) return 'ignore';
 
     const { classifyFailure, healthCheck } = this.#canonicalConfig;
@@ -2591,7 +2602,7 @@ class SessionOfflineCoordinator {
       // An `unknown` one decides nothing by itself: it goes on to the health
       // check, whose answer is shared by every failure waiting for it
       if (result !== 'unknown' && !this.isCurrentClassificationToken(token)) {
-        return 'ignore';
+        return 'overtaken';
       }
     }
 
@@ -2715,10 +2726,15 @@ class SessionOfflineCoordinator {
     );
   }
 
+  /**
+   * Whether `classifyRetryableFailure` considers the failure retryable.
+   * Resolves with `'overtaken'` when a newer call started while it ran, which
+   * drops its answer: callers that need a yes treat it as `false`.
+   */
   async classifyRetriableFailure(
     error: unknown,
     ctx: OfflineStoreFailureContext,
-  ): Promise<boolean> {
+  ): Promise<boolean | 'overtaken'> {
     if (!this.#canonicalConfig.classifyRetriableFailure) return false;
 
     const token = this.getRetriableFailureToken();
@@ -2728,7 +2744,7 @@ class SessionOfflineCoordinator {
     );
 
     if (!this.isCurrentRetriableFailureToken(token)) {
-      return false;
+      return 'overtaken';
     }
 
     return result;
@@ -4480,7 +4496,8 @@ export function createOfflineSession<
         ctx.operationName = options.operationName;
       }
 
-      return (await coordinator.classifyRequestFailure(error, ctx)) ?? 'ignore';
+      const cause = await coordinator.classifyRequestFailure(error, ctx);
+      return cause === null || cause === 'overtaken' ? 'ignore' : cause;
     },
     getOfflineEntities: () => {
       const sessionKey = getSessionKey();
