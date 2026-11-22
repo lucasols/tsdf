@@ -2988,11 +2988,13 @@ export function createListQueryStore<
     itemDroppedFieldInvalidations.delete(itemKey);
     itemInvalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
+    persistence?.restoredItemKeys.delete(itemKey);
   }
 
   function cleanupQueryStateMetadata(queryKey: string): void {
     queryInvalidationWasTriggered.delete(queryKey);
     queryCacheRuntime.clear(queryKey);
+    persistence?.restoredQueryKeys.delete(queryKey);
   }
 
   function clearOfflineOverlays(nextSessionKey: string | null = null): void {

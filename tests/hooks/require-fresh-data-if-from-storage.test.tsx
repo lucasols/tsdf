@@ -587,4 +587,41 @@ describe('list query store', () => {
         time: '10ms -> 810ms | duration: 800ms'
     `);
   });
+
+  test('an item re-added after its restored version was deleted is not treated as restored', async () => {
+    seedListItem('lq-readded', 'session1', 'users', 2, {
+      id: 2,
+      name: 'Stale 2',
+    });
+    const env = createListQueryEnv({ storeName: 'lq-readded', serverData });
+    const itemPayload = rawItemPayload('users', 2);
+
+    // The restored row is read into state, the app deletes it locally and
+    // then adds it back with data it built itself (e.g. undoing the delete)
+    expect(env.apiStore.getItemState(itemPayload)?.name).toBe('Stale 2');
+    env.apiStore.deleteItemState(itemPayload);
+    env.apiStore.addItemToState(itemPayload, { id: 2, name: 'Re-added 2' });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { status, data } = env.apiStore.useItem(itemPayload, {
+        requireFreshData: 'ifFromStorage',
+      });
+      renders.add({ status, name: data?.name ?? null });
+    });
+    // Less than the low-priority throttle: no mount revalidation either
+    await advanceTime(100);
+
+    // The re-added data did not come from storage, so the editor gets it
+    // right away without a forced refresh
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Re-added 2
+      "
+    `);
+    expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
 });
