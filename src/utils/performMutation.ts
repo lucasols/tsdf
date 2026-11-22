@@ -18,12 +18,6 @@ export type MutationDebounce = {
   ms: number;
 };
 
-type ResultError =
-  | Error
-  | Record<string, unknown>
-  | unknown[]
-  | readonly unknown[];
-
 /**
  * Identifies a debounced mutation group: the `context` and `payload` passed
  * to the `debounce` option of `performMutation`.
@@ -67,6 +61,12 @@ export function cancelPendingDebouncedMutation<TRollback>(
 
   return true;
 }
+
+type ResultError =
+  | Error
+  | Record<string, unknown>
+  | unknown[]
+  | readonly unknown[];
 
 export async function performMutationWithLifecycle<
   T,

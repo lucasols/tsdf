@@ -277,6 +277,7 @@ kind so pending deletes do not need item hydration before they appear.
 | `deleteItemState(itemId)`                       | Delete item from all queries                                                              |
 | `startItemMutation(itemId)`                     | Start mutation lock on item + related queries                                             |
 | `performMutation(payload, options)`             | Full mutation lifecycle. See [Mutations](./mutations.md)                                  |
+| `cancelDebouncedMutation(debounce)`             | Cancel a pending debounced mutation. See [Mutations](./mutations.md)                      |
 
 ### Other
 

@@ -163,13 +163,15 @@ For frequent mutations (e.g., typing), use debounce to batch them:
 ```ts
 await store.performMutation({
   debounce: {
-    context: 'update-name', // debounce key
-    payload: newName, // only the latest payload is used
+    context: 'update-name',
+    payload: taskId, // calls with the same context and payload supersede each other
     ms: 500, // wait 500ms of inactivity
   },
-  mutation: () => api.updateName(newName),
+  mutation: () => api.updateName(taskId, newName),
 });
 ```
+
+Only the latest call of a debounce group (same `context` and `payload`) sends its mutation, so the payload should identify what is being edited (e.g. the entity id), not the edited value. Debounce groups are scoped to the store: calls on different stores never supersede each other.
 
 The window close stays blocked during the debounce period too, so a pending debounced mutation isn't lost if the tab is closed.
 

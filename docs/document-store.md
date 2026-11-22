@@ -90,6 +90,7 @@ type DocumentStoreState<State> = {
 | `reset`                    | `() => void`                                            | Reset store to idle state                                                                                                                       |
 | `startMutation`            | `() => () => boolean`                                   | Manually start a mutation lock. See [Mutations](./mutations.md)                                                                                 |
 | `performMutation`          | `(options) => Promise<Result<T>>`                       | Full mutation lifecycle. See [Mutations](./mutations.md)                                                                                        |
+| `cancelDebouncedMutation`  | `(debounce) => boolean`                                 | Cancel a pending debounced mutation and revert its optimistic updates. See [Mutations](./mutations.md#cancelling-a-debounced-mutation)          |
 | `onTransportReconnect`     | `() => void`                                            | Store-level reconnect hook. Prefer `storeManager.onTransportReconnect()` for shared transports. See [Real-Time Updates](./real-time-updates.md) |
 
 ### Offline Methods
