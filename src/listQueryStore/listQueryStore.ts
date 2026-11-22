@@ -1345,7 +1345,12 @@ type ListQueryStoreOptionsBase<
   >[];
   /** Called when an already-loaded query is invalidated. */
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
-  /** Called when an already-loaded item is invalidated. */
+  /**
+   * Called when an already-loaded item is invalidated. Not called for an item
+   * the invalidation leaves alone: an unsent offline creation, or an item with
+   * a change waiting for a manual resolution on an invalidation with any
+   * priority but `highPriority` (see `docs/offline.md`).
+   */
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
   /** Observes request scheduler lifecycle events for this store. */
   onSchedulerEvent?: (
@@ -1529,8 +1534,9 @@ export function createListQueryStore<
   const unsentCreationItemKeys = new Set<string>();
   // Items with a change waiting for a manual resolution. A refetch would
   // replace the change the user still has to decide on, so the window focus,
-  // reconnect and recovery revalidations skip them, and list fetches keep
-  // their local version.
+  // reconnect and recovery revalidations and background item refetches skip
+  // them (see `skipsBackgroundItemRefetch`), and list fetches keep their local
+  // version.
   const resolutionItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
@@ -2396,6 +2402,7 @@ export function createListQueryStore<
       );
     },
     persistence?.restoredItemKeys,
+    skipsBackgroundItemRefetch,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -4142,8 +4149,28 @@ export function createListQueryStore<
   > = scheduleItemFetchApiImpl;
 
   /**
+   * A background item refetch (any priority but `highPriority`: a hook mount,
+   * a window focus, a realtime update) leaves a loaded item alone while it
+   * has a change waiting for a manual resolution: a refetch would replace the
+   * local version the user still has to decide on. Explicit fetches, and the
+   * fetch of requested fields the item is missing, still run. Once the
+   * change is handled, the store's recovery revalidation refetches it.
+   */
+  function skipsBackgroundItemRefetch(
+    itemKey: string,
+    priority: FetchType,
+  ): boolean {
+    return (
+      priority !== 'highPriority' &&
+      resolutionItemKeys.has(itemKey) &&
+      !!store.state.itemQueries[itemKey]?.wasLoaded
+    );
+  }
+
+  /**
    * Schedules an item fetch hooks start on their own, skipping unsent
-   * creations; `onSkipped` is called when the fetch is skipped.
+   * creations and held items (see `skipsBackgroundItemRefetch`); `onSkipped`
+   * is called when the fetch is skipped.
    */
   function scheduleAutomaticItemFetch(
     fetchType: FetchType,
@@ -4182,9 +4209,12 @@ export function createListQueryStore<
     onSkipped: (() => void) | undefined,
   ): ScheduleFetchResults {
     const itemKey = getItemKey(itemPayload);
-    // Only exists locally until its creation is confirmed, so the server
-    // doesn't know it yet
-    if (unsentCreationItemKeys.has(itemKey)) {
+    // An unsent creation only exists locally until its creation is
+    // confirmed, so the server doesn't know it yet
+    if (
+      unsentCreationItemKeys.has(itemKey) ||
+      skipsBackgroundItemRefetch(itemKey, fetchType)
+    ) {
       onSkipped?.();
       return 'skipped';
     }

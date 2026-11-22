@@ -700,9 +700,9 @@ export function createDocumentStore<
   });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
-  // The document has a change waiting for a manual resolution: window focus
-  // and reconnect revalidations leave it alone, a refetch would replace the
-  // change the user still has to decide on
+  // The document has a change waiting for a manual resolution: the UI keeps
+  // its local version until the user decides, so window focus, reconnect and
+  // other background refetches leave it alone (see `skipsBackgroundRefetch`).
   let requiresResolution = false;
 
   function clearOfflineOverlay(nextSessionKey: string | null = null): void {
@@ -1356,7 +1356,44 @@ export function createDocumentStore<
     await persistence.preloadPersistentStorage();
   }
 
+  /**
+   * A background refetch (any priority but `highPriority`: a hook mount, a
+   * window focus, a realtime update) leaves the document alone while it has a
+   * change waiting for a manual resolution: a refetch would replace the local
+   * version the user still has to decide on. Explicit fetches still replace
+   * it. Once the change is handled, the store's recovery revalidation
+   * refetches it. Checks the data rather than the status, so the local
+   * version also stays after a failed refresh.
+   */
+  function skipsBackgroundRefetch(priority: FetchType): boolean {
+    return (
+      requiresResolution &&
+      priority !== 'highPriority' &&
+      store.state.data !== null
+    );
+  }
+
+  /**
+   * Schedules the refetch of an invalidation, skipping it while the document
+   * is held (see `skipsBackgroundRefetch`). Whether it is held is only known
+   * once the queued work is read, e.g. for a realtime update at startup.
+   */
+  function scheduleInvalidationFetch(priority: FetchType): void {
+    if (offlineController && !offlineController.isHydrated()) {
+      const schedule = () => {
+        if (isDisposed || skipsBackgroundRefetch(priority)) return;
+        scheduleFetch(priority);
+      };
+      void offlineController.hydrateIfNeeded().then(schedule, schedule);
+      return;
+    }
+
+    scheduleFetch(priority);
+  }
+
   function invalidateData(priority: FetchType = 'highPriority'): void {
+    if (skipsBackgroundRefetch(priority)) return;
+
     const currentRefetchOnMount = store.state.refetchOnMount;
     const currentInvalidationPriority = currentRefetchOnMount
       ? fetchTypePriority[currentRefetchOnMount]
@@ -1841,7 +1878,7 @@ export function createDocumentStore<
       if (!invalidationWasTriggered) {
         store.setKey('refetchOnMount', false);
 
-        scheduleFetch(priority);
+        scheduleInvalidationFetch(priority);
         invalidationWasTriggered = true;
       }
     });
@@ -1852,6 +1889,14 @@ export function createDocumentStore<
       void (async () => {
         if (persistence) {
           await persistence.maybeHydrateFromStorage();
+          if (effectState.cancelled) return;
+        }
+
+        // Whether the document has a change waiting for a decision is only
+        // known once the queued work is read, e.g. for a view mounted at
+        // startup
+        if (offlineController && !offlineController.isHydrated()) {
+          await offlineController.hydrateIfNeeded().catch(() => {});
           if (effectState.cancelled) return;
         }
 
@@ -1866,12 +1911,25 @@ export function createDocumentStore<
         const shouldFetch = requiredFetch || !!store.state.refetchOnMount;
 
         if (
-          shouldScheduleAutomaticFetch(
+          !shouldScheduleAutomaticFetch(
             wasLoaded,
             shouldFetch,
             !!disableRefetches,
             !!disableRefetchOnMount,
-          ) &&
+          )
+        ) {
+          return;
+        }
+
+        if (skipsBackgroundRefetch(fetchType)) {
+          // The recovery revalidation once the change is handled replaces an
+          // earlier invalidation: left pending, it would make that
+          // revalidation look already requested and not refetch the view
+          if (store.state.refetchOnMount) store.setKey('refetchOnMount', false);
+          return;
+        }
+
+        if (
           tryClaimAutomaticFetchSlot(
             automaticRetryState,
             DOC_TARGET_KEY,
