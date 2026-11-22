@@ -1116,7 +1116,14 @@ test('a file staged while the session is still restoring stored uploads is liste
   uploadHook.unmount();
 });
 
-test('a change saved right after a reload declares the files staged before it, while the session is still restoring them', async () => {
+type UploadDependencyAndPlainOperations = UploadDependencyOperations & {
+  setValue: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { value: number } }
+  >;
+};
+
+test('a change saved right after a reload declares the files staged before it, while the session is still restoring them, and keeps its place before the changes saved after it', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'offline-upload-hydration-dependency-session';
   const requests: string[] = [];
@@ -1144,57 +1151,72 @@ test('a change saved right after a reload declares the files staged before it, w
       },
     },
   });
-  const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
-    1,
-    {
-      id: 'offline-upload-hydration-dependency-doc',
-      storeManager,
-      testScenario: 'loaded',
-      persistentStorage: {
-        adapter: 'local-sync',
-        schema: docSchema,
-        offline: {
-          operations: {
-            updateWithAttachment: {
-              inputSchema: rc_object({
-                attachmentId: rc_string,
-                value: rc_number,
-              }),
-              kind: 'update',
-              // The app only declares the ids that are still staged: an id the
-              // data holds after its file was sent and deleted needs no upload.
-              dependsOnUploads: ({ input }) =>
-                storeManager
-                  .getOfflineUploads()
-                  .some((upload) => upload.id === input.attachmentId)
-                  ? [input.attachmentId]
-                  : [],
-              execute: async ({ input, uploads }) => {
-                requests.push(
-                  `replay with ${JSON.stringify(uploads.resolvedRefsById)}`,
-                );
-                await env.serverMock.delayedSetData(input.value);
-                return { value: input.value };
-              },
+  const env = createDocumentStoreTestEnv<
+    number,
+    UploadDependencyAndPlainOperations
+  >(1, {
+    id: 'offline-upload-hydration-dependency-doc',
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateWithAttachment: {
+            inputSchema: rc_object({
+              attachmentId: rc_string,
+              value: rc_number,
+            }),
+            kind: 'update',
+            // The app only declares the ids that are still staged: an id the
+            // data holds after its file was sent and deleted needs no upload.
+            dependsOnUploads: ({ input }) =>
+              storeManager
+                .getOfflineUploads()
+                .some((upload) => upload.id === input.attachmentId)
+                ? [input.attachmentId]
+                : [],
+            execute: async ({ input, uploads }) => {
+              requests.push(
+                `replay ${input.value} with ${JSON.stringify(uploads.resolvedRefsById)}`,
+              );
+              await env.serverMock.delayedSetData(input.value);
+              return { value: input.value };
+            },
+          },
+          // Declares no uploads, so it has nothing to wait for on its own
+          setValue: {
+            inputSchema: rc_object({ value: rc_number }),
+            kind: 'update',
+            execute: async ({ input }) => {
+              requests.push(`replay ${input.value}`);
+              await env.serverMock.delayedSetData(input.value);
+              return { value: input.value };
             },
           },
         },
       },
     },
-  );
+  });
   // The restore is still running: nothing is listed yet.
   expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
 
-  // --- Action: the user saves a change with the image right away ---
-  await resolveAfterAllTimers(
-    env.apiStore.performMutation({
-      mutation: () => Promise.resolve({ value: 2 }),
-      offline: {
-        operation: 'updateWithAttachment',
-        input: { attachmentId: 'img-1', value: 2 },
-      },
-    }),
-  );
+  // --- Action: the user saves a change with the image right away, then
+  // another change of the same document without files before the first save
+  // finished ---
+  const saveWithImage = env.apiStore.performMutation({
+    mutation: () => Promise.resolve({ value: 2 }),
+    offline: {
+      operation: 'updateWithAttachment',
+      input: { attachmentId: 'img-1', value: 2 },
+    },
+  });
+  const saveWithoutFiles = env.apiStore.performMutation({
+    mutation: () => Promise.resolve({ value: 3 }),
+    offline: { operation: 'setValue', input: { value: 3 } },
+  });
+  await resolveAfterAllTimers(Promise.all([saveWithImage, saveWithoutFiles]));
 
   // On reconnect the image is uploaded first and sent with the change: the
   // save waited for the restore before reading which files are staged, so
@@ -1204,9 +1226,12 @@ test('a change saved right after a reload declares the files staged before it, w
     await Promise.resolve();
   });
   await advanceTime(3_000);
+  // The change without files waited behind it instead of taking an earlier
+  // queue position, so the newest value is the one the server keeps.
   expect(requests).toMatchInlineSnapshot(
-    `['upload img-1', 'replay with {"img-1":"server:img-1"}']`,
+    `['upload img-1', 'replay 2 with {"img-1":"server:img-1"}', 'replay 3']`,
   );
+  expect(env.serverMock.current).toMatchInlineSnapshot(`3`);
 });
 
 test('an upload deleted while the session is still restoring stored uploads does not come back', async () => {

@@ -344,8 +344,11 @@ test('an upload id still held by the app after its mutation replayed resolves to
  */
 function createReloadableAttachmentApp(args: {
   sessionKey: string;
-  /** Replaces the queued edit of the same document */
-  supersedes?: boolean;
+  /**
+   * How a new edit replaces the edit still queued for the document: the new
+   * one supersedes it, or it is merged into it (`accumulation.mergeInput`).
+   */
+  replacesQueuedEdit?: 'supersedes' | 'merges';
 }) {
   const replayEvents: string[] = [];
 
@@ -383,8 +386,15 @@ function createReloadableAttachmentApp(args: {
                   value: rc_number,
                 }),
                 kind: 'update',
-                ...(args.supersedes
+                ...(args.replacesQueuedEdit === 'supersedes'
                   ? { supersedes: { scope: 'same-entity' } }
+                  : {}),
+                ...(args.replacesQueuedEdit === 'merges'
+                  ? {
+                      accumulation: {
+                        mergeInput: ({ incomingInput }) => incomingInput,
+                      },
+                    }
                   : {}),
                 dependsOnUploads: ({ input }) => [input.attachmentId],
                 execute: async (ctx) => {
@@ -508,31 +518,35 @@ test('an edit queued with the id of a file that was already sent still replays w
   attachmentHook.unmount();
 });
 
-test('an edit that replaces a queued edit declaring an already sent file keeps that file ref after an app reload', async () => {
-  createMockBrowserOpfs();
-  // Each edit of the document replaces the edit still queued for it.
-  const app = createReloadableAttachmentApp({
-    sessionKey: 'offline-upload-superseded-after-reload-session',
-    supersedes: true,
-  });
-  await app.sendFileThenQueueEditDeclaringIt();
+test.each(['supersedes', 'merges'] as const)(
+  'an edit that replaces a queued edit declaring an already sent file keeps that file ref after an app reload (%s)',
+  async (replacesQueuedEdit) => {
+    createMockBrowserOpfs();
+    // Each edit of the document replaces the edit still queued for it, by
+    // superseding it or by being merged into it.
+    const app = createReloadableAttachmentApp({
+      sessionKey: `offline-upload-${replacesQueuedEdit}-after-reload-session`,
+      replacesQueuedEdit,
+    });
+    await app.sendFileThenQueueEditDeclaringIt();
 
-  // --- Action: after a reload, still offline, the user edits the document
-  // again. The reloaded app only knows the file ref from the queued edit 3,
-  // which edit 4 replaces ---
-  const reloadedApp = await app.reopen();
-  await reloadedApp.queueEditWithAttachment(4);
-  await app.reconnect();
+    // --- Action: after a reload, still offline, the user edits the document
+    // again. The reloaded app only knows the file ref from the queued edit 3,
+    // which edit 4 replaces ---
+    const reloadedApp = await app.reopen();
+    await reloadedApp.queueEditWithAttachment(4);
+    await app.reconnect();
 
-  // Edit 4 took over the ref edit 3 kept: it is sent with it instead of
-  // failing on an upload the reloaded app no longer knows.
-  expect(app.replayEvents).toMatchInlineSnapshot(
-    `['upload:asset-1', 'execute:2:"server:asset-1"', 'execute:4:"server:asset-1"']`,
-  );
-  expect(
-    reloadedApp.env.apiStore.getOfflineResolutions(),
-  ).toMatchInlineSnapshot(`[]`);
-});
+    // Edit 4 took over the ref edit 3 kept: it is sent with it instead of
+    // failing on an upload the reloaded app no longer knows.
+    expect(app.replayEvents).toMatchInlineSnapshot(
+      `['upload:asset-1', 'execute:2:"server:asset-1"', 'execute:4:"server:asset-1"']`,
+    );
+    expect(
+      reloadedApp.env.apiStore.getOfflineResolutions(),
+    ).toMatchInlineSnapshot(`[]`);
+  },
+);
 
 type AccumulatedAttachmentsOperations = {
   setAttachments: DocumentOfflineOperationDefinition<

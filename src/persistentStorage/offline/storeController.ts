@@ -678,6 +678,9 @@ export function createOfflineStoreController<
   // called. Queued, they go at that position, so no newer mutation is merged
   // into older work across them.
   const reservedMutations = new Map<number, PreparedQueuedMutation>();
+  // Set while a mutation waits for the session to list its stored uploads
+  // before computing its upload dependencies (right after a reload).
+  let uploadDependenciesWait: Promise<void> | undefined;
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -5590,14 +5593,28 @@ export function createOfflineStoreController<
     operationName: string,
   ): Promise<ActiveSessionState | null> {
     const current = ensureActiveSession();
-    if (!current || !operations[operationName]?.dependsOnUploads) {
-      return current;
-    }
+    if (!current) return current;
 
-    const storedUploadsListed = current.session.waitForStoredUploads();
-    if (!storedUploadsListed) return current;
-    await storedUploadsListed;
-    return ensureActiveSession();
+    const storedUploadsListed = operations[operationName]?.dependsOnUploads
+      ? current.session.waitForStoredUploads()
+      : undefined;
+    if (storedUploadsListed && !uploadDependenciesWait) {
+      uploadDependenciesWait = storedUploadsListed;
+      void storedUploadsListed.then(() => {
+        uploadDependenciesWait = undefined;
+      });
+    }
+    // A mutation called while an older one waits for that list waits too, so
+    // it can't take a queue position before it.
+    const wait = storedUploadsListed ?? uploadDependenciesWait;
+    if (!wait) return current;
+    await wait;
+    // A mutation called in a session the app switched away from meanwhile is
+    // not run or queued in the new one.
+    if (!isSessionStillActive(current)) {
+      throw new OfflineSessionUnavailableError();
+    }
+    return current;
   }
 
   async function queueMutation<TName extends keyof TOperations & string>(args: {
