@@ -689,7 +689,13 @@ describe('document', () => {
           outage: {
             enabled: true,
             recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
+            // A 1ms probe would run over a thousand times before the direct
+            // mutation succeeds, which can exceed the test timeout under load
+            recoveryProbe: {
+              ...quickRecoveryProbe,
+              initialIntervalMs: 1_000,
+              maxIntervalMs: 1_000,
+            },
           },
           mutationQueueing: { outage: 'disallow' },
         },
@@ -745,7 +751,7 @@ describe('document', () => {
       isNetworkDetectedOffline: '❌'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
-      lastRecoveryCheckAt: 1735689601224
+      lastRecoveryCheckAt: 1735689601010
       network: { active: '❌', enabled: '❌' }
       outage: { active: '❌', enabled: '✅' }
       sessionKey: 'hybrid-doc-outage-disallowed-online-session'
