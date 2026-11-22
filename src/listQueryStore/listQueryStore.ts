@@ -2754,10 +2754,13 @@ export function createListQueryStore<
       for (const [index, queryKey] of queryKeys.entries()) {
         const savedQuery = savedQueries[index];
         if (!savedQuery) continue;
-        // A list that already holds a replayed temp row is loaded so the row
-        // is reconciled, even if the filter no longer matches it
-        if (savedQuery.items.some((itemKey) => tempItemKeys.has(itemKey))) {
-          unloadedQueryKeys.add(queryKey);
+        // At replay only the lists that hold a temp row are reconciled, so
+        // they are loaded whatever the filter returns now, and the filter is
+        // not run on the others
+        if (tempItemKeys.size > 0) {
+          if (savedQuery.items.some((itemKey) => tempItemKeys.has(itemKey))) {
+            unloadedQueryKeys.add(queryKey);
+          }
           continue;
         }
         const query: TSFDListQuery<QueryPayload> = {
