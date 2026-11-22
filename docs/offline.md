@@ -309,7 +309,7 @@ createUser: {
 ```
 
 - The entity is added to the queries when the mutation is queued, so `optimisticUpdate` does not need to call `addItemToState` for it. A mutation that runs online right away is never queued and creates no pending entity.
-- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function is matched against them too: every query of the store saved in persistent storage is loaded for it, so prefer query payloads when the lists are known.
+- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function is matched against them too: every query of the store saved in persistent storage is loaded for it, so prefer query payloads when the lists are known. The queries loaded this way, and their rows, count as recently used for storage expiry and eviction.
 - The membership is stored with the queries, so the row is still in its lists after the app restarts with the mutation queued.
 - When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. The declared queries that are only in persistent storage are loaded first: the function form of `addToQueries` runs again for this, so it should only depend on its arguments. Discarding the queued mutation removes the row from its lists.
 - While the mutation is pending, a list refetch that does not return the row keeps it rendered at its last known position. This memory does not survive an app restart.
