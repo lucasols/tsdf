@@ -146,7 +146,7 @@ if (result.ok) {
 
 - Result is `Result<T, StoreMutationError | MutationSkipped>` (`t-result`).
 - On error: the optimistic update is reverted; data changed again while in flight (e.g. by a concurrent mutation) is kept and revalidated instead. Debounced calls roll back to the state before the first superseded call.
-- `store.cancelDebouncedMutation({ context, payload })` cancels the call still waiting for its debounce window (e.g. an edit of an entity deleted within the window): it resolves `skipped` and its group's optimistic updates are reverted. Call it before starting the replacing mutation.
+- `store.cancelDebouncedMutation({ context, payload })` cancels a pending debounced call and reverts its optimistic updates.
 - `silentErrors: true` still calls `onMutationError(error, { silentErrors: true })`; handlers should use the flag to suppress user-facing noise while preserving logging/recovery.
 - `revalidateOnSuccess`: `true | false | 'queries' | (queryPayload) => boolean | { queries, items }` (List Query).
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).
@@ -276,7 +276,7 @@ Check more on docs: `docs/real-time-updates.md`.
 
 ## List Query specific features
 
-- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem` gets the query payload, current membership and the previous item / query memberships, `sort`, `appendNewTo`). Check more on docs: `docs/optimistic-list-updates.md`.
+- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`). Check more on docs: `docs/optimistic-list-updates.md`.
 - **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Check more on docs: `docs/partial-resources.md`.
 - **Offset pagination** (set `TOffsetPagination = true`) — real offset/limit pagination instead of size-mode re-fetches. `fetchListFn` receives `{ offset, limit }`; `offsetPagination: { maxInvalidationLimit, maxParallel }`. Check more on docs: `docs/offset-pagination.md`.
 - **`derivedQueries`** — hook results computed locally from already-materialized items when `isComplete(...)` returns `true`; results expose `isDerived: true` and `hasMore: false`, and never materialize a query entry.
