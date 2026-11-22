@@ -1698,16 +1698,16 @@ class SessionOfflineCoordinator {
     return this.store.state.uploads;
   }
 
-  /**
-   * Server ref `id` resolves to without uploading anything: the ref of a
-   * staged upload in `uploaded` state, or of an upload released after it was
-   * sent. `null` otherwise.
-   */
   /** Ref of an upload released after it was sent, kept in memory. */
   getReleasedUploadRef(id: string): ValidPayload | undefined {
     return this.#releasedUploadRefs.get(id);
   }
 
+  /**
+   * Server ref `id` resolves to without uploading anything: the ref of a
+   * staged upload in `uploaded` state, or of an upload released after it was
+   * sent. `null` otherwise.
+   */
   getResolvedUploadRef(id: string): ValidPayload | null {
     // The published list, so uploads another tab sent count too.
     const upload = this.store.state.uploads.find(
@@ -1963,6 +1963,12 @@ class SessionOfflineCoordinator {
      * was queued, used for ids the session no longer knows (after a reload).
      */
     keptRefs?: Record<string, ValidPayload>,
+    /**
+     * Upload attempts of earlier calls for the same run, by id: an upload
+     * that already settled there (or is still running) is not sent again, so
+     * a failure that settled after the first reported one is returned as is.
+     */
+    attempts?: Map<string, Promise<ValidPayload>>,
   ): Promise<
     | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
     | { failedUploadId: string; error: unknown }
@@ -1973,18 +1979,18 @@ class SessionOfflineCoordinator {
     // without waiting for the uploads that are still running.
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
-        try {
-          return [
+        let attempt = attempts?.get(id);
+        if (!attempt) {
+          attempt = this.#ensureUploadResolved(
             id,
-            await this.#ensureUploadResolved(
-              id,
-              true,
-              canSendUploads,
-              keptRefs && Object.hasOwn(keptRefs, id)
-                ? keptRefs[id]
-                : undefined,
-            ),
-          ] as const;
+            true,
+            canSendUploads,
+            keptRefs && Object.hasOwn(keptRefs, id) ? keptRefs[id] : undefined,
+          );
+          attempts?.set(id, attempt);
+        }
+        try {
+          return [id, await attempt] as const;
         } catch (error) {
           failures.push({ failedUploadId: id, error });
           throw error;
@@ -3352,7 +3358,7 @@ class SessionOfflineCoordinator {
   ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
-      const releasedRef = this.#getReleasedUploadRef(id, keptRef);
+      const releasedRef = this.#resolveReleasedOrKeptRef(id, keptRef);
       if (releasedRef !== undefined) return releasedRef;
       throw new Error(`Unknown offline upload "${id}"`);
     }
@@ -3376,7 +3382,7 @@ class SessionOfflineCoordinator {
       .resultifyAdd(async () => {
         const queuedRecord = await this.#getUploadRecord(id);
         if (!queuedRecord) {
-          const releasedRef = this.#getReleasedUploadRef(id, keptRef);
+          const releasedRef = this.#resolveReleasedOrKeptRef(id, keptRef);
           if (releasedRef !== undefined) return releasedRef;
           throw new Error(`Unknown offline upload "${id}"`);
         }
@@ -3476,7 +3482,7 @@ class SessionOfflineCoordinator {
    * was read back from storage, so it is checked against `resolvedRefSchema`
    * and then known as released for the rest of the app session.
    */
-  #getReleasedUploadRef(
+  #resolveReleasedOrKeptRef(
     id: string,
     keptRef: ValidPayload | undefined,
   ): ValidPayload | undefined {
@@ -3486,7 +3492,12 @@ class SessionOfflineCoordinator {
     const schema = this.#uploadsConfig?.resolvedRefSchema;
     const parsedRef =
       schema === undefined ? keptRef : parseRestoredUploadRef(schema, keptRef);
-    if (parsedRef !== undefined) this.#releasedUploadRefs.set(id, parsedRef);
+    if (parsedRef === undefined) return undefined;
+
+    this.#releasedUploadRefs.set(id, parsedRef);
+    // A rendered file of the id now exposes the ref.
+    const fileEntry = this.#uploadFiles.get(id);
+    if (fileEntry) this.#syncUploadFile(id, fileEntry);
     return parsedRef;
   }
 

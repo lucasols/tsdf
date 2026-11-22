@@ -37,17 +37,12 @@ class UploadError extends Error {
   }
 }
 
-const sessionClassifiers: Pick<
-  OfflineSessionConfig,
-  'classifyFailure' | 'classifyRetryableFailure'
-> = {
-  classifyFailure: (error) =>
-    error instanceof UploadError && error.kind === 'connection'
-      ? 'network'
-      : 'ignore',
-  classifyRetryableFailure: (error) =>
-    error instanceof UploadError && error.kind === 'busy',
-};
+const classifyFailure = (error: unknown) =>
+  error instanceof UploadError && error.kind === 'connection'
+    ? 'network'
+    : 'ignore';
+const classifyRetryableFailure = (error: unknown) =>
+  error instanceof UploadError && error.kind === 'busy';
 
 type DocWithImagesOperations = {
   saveDoc: DocumentOfflineOperationDefinition<
@@ -65,20 +60,46 @@ type DocWithImagesOperations = {
 function createDocWithImagesEnv({
   sessionKey,
   uploadOutcomes,
+  classifiersDelayMs,
+  enabled,
 }: {
   sessionKey: string;
+  /** Session gate */
+  enabled?: () => boolean;
   uploadOutcomes: Record<string, UploadError[]>;
+  /**
+   * Makes the session classifiers async, answering after this delay, like a
+   * classifier that reads the error response body first.
+   */
+  classifiersDelayMs?: number;
 }) {
   const requests: string[] = [];
   const uploadCalls = new Map<string, number>();
   // Answer of the network recovery check, once the session went offline.
   let serverReachable = true;
 
+  const delayed = <T,>(value: T) =>
+    new Promise<T>((resolve) => {
+      setTimeout(() => resolve(value), classifiersDelayMs);
+    });
+  const classifiers: Pick<
+    OfflineSessionConfig,
+    'classifyFailure' | 'classifyRetryableFailure'
+  > =
+    classifiersDelayMs === undefined
+      ? { classifyFailure, classifyRetryableFailure }
+      : {
+          classifyFailure: (error) => delayed(classifyFailure(error)),
+          classifyRetryableFailure: (error) =>
+            delayed(classifyRetryableFailure(error)),
+        };
+
   const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
     errorNormalizer: normalizeError,
     offlineSession: {
-      ...sessionClassifiers,
+      ...classifiers,
+      ...(enabled ? { enabled } : {}),
       network: { ...network.config, recoveryCheck: () => serverReachable },
       uploads: {
         adapter: opfsOfflineUploadAdapter,
@@ -239,6 +260,69 @@ test('a queued change is sent without an optional image the server refuses, whic
   // Time passing does not upload it again.
   await advanceTime(60_000);
   expect(requests).toHaveLength(4);
+});
+
+test('when every optional image is refused, each is uploaded once and the change is sent without them, also with async classifiers', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  const { env, requests, getUploads, ...actions } = createDocWithImagesEnv({
+    sessionKey: 'optional-upload-all-refused-replay',
+    uploadOutcomes: {
+      'img-1': [new UploadError('refused', 'Storage full')],
+      'img-2': [new UploadError('refused', 'Type not accepted')],
+    },
+    // The second refusal arrives while the first one is being classified.
+    classifiersDelayMs: 100,
+  });
+  await flushAllTimers();
+
+  await actions.stageFiles();
+  await actions.saveDoc();
+  await reconnect();
+
+  // Each image is sent once, and the request reports the refusal the server
+  // gave for each of them.
+  expect(requests).toMatchInlineSnapshot(`
+    - 'upload cover -> server:cover'
+    - 'upload img-1 -> Storage full'
+    - 'upload img-2 -> Type not accepted'
+    - 'replay saveDoc with refs {"cover":"server:cover"}, without img-1 (Storage full), img-2 (Type not accepted)'
+  `);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  // Both refused images stay staged as failed.
+  expect(getUploads()).toMatchInlineSnapshot(`
+    - id: 'img-1'
+      lastError: { message: 'Storage full' }
+      state: 'failed'
+    - id: 'img-2'
+      lastError: { message: 'Type not accepted' }
+      state: 'failed'
+  `);
+});
+
+test('a change saved online with every optional image refused uploads each image once, also with async classifiers', async () => {
+  createMockBrowserOpfs();
+  const { requests, ...actions } = createDocWithImagesEnv({
+    sessionKey: 'optional-upload-all-refused-direct',
+    uploadOutcomes: {
+      'img-1': [new UploadError('refused', 'Storage full')],
+      'img-2': [new UploadError('refused', 'Type not accepted')],
+    },
+    classifiersDelayMs: 100,
+  });
+  await flushAllTimers();
+
+  await actions.stageFiles();
+  const result = await actions.saveDoc();
+
+  // The save succeeds without both images, each sent once.
+  expect(result.ok).toBe(true);
+  expect(requests).toMatchInlineSnapshot(`
+    - 'upload cover -> server:cover'
+    - 'upload img-1 -> Storage full'
+    - 'upload img-2 -> Type not accepted'
+    - 'direct saveDoc with refs {"cover":"server:cover"}, without img-1 (Storage full), img-2 (Type not accepted)'
+  `);
 });
 
 test('a refused required upload still sends the change to manual resolution, even when an optional image was refused too', async () => {
@@ -431,4 +515,46 @@ test('an optional image failing with a retryable error during an online save fai
     - 'direct saveDoc with refs {"cover":"server:cover","img-1":"server:img-1","img-2":"server:img-2"}'
   `);
   expect(getUploads()).toMatchInlineSnapshot(`[]`);
+});
+
+test('with the session gate closed, an optional image the server refuses fails the online save instead of being dropped', async () => {
+  createMockBrowserOpfs();
+  const { env, requests, getUploads, ...actions } = createDocWithImagesEnv({
+    sessionKey: 'optional-upload-refused-gate-closed',
+    uploadOutcomes: { 'img-1': [new UploadError('refused', 'Storage full')] },
+    // The offline layer is turned off, e.g. by a feature flag.
+    enabled: () => false,
+  });
+  await flushAllTimers();
+
+  await actions.stageFiles();
+  const result = await actions.saveDoc();
+
+  // Upload failures are not classified with the gate closed, so the refused
+  // image fails the save like a required upload would, and the request is
+  // not sent.
+  expect(result.ok ? null : result.error).toMatchInlineSnapshot(`
+    Error#:
+      message: 'Storage full'
+      name: 'StoreMutationError'
+      kind: 'error'
+      code: 500
+      id: 'fetch-error'
+      cause:
+        Error#: { message: 'Storage full', name: 'Error', kind: 'refused' }
+  `);
+  expect(requests).toMatchInlineSnapshot(`
+    - 'upload cover -> server:cover'
+    - 'upload img-1 -> Storage full'
+    - 'upload img-2 -> server:img-2'
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  // The refused image stays staged, as failed.
+  expect(getUploads()).toMatchInlineSnapshot(`
+    - { id: 'cover', state: 'uploaded' }
+    - id: 'img-1'
+      lastError: { message: 'Storage full' }
+      state: 'failed'
+    - { id: 'img-2', state: 'uploaded' }
+  `);
 });

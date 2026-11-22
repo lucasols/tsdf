@@ -1729,10 +1729,13 @@ export function createOfflineStoreController<
       }
   > {
     const canSendUploads = () => isSessionStillActive(current);
+    // Shared by the calls below, so an upload is sent once per resolution.
+    const attempts = new Map<string, Promise<ValidPayload>>();
     let resolution = await current.session.resolveReplayUploadIds(
       uploadIds,
       canSendUploads,
       keptRefs,
+      attempts,
     );
     let optionalIds: Set<string> | undefined;
     const refusedUploadErrors = new Map<string, unknown>();
@@ -1754,11 +1757,13 @@ export function createOfflineStoreController<
       }
 
       refusedUploadErrors.set(failedUploadId, error);
-      // Uploads already resolved or still running are not sent again.
+      // Uploads already settled or still running are not sent again: a
+      // failure that settled meanwhile is returned to be classified.
       resolution = await current.session.resolveReplayUploadIds(
         uploadIds.filter((id) => !refusedUploadErrors.has(id)),
         canSendUploads,
         keptRefs,
+        attempts,
       );
     }
 
@@ -4679,10 +4684,16 @@ export function createOfflineStoreController<
       attachedUploadIds,
       dependencyUploadIds:
         dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
+      // The replaced work may be the only one that kept the ref of a released
+      // id after a reload.
       dependencyUploadRefs: getDependencyUploadRefs(
         current,
         dependencyUploadIds,
         preparedDependencyUploadRefs,
+        ...supersededEntries.map((entry) => entry.dependencyUploadRefs),
+        ...supersededResolutions.map(
+          (resolution) => resolution.dependencyUploadRefs,
+        ),
       ),
       tempIds,
     });
@@ -5571,12 +5582,17 @@ export function createOfflineStoreController<
                     await classifyDirectFailure(error, uploadId);
                   if (activeCause)
                     return isMutationQueueingAllowed(activeCause);
-                  // Not refused: running the mutation again may upload it.
+                  // A session gate closed during the run leaves the failure
+                  // unclassified, so it fails the mutation like a required
+                  // upload. Retryable: running the mutation again may upload
+                  // it.
                   if (
-                    await preparedCurrent.session.classifyRetriableFailure(
+                    !isSessionEnabled() ||
+                    (await preparedCurrent.session.classifyRetriableFailure(
                       error,
                       failureCtx,
-                    )
+                    )) ||
+                    !isSessionEnabled()
                   ) {
                     return false;
                   }
