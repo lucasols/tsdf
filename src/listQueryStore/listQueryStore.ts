@@ -1345,7 +1345,12 @@ type ListQueryStoreOptionsBase<
   >[];
   /** Called when an already-loaded query is invalidated. */
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
-  /** Called when an already-loaded item is invalidated. */
+  /**
+   * Called when an already-loaded item is invalidated. Not called for an item
+   * the invalidation leaves alone: an unsent offline creation, or an item with
+   * a change waiting for a manual resolution on an invalidation with any
+   * priority but `highPriority` (see `docs/offline.md`).
+   */
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
   /** Observes request scheduler lifecycle events for this store. */
   onSchedulerEvent?: (

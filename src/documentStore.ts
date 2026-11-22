@@ -1373,6 +1373,24 @@ export function createDocumentStore<
     );
   }
 
+  /**
+   * Schedules the refetch of an invalidation, skipping it while the document
+   * is held (see `skipsBackgroundRefetch`). Whether it is held is only known
+   * once the queued work is read, e.g. for a realtime update at startup.
+   */
+  function scheduleInvalidationFetch(priority: FetchType): void {
+    if (offlineController && !offlineController.isHydrated()) {
+      const schedule = () => {
+        if (isDisposed || skipsBackgroundRefetch(priority)) return;
+        scheduleFetch(priority);
+      };
+      void offlineController.hydrateIfNeeded().then(schedule, schedule);
+      return;
+    }
+
+    scheduleFetch(priority);
+  }
+
   function invalidateData(priority: FetchType = 'highPriority'): void {
     if (skipsBackgroundRefetch(priority)) return;
 
@@ -1860,7 +1878,7 @@ export function createDocumentStore<
       if (!invalidationWasTriggered) {
         store.setKey('refetchOnMount', false);
 
-        scheduleFetch(priority);
+        scheduleInvalidationFetch(priority);
         invalidationWasTriggered = true;
       }
     });
@@ -1893,13 +1911,25 @@ export function createDocumentStore<
         const shouldFetch = requiredFetch || !!store.state.refetchOnMount;
 
         if (
-          shouldScheduleAutomaticFetch(
+          !shouldScheduleAutomaticFetch(
             wasLoaded,
             shouldFetch,
             !!disableRefetches,
             !!disableRefetchOnMount,
-          ) &&
-          !skipsBackgroundRefetch(fetchType) &&
+          )
+        ) {
+          return;
+        }
+
+        if (skipsBackgroundRefetch(fetchType)) {
+          // The recovery revalidation once the change is handled replaces an
+          // earlier invalidation: left pending, it would make that
+          // revalidation look already requested and not refetch the view
+          if (store.state.refetchOnMount) store.setKey('refetchOnMount', false);
+          return;
+        }
+
+        if (
           tryClaimAutomaticFetchSlot(
             automaticRetryState,
             DOC_TARGET_KEY,

@@ -361,7 +361,12 @@ export type CollectionStoreOptions<
    * reconnect before revalidating, so the two share one revalidation. Set to
    * `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
-  /** Called when an already-loaded item is invalidated. */
+  /**
+   * Called when an already-loaded item is invalidated. Not called for an item
+   * the invalidation leaves alone: an unsent offline creation, or an item with
+   * a change waiting for a manual resolution on an invalidation with any
+   * priority but `highPriority` (see `docs/offline.md`).
+   */
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
   /** Observes request scheduler lifecycle events for this store. */
   onSchedulerEvent?: (

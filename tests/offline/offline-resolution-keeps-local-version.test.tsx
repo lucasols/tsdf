@@ -897,3 +897,118 @@ test('document: a document waiting for a decision keeps its local version after 
 
   reloadedView.unmount();
 });
+
+test('document: a realtime update received while the app starts leaves a document waiting for a decision alone', async () => {
+  const before = setupDocument('held-local-document-startup-realtime', true);
+
+  const view = before.renderDocumentView();
+  await flushAllTimers();
+
+  // Offline: change the value to 2. Meanwhile someone else sets it to 5.
+  await before.changeValueOffline();
+  before.env.setServerData(5);
+  goOnline();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads with the change still waiting for a decision, and a
+  // realtime update reports another change (to 6) before the queued work is
+  // read from the device. Its refetch still waits for it and leaves the
+  // local version alone.
+  resetSessionForTests();
+  const { env, renderDocumentView, keepChange } = setupDocument(
+    'held-local-document-startup-realtime',
+    true,
+    5,
+  );
+  env.addTimelineComments('beforeNextAction', [
+    'the app reloads, a realtime update arrives right away',
+  ]);
+  const reloadedView = renderDocumentView();
+  act(() => {
+    env.emulateExternalRTU(6);
+  });
+  await flushAllTimers();
+
+  // Once the conflict is handled, the document is refetched.
+  await keepChange();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui |
+    0      | -  | -- the app reloads, a realtime update arrives right away
+    .      | 2  | ui-initialized
+    .      | 2  | server-data-changed (value: 6)
+    .      | 2  | received-ws-data-change-event
+    .      | 2  | offline:updateValue resolution-required
+    12s    | 2  | server-data-changed (value: 2)
+    14.01s | 2  | -- the user keeps their change: the document is refetched
+    .      | 2  | 🔴 >fetch-started
+    14.81s | 2  | 🔴 <fetch-finished (value: 2)
+    "
+  `);
+
+  reloadedView.unmount();
+});
+
+test('document: a view mounted while its document waits for a decision is refetched once the change is handled, after an earlier realtime update', async () => {
+  const { env, renderDocumentView, changeValueOffline, keepChange } =
+    setupDocument('held-local-document-earlier-realtime', true);
+
+  let view = renderDocumentView();
+  await flushAllTimers();
+  view.unmount();
+
+  // While the view is unmounted, a realtime update reports that someone else
+  // set the value to 5: the document is refetched on its next mount.
+  env.addTimelineComments('beforeNextAction', [
+    'view unmounted: a realtime update reports a change',
+  ]);
+  act(() => {
+    env.emulateExternalRTU(5);
+  });
+  await flushAllTimers();
+
+  // Offline, another screen changes the value to 2, which conflicts once
+  // back online.
+  await changeValueOffline();
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the change conflicts',
+  ]);
+  goOnline();
+  await flushAllTimers();
+
+  // The view mounts while the change waits for a decision: the refetch the
+  // realtime update asked for doesn't run, the local version stays.
+  env.addTimelineComments('beforeNextAction', ['the view mounts']);
+  view = renderDocumentView();
+  await flushAllTimers();
+
+  // Once the conflict is handled, the mounted view is refetched: the earlier
+  // realtime update doesn't make the store take that refetch as already
+  // requested.
+  await keepChange();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 1  | ui-initialized
+    .     | 1  | -- view unmounted: a realtime update reports a change
+    .     | 1  | server-data-changed (value: 5)
+    .     | 1  | received-ws-data-change-event
+    1s    | 1  | -- offline: change to 2
+    .     | 1  | offline:updateValue queued
+    .     | 1  | -- back online: the change conflicts
+    .     | 1  | offline:updateValue resolution-required
+    2s    | 1  | -- the view mounts
+    .     | 2  | ui-changed
+    3s    | 2  | server-data-changed (value: 2)
+    5.01s | 2  | -- the user keeps their change: the document is refetched
+    .     | 2  | 🔴 >fetch-started
+    5.81s | 2  | 🔴 <fetch-finished (value: 2)
+    "
+  `);
+
+  view.unmount();
+});
