@@ -782,11 +782,13 @@ export class MockBrowserOpfsEnvironment {
           }
         }
 
-        return __LEGIT_CAST__<File, unknown>({
-          name: node.name,
+        // A real `File`, like the browser returns, so it can be used as a
+        // part of other blobs. Reads through `arrayBuffer` / `text` are
+        // instrumented and fail once the snapshot is stale, as in browsers.
+        const snapshotFile = new File([snapshotBytes.slice()], node.name, {
           lastModified: Date.now(),
-          size: snapshotBytes.byteLength,
-          type: '',
+        });
+        return Object.assign(snapshotFile, {
           async arrayBuffer(): Promise<ArrayBuffer> {
             let { completionTime: arrayBufferCompletionTime } =
               await waitLatency({

@@ -294,7 +294,7 @@ test('manual uploads expire only after one week in the current online session', 
   `);
   expect(retentionStartedMetadata).toMatchInlineSnapshot(`
     c: 1735689612000
-    g: 1736380817009
+    g: 1736380817012
     i: 'stale-manual-upload'
     k: 'offline-upload-retention-session'
     l: 1
@@ -302,7 +302,7 @@ test('manual uploads expire only after one week in the current online session', 
     n: 'retention.txt'
     o: 'manual'
     t: 'pending'
-    u: 1736380817009
+    u: 1736380817012
     z: 14
   `);
 
@@ -717,7 +717,7 @@ test('queued direct uploads keep same logical field names isolated per mutation'
         ├ offline-direct-upload-collision-doc:1735689612000:eeeeeeee:avatar (0.74 kb)
         │ ├ binary.blob (0.06 kb)
         │ └ metadata.json (0.56 kb)
-        └ offline-direct-upload-collision-doc:1735689612009:i:avatar (0.72 kb)
+        └ offline-direct-upload-collision-doc:1735689612012:i:avatar (0.72 kb)
           ├ binary.blob (0.06 kb)
           └ metadata.json (0.54 kb)"
     `);
@@ -1118,7 +1118,7 @@ test('replacing a file while the session is still restoring stored uploads updat
       fileName: 'final.txt'
       id: 'attachment'
       state: 'pending'
-      updatedAt: '2025-01-01T01:00:12.013Z'
+      updatedAt: '2025-01-01T01:00:12.011Z'
   `);
   expect(
     getParsedOpfsFileData(
@@ -1214,6 +1214,93 @@ test('replacing an upload right after a restart keeps the metadata saved before 
       id: 'attachment'
       metadata: { chatId: 'chat-42', kind: 'chat' }
   `);
+});
+
+test('restoring staged uploads after a reload reads only their metadata, and a restored file is read from storage when it is sent', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-lazy-restore-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  function getOpfsOperationPaths(type: 'readFile' | 'writeFile'): string[] {
+    return mockBrowserOpfs.operations.flatMap((operation) =>
+      operation.type === type
+        ? [operation.path.replace(`tsdf-uploads/${sessionKey}/`, '')]
+        : [],
+    );
+  }
+
+  // --- Setup: the user took two videos offline in a previous app run ---
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    'video-1': new File(['first video bytes'], 'video-1.mp4', {
+      type: 'video/mp4',
+      lastModified: 1,
+    }),
+    'video-2': new File(['second video bytes'], 'video-2.mp4', {
+      type: 'video/mp4',
+      lastModified: 2,
+    }),
+  });
+  mockBrowserOpfs.clearInstrumentation();
+
+  // --- Reload: a screen lists the staged uploads ---
+  const session = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file }) => {
+          transportCalls.push({
+            id,
+            fileName: file.name,
+            type: file.type,
+            fileText: await file.text(),
+          });
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+  const uploadsHook = renderHook(() =>
+    session.useOfflineUploads().map((upload) => upload.id),
+  );
+  await flushAllTimers();
+
+  expect(uploadsHook.result.current).toMatchInlineSnapshot(
+    `['video-1', 'video-2']`,
+  );
+  // Listing the uploads doesn't load the staged files into memory: with many
+  // large videos staged, reading them all on every load could crash the tab.
+  expect(getOpfsOperationPaths('readFile')).toMatchInlineSnapshot(
+    `['video-1/metadata.json', 'video-2/metadata.json']`,
+  );
+
+  // --- Action: back online, the first video is sent ---
+  mockBrowserOpfs.clearInstrumentation();
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (
+    await resolveAfterAllTimers(session.resolveOfflineUpload('video-1'))
+  ).unwrap();
+
+  // The transport receives the restored file with its original name, type and
+  // bytes, read from storage only now.
+  expect(transportCalls).toMatchInlineSnapshot(`
+    - fileName: 'video-1.mp4'
+      fileText: 'first video bytes'
+      id: 'video-1'
+      type: 'video/mp4'
+  `);
+  // Each state change of the upload (uploading, uploaded) only rewrites its
+  // metadata: the staged video is never copied again.
+  expect(getOpfsOperationPaths('writeFile')).toMatchInlineSnapshot(
+    `['video-1/metadata.json', 'video-1/metadata.json']`,
+  );
 });
 
 test('saving a new file over an upload that is still being sent is rejected, so the new file is never marked as uploaded with the previous file ref', async () => {

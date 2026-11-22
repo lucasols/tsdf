@@ -151,30 +151,53 @@ function parseStoredUploadMetadataRecord<
   };
 }
 
+function getUploadPath(sessionKey: string, encodedId: string): string {
+  return `${encodePathSegment(sessionKey)}/${encodedId}`;
+}
+
 class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
   #rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
+  /**
+   * Upload paths whose stored binary holds each file, for the files this
+   * driver wrote or restored. Restored files are read lazily from their
+   * binary, so writing one over its own binary would leave it unreadable
+   * (browsers fail reads of a file snapshot once the file changed).
+   */
+  readonly #storedFilePaths = new WeakMap<File, Set<string>>();
 
   async save<TResolvedRef extends ValidPayload>(
     sessionKey: string,
     id: string,
     record: OfflineStoredUploadRecord<TResolvedRef>,
   ): Promise<void> {
-    const uploadDir = await this.#replaceUploadDir(sessionKey, id);
+    const uploadPath = getUploadPath(sessionKey, encodePathSegment(id));
+    const uploadDir = await this.#getUploadDir(sessionKey, id, true);
+    if (!uploadDir) {
+      throw new Error('Failed to create OPFS upload directory');
+    }
+    const { file, ...metadataRecord } = record;
+
+    // State changes save the record again with the same file, so the binary
+    // is only written when it doesn't already hold this file. It is written
+    // before the metadata, so a failed write keeps the previous record whole.
+    const isFileStored =
+      this.#storedFilePaths.get(file)?.has(uploadPath) === true &&
+      (await getFileHandleIfExists(uploadDir, BINARY_FILE_NAME)) !== null;
+    if (!isFileStored) {
+      const binaryHandle = await uploadDir.getFileHandle(BINARY_FILE_NAME, {
+        create: true,
+      });
+      await writeFile(binaryHandle, file);
+      this.#addStoredFilePath(file, uploadPath);
+    }
+
     const metadataHandle = await uploadDir.getFileHandle(METADATA_FILE_NAME, {
       create: true,
     });
-    const binaryHandle = await uploadDir.getFileHandle(BINARY_FILE_NAME, {
-      create: true,
-    });
-    const { file: _file, ...metadataRecord } = record;
-
-    await Promise.all([
-      writeFile(
-        metadataHandle,
-        serializeStoredUploadMetadataRecord(metadataRecord),
-      ),
-      writeFile(binaryHandle, record.file),
-    ]);
+    await writeFile(
+      metadataHandle,
+      serializeStoredUploadMetadataRecord(metadataRecord),
+    );
   }
 
   async load<TResolvedRef extends ValidPayload>(
@@ -184,7 +207,10 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     const uploadDir = await this.#getUploadDir(sessionKey, id, false);
     if (!uploadDir) return null;
 
-    return this.#loadFromDir(uploadDir);
+    return this.#loadFromDir(
+      uploadDir,
+      getUploadPath(sessionKey, encodePathSegment(id)),
+    );
   }
 
   async list<TResolvedRef extends ValidPayload>(
@@ -194,14 +220,22 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     if (!sessionDir) return [];
 
     // Collect directory handles first, then load records in parallel.
-    const dirHandles: FileSystemDirectoryHandle[] = [];
+    const dirEntries: Array<[string, FileSystemDirectoryHandle]> = [];
     for await (const [entryName, entryHandle] of sessionDir.entries()) {
       if (entryHandle.kind !== 'directory') continue;
-      dirHandles.push(await sessionDir.getDirectoryHandle(entryName));
+      dirEntries.push([
+        entryName,
+        await sessionDir.getDirectoryHandle(entryName),
+      ]);
     }
 
     const loadedRecords = await Promise.all(
-      dirHandles.map((dirHandle) => this.#loadFromDir<TResolvedRef>(dirHandle)),
+      dirEntries.map(([entryName, dirHandle]) =>
+        this.#loadFromDir<TResolvedRef>(
+          dirHandle,
+          getUploadPath(sessionKey, entryName),
+        ),
+      ),
     );
 
     return loadedRecords
@@ -237,8 +271,15 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     this.#rootDirPromise = null;
   }
 
+  #addStoredFilePath(file: File, uploadPath: string): void {
+    const paths = this.#storedFilePaths.get(file);
+    if (paths) paths.add(uploadPath);
+    else this.#storedFilePaths.set(file, new Set([uploadPath]));
+  }
+
   async #loadFromDir<TResolvedRef extends ValidPayload>(
     uploadDir: FileSystemDirectoryHandle,
+    uploadPath: string,
   ): Promise<OfflineStoredUploadRecord<TResolvedRef> | null> {
     const metadataHandle = await getFileHandleIfExists(
       uploadDir,
@@ -265,16 +306,19 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     if (!binaryHandle) return null;
 
     try {
-      const storedFile = await binaryHandle.getFile();
-      const fileBuffer = await storedFile.arrayBuffer();
-
-      return {
-        ...metadataRecord,
-        file: new File([fileBuffer], metadataRecord.fileName, {
+      // The file stays backed by the stored binary instead of being read into
+      // memory: its bytes are only read when it is uploaded or rendered.
+      const file = new File(
+        [await binaryHandle.getFile()],
+        metadataRecord.fileName,
+        {
           type: metadataRecord.mimeType,
           lastModified: metadataRecord.lastModified,
-        }),
-      };
+        },
+      );
+      this.#addStoredFilePath(file, uploadPath);
+
+      return { ...metadataRecord, file };
     } catch {
       return null;
     }
@@ -338,26 +382,6 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     }
 
     return getDirectoryHandleIfExists(sessionDir, encodePathSegment(id));
-  }
-
-  async #replaceUploadDir(
-    sessionKey: string,
-    id: string,
-  ): Promise<FileSystemDirectoryHandle> {
-    const sessionDir = await this.#getSessionDir(sessionKey, true);
-    if (!sessionDir) {
-      throw new Error('Failed to create OPFS upload session directory');
-    }
-
-    try {
-      await sessionDir.removeEntry(encodePathSegment(id), { recursive: true });
-    } catch {
-      // Ignore missing upload directories.
-    }
-
-    return sessionDir.getDirectoryHandle(encodePathSegment(id), {
-      create: true,
-    });
   }
 }
 

@@ -339,26 +339,26 @@ test('a dependency upload that fails with a connection error stays pending and i
     "
     time    | ui                                                                                     |
     12s     | -                                                                                      | -- timeline-cleared
-    12.009s | "upload:pending | op:none | session:network-offline"                                   | ui-changed
+    12.012s | "upload:pending | op:none | session:network-offline"                                   | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                                | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                                | offline:updateWithAttachment queued
     .       | "upload:pending | op:pending | session:network-offline"                                | -- browser reconnects, but the upload endpoint is still unreachable
     .       | "upload:pending | op:pending | session:online"                                         | ui-changed
     .       | "upload:pending | op:syncing | session:online"                                         | ui-changed
-    12.018s | "upload:uploading | op:syncing | session:online"                                       | ui-changed
-    12.227s | "upload:pending (Upload failed: Network error) | op:syncing | session:online"          | ui-changed
+    12.02s  | "upload:uploading | op:syncing | session:online"                                       | ui-changed
+    12.228s | "upload:pending (Upload failed: Network error) | op:syncing | session:online"          | ui-changed
     .       | "upload:pending (Upload failed: Network error) | op:syncing | session:network-offline" | ui-changed
     .       | "upload:pending (Upload failed: Network error) | op:pending | session:network-offline" | ui-changed
-    87.227s | "upload:pending (Upload failed: Network error) | op:pending | session:network-offline" | -- the upload endpoint is reachable again; the next recovery probe notices it
+    87.228s | "upload:pending (Upload failed: Network error) | op:pending | session:network-offline" | -- the upload endpoint is reachable again; the next recovery probe notices it
     .       | "upload:pending (Upload failed: Network error) | op:pending | session:online"          | ui-changed
     .       | "upload:pending (Upload failed: Network error) | op:syncing | session:online"          | ui-changed
     87.236s | "upload:uploading (Upload failed: Network error) | op:syncing | session:online"        | ui-changed
-    87.445s | "upload:uploaded | op:syncing | session:online"                                        | ui-changed
+    87.444s | "upload:uploaded | op:syncing | session:online"                                        | ui-changed
     .       | "upload:uploaded | op:syncing | session:online"                                        | offline:updateWithAttachment replay-started
-    88.645s | "upload:uploaded | op:syncing | session:online"                                        | server-data-changed (value: 3)
+    88.644s | "upload:uploaded | op:syncing | session:online"                                        | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"                                        | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"                                           | ui-changed
-    88.647s | "upload:none | op:none | session:online"                                               | ui-changed
+    88.646s | "upload:none | op:none | session:online"                                               | ui-changed
     "
   `);
 
@@ -448,26 +448,26 @@ test('a dependency upload failure classified as an outage puts the session in ou
     "
     time    | ui                                                                    |
     12s     | -                                                                     | -- timeline-cleared
-    12.009s | "upload:pending | op:none | session:network-offline"                  | ui-changed
+    12.012s | "upload:pending | op:none | session:network-offline"                  | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"               | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"               | offline:updateWithAttachment queued
     .       | "upload:pending | op:pending | session:network-offline"               | -- browser reconnects while the upload service answers 503
     .       | "upload:pending | op:pending | session:online"                        | ui-changed
     .       | "upload:pending | op:syncing | session:online"                        | ui-changed
-    12.018s | "upload:uploading | op:syncing | session:online"                      | ui-changed
-    12.227s | "upload:pending (Upload failed: 503) | op:syncing | session:online"   | ui-changed
+    12.02s  | "upload:uploading | op:syncing | session:online"                      | ui-changed
+    12.228s | "upload:pending (Upload failed: 503) | op:syncing | session:online"   | ui-changed
     .       | "upload:pending (Upload failed: 503) | op:syncing | session:outage"   | ui-changed
     .       | "upload:pending (Upload failed: 503) | op:pending | session:outage"   | ui-changed
-    87.227s | "upload:pending (Upload failed: 503) | op:pending | session:outage"   | -- the upload service is back; the next outage recovery probe notices it
+    87.228s | "upload:pending (Upload failed: 503) | op:pending | session:outage"   | -- the upload service is back; the next outage recovery probe notices it
     .       | "upload:pending (Upload failed: 503) | op:pending | session:online"   | ui-changed
     .       | "upload:pending (Upload failed: 503) | op:syncing | session:online"   | ui-changed
     87.236s | "upload:uploading (Upload failed: 503) | op:syncing | session:online" | ui-changed
-    87.445s | "upload:uploaded | op:syncing | session:online"                       | ui-changed
+    87.444s | "upload:uploaded | op:syncing | session:online"                       | ui-changed
     .       | "upload:uploaded | op:syncing | session:online"                       | offline:updateWithAttachment replay-started
-    88.645s | "upload:uploaded | op:syncing | session:online"                       | server-data-changed (value: 3)
+    88.644s | "upload:uploaded | op:syncing | session:online"                       | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"                       | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"                          | ui-changed
-    88.647s | "upload:none | op:none | session:online"                              | ui-changed
+    88.646s | "upload:none | op:none | session:online"                              | ui-changed
     "
   `);
 
@@ -536,27 +536,27 @@ test('a dependency upload failure marked as retryable is uploaded again on the r
     "
     time    | ui                                                                           |
     12s     | -                                                                            | -- timeline-cleared
-    12.009s | "upload:pending | op:none | session:network-offline"                         | ui-changed
+    12.012s | "upload:pending | op:none | session:network-offline"                         | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                      | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                      | offline:updateWithAttachment queued
     .       | "upload:pending | op:pending | session:network-offline"                      | -- browser reconnects; the first two upload attempts time out
     .       | "upload:pending | op:pending | session:online"                               | ui-changed
     .       | "upload:pending | op:syncing | session:online"                               | ui-changed
-    12.018s | "upload:uploading | op:syncing | session:online"                             | ui-changed
-    12.227s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    12.02s  | "upload:uploading | op:syncing | session:online"                             | ui-changed
+    12.228s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
     .       | "upload:pending (Upload timed out) | op:needs-confirmation | session:online" | ui-changed
-    17.227s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    17.228s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
     17.236s | "upload:uploading (Upload timed out) | op:syncing | session:online"          | ui-changed
-    17.445s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    17.444s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
     .       | "upload:pending (Upload timed out) | op:needs-confirmation | session:online" | ui-changed
-    22.445s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
-    22.454s | "upload:uploading (Upload timed out) | op:syncing | session:online"          | ui-changed
-    22.663s | "upload:uploaded | op:syncing | session:online"                              | ui-changed
+    22.444s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    22.452s | "upload:uploading (Upload timed out) | op:syncing | session:online"          | ui-changed
+    22.66s  | "upload:uploaded | op:syncing | session:online"                              | ui-changed
     .       | "upload:uploaded | op:syncing | session:online"                              | offline:updateWithAttachment replay-started
-    23.863s | "upload:uploaded | op:syncing | session:online"                              | server-data-changed (value: 3)
+    23.86s  | "upload:uploaded | op:syncing | session:online"                              | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"                              | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"                                 | ui-changed
-    23.872s | "upload:none | op:none | session:online"                                     | ui-changed
+    23.868s | "upload:none | op:none | session:online"                                     | ui-changed
     "
   `);
 
@@ -626,23 +626,23 @@ test('a retryable dependency upload failure that keeps failing uses up the repla
     "
     time    | ui                                                                           |
     12s     | -                                                                            | -- timeline-cleared
-    12.009s | "upload:pending | op:none | session:network-offline"                         | ui-changed
+    12.012s | "upload:pending | op:none | session:network-offline"                         | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                      | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                      | offline:updateWithAttachment queued
     .       | "upload:pending | op:pending | session:network-offline"                      | -- browser reconnects; every upload attempt times out
     .       | "upload:pending | op:pending | session:online"                               | ui-changed
     .       | "upload:pending | op:syncing | session:online"                               | ui-changed
-    12.018s | "upload:uploading | op:syncing | session:online"                             | ui-changed
-    12.227s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    12.02s  | "upload:uploading | op:syncing | session:online"                             | ui-changed
+    12.228s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
     .       | "upload:pending (Upload timed out) | op:needs-confirmation | session:online" | ui-changed
-    17.227s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    17.228s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
     17.236s | "upload:uploading (Upload timed out) | op:syncing | session:online"          | ui-changed
-    17.445s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    17.444s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
     .       | "upload:pending (Upload timed out) | op:needs-confirmation | session:online" | ui-changed
-    22.445s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
-    22.454s | "upload:uploading (Upload timed out) | op:syncing | session:online"          | ui-changed
-    22.663s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
-    22.672s | "upload:failed (Upload timed out) | op:syncing | session:online"             | ui-changed
+    22.444s | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    22.452s | "upload:uploading (Upload timed out) | op:syncing | session:online"          | ui-changed
+    22.66s  | "upload:pending (Upload timed out) | op:syncing | session:online"            | ui-changed
+    22.668s | "upload:failed (Upload timed out) | op:syncing | session:online"             | ui-changed
     .       | "upload:failed (Upload timed out) | op:syncing | session:online"             | offline:updateWithAttachment resolution-required
     .       | "upload:failed (Upload timed out) | op:resolution-required | session:online" | ui-changed
     "
@@ -756,24 +756,24 @@ test('a permanently rejected dependency upload sends the operation to manual res
     "
     time    | ui                                                                                 |
     12s     | -                                                                                  | -- timeline-cleared
-    12.009s | "upload:pending | op:none | session:network-offline"                               | ui-changed
+    12.012s | "upload:pending | op:none | session:network-offline"                               | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                            | ui-changed
     .       | "upload:pending | op:pending | session:network-offline"                            | offline:updateWithAttachment queued
     .       | "upload:pending | op:pending | session:network-offline"                            | -- browser reconnects and the server rejects the file
     .       | "upload:pending | op:pending | session:online"                                     | ui-changed
     .       | "upload:pending | op:syncing | session:online"                                     | ui-changed
-    12.018s | "upload:uploading | op:syncing | session:online"                                   | ui-changed
-    12.227s | "upload:pending (File type not accepted) | op:syncing | session:online"            | ui-changed
+    12.02s  | "upload:uploading | op:syncing | session:online"                                   | ui-changed
+    12.228s | "upload:pending (File type not accepted) | op:syncing | session:online"            | ui-changed
     12.236s | "upload:failed (File type not accepted) | op:syncing | session:online"             | ui-changed
     .       | "upload:failed (File type not accepted) | op:syncing | session:online"             | offline:updateWithAttachment resolution-required
     .       | "upload:failed (File type not accepted) | op:resolution-required | session:online" | ui-changed
-    73.009s | "upload:failed (File type not accepted) | op:resolution-required | session:online" | -- the server now accepts the file and the user resolves with "retry"
+    73.012s | "upload:failed (File type not accepted) | op:resolution-required | session:online" | -- the server now accepts the file and the user resolves with "retry"
     .       | "upload:failed (File type not accepted) | op:pending | session:online"             | ui-changed
     .       | "upload:failed (File type not accepted) | op:syncing | session:online"             | ui-changed
-    73.018s | "upload:uploading (File type not accepted) | op:syncing | session:online"          | ui-changed
-    73.227s | "upload:uploaded | op:syncing | session:online"                                    | ui-changed
+    73.02s  | "upload:uploading (File type not accepted) | op:syncing | session:online"          | ui-changed
+    73.228s | "upload:uploaded | op:syncing | session:online"                                    | ui-changed
     .       | "upload:uploaded | op:syncing | session:online"                                    | offline:updateWithAttachment replay-started
-    74.427s | "upload:uploaded | op:syncing | session:online"                                    | server-data-changed (value: 3)
+    74.428s | "upload:uploaded | op:syncing | session:online"                                    | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"                                    | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"                                       | ui-changed
     74.436s | "upload:none | op:none | session:online"                                           | ui-changed
@@ -1136,14 +1136,14 @@ test('resolveOfflineUpload returns the transport error without touching the sess
     "
     time    | ui                                                                           |
     12s     | -                                                                            | -- timeline-cleared
-    12.009s | "upload:pending | op:none | session:network-offline"                         | ui-changed
+    12.012s | "upload:pending | op:none | session:network-offline"                         | ui-changed
     .       | "upload:pending | op:none | session:online"                                  | ui-changed
-    12.018s | "upload:pending | op:none | session:online"                                  | -- app calls resolveOfflineUpload while the upload endpoint is unreachable
+    12.02s  | "upload:pending | op:none | session:online"                                  | -- app calls resolveOfflineUpload while the upload endpoint is unreachable
     .       | "upload:uploading | op:none | session:online"                                | ui-changed
-    12.227s | "upload:failed (Upload failed: Network error) | op:none | session:online"    | ui-changed
-    13.018s | "upload:failed (Upload failed: Network error) | op:none | session:online"    | -- app calls resolveOfflineUpload again
+    12.228s | "upload:failed (Upload failed: Network error) | op:none | session:online"    | ui-changed
+    13.02s  | "upload:failed (Upload failed: Network error) | op:none | session:online"    | -- app calls resolveOfflineUpload again
     .       | "upload:uploading (Upload failed: Network error) | op:none | session:online" | ui-changed
-    13.227s | "upload:uploaded | op:none | session:online"                                 | ui-changed
+    13.228s | "upload:uploaded | op:none | session:online"                                 | ui-changed
     "
   `);
 
@@ -1215,8 +1215,8 @@ test('an upload the app sends itself that loses the connection takes the session
   await actions.stageUploadAndQueueDependentMutation();
   expect(requests).toMatchInlineSnapshot(`[]`);
 
-  // -- The connection comes back. The first recovery check ran while the file
-  // was being staged (5s after the failure), the next one runs 10s later --
+  // -- The connection comes back while the first recovery check (5s after
+  // the failure) is running, so that check already finds the backend up --
   env.addTimelineComments('beforeNextAction', [
     'the backend is reachable again',
   ]);
@@ -1236,19 +1236,19 @@ test('an upload the app sends itself that loses the connection takes the session
     12s     | -                                                       | -- timeline-cleared
     12.3s   | -                                                       | -- the app reports the failure of its own upload
     .       | "upload:none | op:none | session:network-offline"       | ui-changed
-    12.309s | "upload:pending | op:none | session:network-offline"    | ui-changed
-    17.3s   | "upload:pending | op:pending | session:network-offline" | ui-changed
+    12.312s | "upload:pending | op:none | session:network-offline"    | ui-changed
+    .       | "upload:pending | op:pending | session:network-offline" | ui-changed
     .       | "upload:pending | op:pending | session:network-offline" | offline:updateWithAttachment queued
-    27.5s   | "upload:pending | op:pending | session:network-offline" | -- the backend is reachable again
+    17.4s   | "upload:pending | op:pending | session:network-offline" | -- the backend is reachable again
     .       | "upload:pending | op:pending | session:online"          | ui-changed
     .       | "upload:pending | op:syncing | session:online"          | ui-changed
-    27.509s | "upload:uploading | op:syncing | session:online"        | ui-changed
-    27.718s | "upload:uploaded | op:syncing | session:online"         | ui-changed
+    17.408s | "upload:uploading | op:syncing | session:online"        | ui-changed
+    17.616s | "upload:uploaded | op:syncing | session:online"         | ui-changed
     .       | "upload:uploaded | op:syncing | session:online"         | offline:updateWithAttachment replay-started
-    28.918s | "upload:uploaded | op:syncing | session:online"         | server-data-changed (value: 3)
+    18.816s | "upload:uploaded | op:syncing | session:online"         | server-data-changed (value: 3)
     .       | "upload:uploaded | op:syncing | session:online"         | offline:updateWithAttachment replay-finished
     .       | "upload:uploaded | op:none | session:online"            | ui-changed
-    28.92s  | "upload:none | op:none | session:online"                | ui-changed
+    18.818s | "upload:none | op:none | session:online"                | ui-changed
     "
   `);
 

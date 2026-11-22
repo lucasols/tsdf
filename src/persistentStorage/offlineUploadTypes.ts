@@ -212,7 +212,15 @@ export type OfflineStoredUploadRecord<
 
 /** Storage backend contract for session-scoped offline upload files. */
 export type OfflineUploadAdapter = {
-  /** Saves or replaces one staged upload record. */
+  /**
+   * Saves or replaces one staged upload record.
+   *
+   * TSDF saves the record again on every state change of the upload, with the
+   * same `file` object it holds for it (the one it saved, or the one `load` /
+   * `list` returned), so an adapter can skip rewriting a file it already
+   * stores. An adapter whose listed files read from storage must do so: a
+   * file is usually not readable from a snapshot of storage it is replacing.
+   */
   save<TResolvedRef extends ValidPayload>(
     sessionKey: string,
     id: string,
@@ -223,7 +231,14 @@ export type OfflineUploadAdapter = {
     sessionKey: string,
     id: string,
   ): Promise<OfflineStoredUploadRecord<TResolvedRef> | null>;
-  /** Lists all staged upload records for a session. */
+  /**
+   * Lists all staged upload records for a session.
+   *
+   * The `file` of each record doesn't have to be read into memory: TSDF only
+   * reads it when the upload is sent or its file is rendered, so a file
+   * backed by storage (like a `File` from OPFS `getFile()`) keeps listing
+   * cheap with many large files staged.
+   */
   list<TResolvedRef extends ValidPayload>(
     sessionKey: string,
   ): Promise<OfflineStoredUploadRecord<TResolvedRef>[]>;
