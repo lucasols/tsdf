@@ -1362,13 +1362,14 @@ export function createDocumentStore<
    * change waiting for a manual resolution: a refetch would replace the local
    * version the user still has to decide on. Explicit fetches still replace
    * it. Once the change is handled, the store's recovery revalidation
-   * refetches it.
+   * refetches it. Checks the data rather than the status, so the local
+   * version also stays after a failed refresh.
    */
   function skipsBackgroundRefetch(priority: FetchType): boolean {
     return (
       requiresResolution &&
       priority !== 'highPriority' &&
-      (store.state.status === 'success' || store.state.status === 'refetching')
+      store.state.data !== null
     );
   }
 
@@ -1870,6 +1871,14 @@ export function createDocumentStore<
       void (async () => {
         if (persistence) {
           await persistence.maybeHydrateFromStorage();
+          if (effectState.cancelled) return;
+        }
+
+        // Whether the document has a change waiting for a decision is only
+        // known once the queued work is read, e.g. for a view mounted at
+        // startup
+        if (offlineController && !offlineController.isHydrated()) {
+          await offlineController.hydrateIfNeeded().catch(() => {});
           if (effectState.cancelled) return;
         }
 

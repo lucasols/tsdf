@@ -16,7 +16,8 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type UpdateValueConflictOperations,
   userPatchSchema,
@@ -569,15 +570,22 @@ test('list query: an item waiting for a decision keeps its local version when a 
 
 /**
  * A loaded document store whose offline changes always conflict, and a view
- * showing it.
+ * showing it. With `reloadedWithServerValue`, it is the same store after the
+ * app reloads, starting from what was saved on the device while the server
+ * has that value.
  */
-function setupDocument(name: string, usesRealTimeUpdates: boolean) {
-  network.setOffline();
+function setupDocument(
+  name: string,
+  usesRealTimeUpdates: boolean,
+  reloadedWithServerValue?: number,
+) {
+  const reloaded = reloadedWithServerValue !== undefined;
+  if (!reloaded) network.setOffline();
   const sessionKey = `${name}-session`;
   const tabs = createFocusChangeCoordinator(['app'], 'app');
 
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
-    1,
+    reloadedWithServerValue ?? 1,
     {
       id: name,
       getSessionKey: () => sessionKey,
@@ -586,7 +594,7 @@ function setupDocument(name: string, usesRealTimeUpdates: boolean) {
         getSessionKey: () => sessionKey,
         offlineSession: { network: network.config },
       }),
-      testScenario: 'loaded',
+      testScenario: reloaded ? 'idle' : 'loaded',
       usesRealTimeUpdates,
       revalidateOnWindowFocus: true,
       bindFocusController: tabs.bind('app'),
@@ -778,4 +786,114 @@ test('document: a document waiting for a decision keeps its local version when a
   `);
 
   view.unmount();
+});
+
+test('document: a document waiting for a decision keeps its local version after a failed refresh', async () => {
+  const { env, renderDocumentView, changeValueOffline, keepChange } =
+    setupDocument('held-local-document-failed-refresh', false);
+
+  let view = renderDocumentView();
+  await flushAllTimers();
+
+  // Offline: change the value to 2. Meanwhile someone else sets it to 5.
+  await changeValueOffline();
+  env.setServerData(5);
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the change conflicts',
+  ]);
+  goOnline();
+  await flushAllTimers();
+
+  // The user asks to refresh, but the server fails: the document keeps
+  // showing the local version together with the error.
+  env.serverMock.setNextFetchError('server error');
+  env.addTimelineComments('beforeNextAction', ['explicit fetch fails']);
+  act(() => {
+    env.scheduleFetch('highPriority');
+  });
+  await flushAllTimers();
+
+  // A minute later the view remounts: the failed refresh doesn't make the
+  // mount refetch replace the change the user still has to decide on.
+  await advanceTime(60_000);
+  env.addTimelineComments('beforeNextAction', ['the view remounts']);
+  view.unmount();
+  view = renderDocumentView();
+  await flushAllTimers();
+
+  // Once the conflict is handled, the document is refetched.
+  await keepChange();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui |
+    0      | 1  | ui-initialized
+    1.01s  | 1  | -- offline: change to 2
+    .      | 2  | ui-changed
+    .      | 2  | offline:updateValue queued
+    .      | 2  | server-data-changed (value: 5)
+    .      | 2  | -- back online: the change conflicts
+    .      | 2  | offline:updateValue resolution-required
+    2.01s  | 2  | -- explicit fetch fails
+    .      | 2  | scheduled-fetch-triggered
+    2.02s  | 2  | 🔴 >fetch-started
+    .      | 2  | 🔴 <fetch-error (value: "error")
+    62.02s | 2  | -- the view remounts
+    .      | 2  | server-data-changed (value: 2)
+    62.03s | 2  | -- the user keeps their change: the document is refetched
+    .      | 2  | 🟠 >fetch-started
+    62.83s | 2  | 🟠 <fetch-finished (value: 2)
+    "
+  `);
+
+  view.unmount();
+});
+
+test('document: a document waiting for a decision keeps its local version after the app reloads', async () => {
+  const before = setupDocument('held-local-document-reload', false);
+
+  const view = before.renderDocumentView();
+  await flushAllTimers();
+
+  // Offline: change the value to 2. Meanwhile someone else sets it to 5.
+  await before.changeValueOffline();
+  before.env.setServerData(5);
+  goOnline();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads with the change still waiting for a decision. The view
+  // mounts before the queued work is read from the device: its mount fetch
+  // still waits for it and leaves the local version alone.
+  resetSessionForTests();
+  const { env, renderDocumentView, keepChange } = setupDocument(
+    'held-local-document-reload',
+    false,
+    5,
+  );
+  env.addTimelineComments('beforeNextAction', [
+    'the app reloads and the view mounts',
+  ]);
+  const reloadedView = renderDocumentView();
+  await flushAllTimers();
+
+  // Once the conflict is handled, the document is refetched.
+  await keepChange();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui |
+    0      | -  | -- the app reloads and the view mounts
+    .      | 2  | ui-initialized
+    .      | 2  | offline:updateValue resolution-required
+    12s    | 2  | server-data-changed (value: 2)
+    12.01s | 2  | -- the user keeps their change: the document is refetched
+    .      | 2  | 🔴 >fetch-started
+    12.81s | 2  | 🔴 <fetch-finished (value: 2)
+    "
+  `);
+
+  reloadedView.unmount();
 });
