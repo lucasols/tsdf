@@ -1004,7 +1004,7 @@ With the session gate closed, the failure is not classified: the mutation fails 
 
 #### `resolveOfflineUpload(s)`
 
-When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again.
+When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again. To let the session classify the failure (and possibly enter offline mode), pass the error to `storeManager.reportOfflineFailure(error)`; see [Failures of the app's own requests](#failures-of-the-apps-own-requests).
 
 #### Upload states
 
