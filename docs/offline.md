@@ -851,7 +851,7 @@ function ImageNode({ uploadId }: { uploadId: string }) {
 }
 ```
 
-`resolvedRef` is the ref `resolveOfflineUpload(id)` returns for a sent upload that was deleted (see [Upload lifecycle](#upload-lifecycle)) and is kept for as long: in memory, for the rest of the app session, in every tab open when the upload was deleted. Tabs that show the staged file switch to the ref as soon as it is deleted, and components mounted later get it after the usual `loading` state. It is `null` after a reload, in a tab opened later, after `deleteOfflineUpload(id)`, and for uploads deleted before they were sent, so data that must keep its file across reloads still needs the server ref written into it.
+`resolvedRef` is the ref `resolveOfflineUpload(id)` returns for a sent upload that was deleted (see [Upload lifecycle](#upload-lifecycle)) and is kept for as long: in memory, for the rest of the app session, in every tab open when the upload was deleted. Tabs that show the staged file switch to the ref as soon as it is deleted, and components mounted later get it on their first render. It is `null` after a reload, in a tab opened later, after `deleteOfflineUpload(id)`, and for uploads deleted before they were sent, so data that must keep its file across reloads still needs the server ref written into it.
 
 ### Upload failure handling
 

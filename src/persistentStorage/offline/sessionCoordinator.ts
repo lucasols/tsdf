@@ -2763,7 +2763,12 @@ class SessionOfflineCoordinator {
     };
     this.#uploadFiles.set(id, entry);
     if (!this.#syncUploadFile(id, entry)) {
-      void this.#loadUploadFile(id, entry);
+      // A released upload already left storage, so its ref needs no read.
+      if (this.#releasedUploadRefs.has(id)) {
+        entry.value = this.#getMissingUploadFile(id);
+      } else {
+        void this.#loadUploadFile(id, entry);
+      }
     }
     // Entries are created while rendering, so the ones whose render never
     // commits (and therefore never subscribes) have to be released as well.
@@ -2802,11 +2807,11 @@ class SessionOfflineCoordinator {
     if (!file) {
       // The upload left the session: deleted, expired or consumed. A consumed
       // upload that was sent exposes its server ref, which can also arrive or
-      // be forgotten while the entry is already `missing`.
+      // be forgotten after the entry settled as `missing` or `error`.
       const { status, resolvedRef } = entry.value;
       if (
         status === 'success' ||
-        (status === 'missing' &&
+        (status !== 'loading' &&
           resolvedRef !== (this.#releasedUploadRefs.get(id) ?? null))
       ) {
         this.#setUploadFile(entry, this.#getMissingUploadFile(id));
@@ -2848,7 +2853,9 @@ class SessionOfflineCoordinator {
 
     this.#setUploadFile(
       entry,
-      failure
+      // The upload can be released during a failed read, and its ref is then
+      // known without the file.
+      failure && !this.#releasedUploadRefs.has(id)
         ? {
             status: 'error',
             url: null,

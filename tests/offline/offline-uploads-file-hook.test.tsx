@@ -767,11 +767,13 @@ type RichTextImageOperations = {
 test('an image whose staged file was sent by replay switches to the uploaded server ref instead of being uploaded again', async () => {
   createMockBrowserOpfs();
   const objectUrls = trackObjectUrls();
+  const storage = createReadTrackingUploadAdapter();
   const renders = createLoggerStore();
 
   network.setOffline();
   const storeManager = createUploadFileTestManager(
     () => 'offline-upload-file-released-ref-session',
+    storage.adapter,
   );
 
   // A rich text document whose images reference staged upload ids. Saving it
@@ -896,7 +898,9 @@ test('an image whose staged file was sent by replay switches to the uploaded ser
   await advanceTime(1_000);
 
   // ...then opened again: the image node mounts with the same staged id and
-  // also gets the server ref, after checking storage for a staged file.
+  // gets the server ref right away, without a placeholder flash or a storage
+  // read, since the released upload already left storage.
+  storage.reads.length = 0;
   renders.reset();
   renders.addMark('reopen the document');
   const reopenedEditor = render(
@@ -911,10 +915,10 @@ test('an image whose staged file was sent by replay switches to the uploaded ser
 
     >>> reopen the document
 
-    -> node: reopened editor ⋅ status: loading ⋅ src: null
     -> node: reopened editor ⋅ status: missing ⋅ src: server:image-1
     "
   `);
+  expect(storage.reads).toMatchInlineSnapshot(`[]`);
   // Still a single upload.
   expect(transportUploads).toMatchInlineSnapshot(`['image-1']`);
 
