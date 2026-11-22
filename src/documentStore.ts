@@ -700,10 +700,15 @@ export function createDocumentStore<
   });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
+  // The document has a change waiting for a manual resolution: window focus
+  // and reconnect revalidations leave it alone, a refetch would replace the
+  // change the user still has to decide on
+  let requiresResolution = false;
 
   function clearOfflineOverlay(nextSessionKey: string | null = null): void {
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState(null);
+    requiresResolution = false;
   }
 
   /**
@@ -912,11 +917,12 @@ export function createDocumentStore<
                 clearOfflineOverlay(sessionKey);
               }
 
-              if (
-                !entities.some((entity) => {
-                  return entity.entityKey === DOC_TARGET_KEY;
-                })
-              ) {
+              const documentEntity = entities.find((entity) => {
+                return entity.entityKey === DOC_TARGET_KEY;
+              });
+              requiresResolution = !!documentEntity?.requiresResolution;
+
+              if (!documentEntity) {
                 offlineOverlayStore.setState(null);
               }
             },
@@ -1250,9 +1256,11 @@ export function createDocumentStore<
     getWindowIsFocused,
     testOptions?.onWindowFocus ?? onWindowFocusDefault,
     () => {
-      invalidateData('lowPriority');
+      if (!requiresResolution) invalidateData('lowPriority');
     },
     () => {
+      if (requiresResolution) return;
+
       invalidateData(usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority');
     },
     () => {

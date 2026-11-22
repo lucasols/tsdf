@@ -855,10 +855,10 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     .    | pending:Ada          | [temp:Ada] ui-initialized
     1s   | pending:Ada          | -- replay the queued temp create and persist the conflict
     .    | pending:Ada          | offline:createUser resolution-required
-    .    | pending:Ada          | -- resolve the conflict with a new name while keeping the same temp row
+    2s   | pending:Ada          | -- resolve the conflict with a new name while keeping the same temp row
     .    | pending:Ada resolved | [temp:Ada] ui-changed
     .    | pending:Ada resolved | offline:createUser replay-started
-    2.2s | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
+    3.2s | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
     .    | pending:Ada resolved | [users||ada-resolved] server-data-changed (value: {"name":"Ada resolved"})
     .    | pending:Ada resolved | offline:createUser replay-finished
     .    | ···                  | [temp:Ada] ui-changed
@@ -1314,6 +1314,8 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
     .     | Ada, Grace, Linus blocked edit | success      | -- go online and let the temp create stop at conflict detection
     .     | Ada, Grace, Linus blocked edit | success      | offline:createUser resolution-required
     .     | Ada, Grace, Linus blocked edit | success      | offline:patchUserName resolution-required
+    3.02s | Ada, Grace, Linus blocked edit | success      | 🔴 >list-fetch-started
+    3.82s | Ada, Grace, Linus blocked edit | success      | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 
