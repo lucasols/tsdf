@@ -1824,11 +1824,16 @@ export function createListQueryStore<
         : Promise.resolve(),
   };
 
-  function touchQueries(queryKeys: string[]): void {
+  /**
+   * With `inMemoryOnly`, only the in-memory cache order is refreshed, so a
+   * query loaded without touch still doesn't count as used in storage. Used
+   * when a row of the query changes, which is not a use of the list.
+   */
+  function touchQueries(queryKeys: string[], inMemoryOnly = false): void {
     queryCacheRuntime.touch(queryKeys, (queryKey) => {
       return store.state.queries[queryKey] !== undefined;
     });
-    persistence?.touchQueriesLoadedWithoutTouch(queryKeys);
+    if (!inMemoryOnly) persistence?.touchQueriesLoadedWithoutTouch(queryKeys);
   }
 
   function touchItems(itemKeys: string[]): void {
@@ -2408,14 +2413,22 @@ export function createListQueryStore<
           loadedFields,
         }) => {
           if (!pendingEntity || typeof pendingEntity !== 'object') return;
+          // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
+          const tempItemPayload = __LEGIT_CAST__<ItemPayload, ValidPayload>(
+            tempId,
+          );
           addItemToState(
-            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+            tempItemPayload,
             // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
             __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
             addToQueries && { addItemToQueries: addToQueries },
             // Loaded fields are only tracked with partial resources
             partialResources ? loadedFields : undefined,
+          );
+          // The lists that got the row are used, also when they were loaded
+          // without touch to match a filter
+          touchQueries(
+            getRelatedQueryKeysForItemEntries([{ payload: tempItemPayload }]),
           );
         },
         rollbackPendingEntity: ({ tempId }) => {
@@ -4048,7 +4061,7 @@ export function createListQueryStore<
     itemEntries: { itemKey: string; payload: ItemPayload }[],
   ): void {
     touchItems(itemEntries.map(({ itemKey }) => itemKey));
-    touchQueries(getRelatedQueryKeysForItemEntries(itemEntries));
+    touchQueries(getRelatedQueryKeysForItemEntries(itemEntries), true);
     if (shouldScheduleCacheLimitEnforcement()) {
       scheduleCacheLimitEnforcement();
     }
@@ -4092,7 +4105,7 @@ export function createListQueryStore<
     for (const { itemKey } of itemEntries) {
       cleanupItemStateMetadata(itemKey);
     }
-    touchQueries(relatedQueryKeys);
+    touchQueries(relatedQueryKeys, true);
   }
 
   let isDisposed = false;
