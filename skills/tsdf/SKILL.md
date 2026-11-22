@@ -26,14 +26,14 @@ Check more on docs: `docs/document-store.md`, `docs/collection-store.md`, `docs/
 Every store attaches to a single `storeManager`:
 
 ```ts
-import { createStoreManager, createDocumentStore } from "tsdf";
+import { createStoreManager, createDocumentStore } from 'tsdf';
 
 const storeManager = createStoreManager({
   getSessionKey: () => (auth.userId ? `tenant:${auth.tenantId}` : false),
   getAppVersion: () => BUILD_VERSION, // optional; isolates tab sync across deployments
   errorNormalizer: (err) => ({
     code: 500,
-    id: "fetch-error",
+    id: 'fetch-error',
     message: err.message,
   }),
   lowPriorityThrottleMs: 40 * 60 * 1_000, // optional; defaults to 40 minutes
@@ -48,7 +48,7 @@ const storeManager = createStoreManager({
 });
 
 const userStore = createDocumentStore<User>({
-  id: "document-user", // stable id; also used for browser tab sync
+  id: 'document-user', // stable id; also used for browser tab sync
   storeManager,
   fetchFn: (signal) => api.getUser(signal),
   lowPriorityThrottleMs: 2000, // optional store override
@@ -137,7 +137,7 @@ const result = await store.performMutation(payload, {
 
 if (result.ok) {
   /* result.value */
-} else if (result.error.kind === "skipped") {
+} else if (result.error.kind === 'skipped') {
   /* cancelled or superseded */
 } else {
   /* StoreMutationError */
@@ -263,7 +263,7 @@ createDocumentStore({
 // store-level callbacks override the manager default. The built-in manager
 // default is 100ms focused and 1000ms in the background.
 
-socket.on("user-updated", (data) =>
+socket.on('user-updated', (data) =>
   store.updateState((d) => Object.assign(d, data)),
 );
 storeManager.onTransportReconnect(); // notify attached realtime stores after reconnect
