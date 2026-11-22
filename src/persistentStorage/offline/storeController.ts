@@ -4289,27 +4289,29 @@ export function createOfflineStoreController<
           normalizeEntityRefs(resolution.entityRefs) === normalizedEntityRefs,
         replacedResolutionId,
       ).at(-1);
-      const existingEntry = heldResolution
+      const candidateEntry = heldResolution
         ? undefined
         : findAccumulationCandidate({
             operationName,
             entityRefs,
             entries: workingQueue.values(),
           });
+      // A direct request that fell back to the queue is older than the entries
+      // queued while it was in flight. Merged into the newest one, its input
+      // would be replayed at that entry's place, after the work queued in
+      // between (e.g. another direct request that fell back), so it keeps its
+      // own entry instead.
+      const existingEntry =
+        candidateEntry && getQueueOrder(candidateEntry) < queueOrder
+          ? candidateEntry
+          : undefined;
       const existingWork = heldResolution ?? existingEntry;
-      // A direct request that fell back to the queue is older than the entry
-      // queued while it was in flight, so its input is the existing one. The
-      // merged entry keeps the newer entry's place, after the work that entry
-      // may depend on.
-      const isIncomingOlder = existingEntry
-        ? queueOrder < getQueueOrder(existingEntry)
-        : false;
 
       if (existingWork) {
         const mergedInput = await operation.accumulation.mergeInput({
           sessionKey: current.sessionKey,
-          existingInput: isIncomingOlder ? validatedInput : existingWork.input,
-          incomingInput: isIncomingOlder ? existingWork.input : validatedInput,
+          existingInput: existingWork.input,
+          incomingInput: validatedInput,
         });
         const validatedMergedInput = validateWithSchema(
           operation.inputSchema,
