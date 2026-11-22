@@ -1241,18 +1241,22 @@ export function setupListQueryPersistence<
   async function ensureKnownPersistedItemKeys(): Promise<Set<string>> {
     if (knownPersistedItemKeys !== null) return knownPersistedItemKeys;
 
-    knownPersistedItemKeys = new Set(await itemNamespace.listKeys());
+    const listedKeys = new Set(await itemNamespace.listKeys());
+    // A flush that finished while the keys were listed knows newer keys
+    knownPersistedItemKeys ??= listedKeys;
     return knownPersistedItemKeys;
   }
 
   async function ensureKnownPersistedQueryKeys(): Promise<Set<string>> {
     if (knownPersistedQueryKeys !== null) return knownPersistedQueryKeys;
 
-    knownPersistedQueryKeys = new Set(
+    const listedKeys = new Set(
       localStorageAdapter !== null
         ? [...(scanLocalStorageQueryEntries()?.entriesByKey.keys() ?? [])]
         : await queryNamespace.listKeys(),
     );
+    // A flush that finished while the keys were listed knows newer keys
+    knownPersistedQueryKeys ??= listedKeys;
     return knownPersistedQueryKeys;
   }
 
