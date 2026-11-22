@@ -5454,12 +5454,34 @@ export function createOfflineStoreController<
     }
   }
 
+  /**
+   * Active session to compute the dependency uploads of `operationName` with.
+   * Right after a reload the session is still listing its stored uploads, and
+   * `dependsOnUploads` may read them (`getOfflineUploads()`), so operations
+   * that declare uploads wait for that list first.
+   */
+  async function ensureSessionForUploadDependencies(
+    operationName: string,
+  ): Promise<ActiveSessionState | null> {
+    const current = ensureActiveSession();
+    if (!current || !operations[operationName]?.dependsOnUploads) {
+      return current;
+    }
+
+    const storedUploadsListed = current.session.waitForStoredUploads();
+    if (!storedUploadsListed) return current;
+    await storedUploadsListed;
+    return ensureActiveSession();
+  }
+
   async function queueMutation<TName extends keyof TOperations & string>(args: {
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;
   }): Promise<void> {
     await hydrateIfNeeded();
-    const current = ensureActiveSession();
+    const current = await ensureSessionForUploadDependencies(
+      args.offline.operation,
+    );
     if (!current) {
       throw new OfflineSessionUnavailableError();
     }
@@ -5480,7 +5502,9 @@ export function createOfflineStoreController<
     upload?: OfflineMutationUploadsInput;
   }): Promise<PreparedOfflineMutation> {
     await hydrateIfNeeded();
-    const current = ensureActiveSession();
+    const current = await ensureSessionForUploadDependencies(
+      args.offline.operation,
+    );
     if (!current) {
       throw new OfflineSessionUnavailableError();
     }
@@ -5625,7 +5649,7 @@ export function createOfflineStoreController<
   ): Promise<T> {
     const operationName: string = offline.operation;
     const current = operations[operationName]?.dependsOnUploads
-      ? ensureActiveSession()
+      ? await ensureSessionForUploadDependencies(operationName)
       : null;
     const dependencyUploadIds = current
       ? prepareMutationWithSession(current, {
@@ -5695,7 +5719,8 @@ export function createOfflineStoreController<
     resolution: OfflineResolutionActionForOperation<TOperations, TName>,
   ): Promise<void> {
     await hydrateIfNeeded();
-    const current = ensureActiveSession();
+    // A `requeue` computes the dependency uploads of its replacement input.
+    const current = await ensureSessionForUploadDependencies(operationName);
     if (!current) return;
 
     const resolutionRecord = resolutions.get(resolutionId);

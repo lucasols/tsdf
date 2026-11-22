@@ -712,7 +712,9 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `useOfflineUploads()`
 - `useOfflineUploadFile(id)` — see [Rendering staged files](#rendering-staged-files)
 
-Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. An upload the operation can be sent without is declared as `{ id, optional: true }`, see [Optional uploads](#optional-uploads). When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. An upload the operation can be sent without is declared as `{ id, optional: true }`, see [Optional uploads](#optional-uploads).
+
+Right after a reload the session lists its stored uploads in the background, so `getOfflineUploads()` is empty for a moment. A mutation (queued, run directly, or a `requeue`) whose operation declares `dependsOnUploads` waits for that list before calling it, so a `dependsOnUploads` that only returns the ids `getOfflineUploads()` still lists sees the restored uploads. Operations without `dependsOnUploads` don't wait. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
 ### Direct runs
 

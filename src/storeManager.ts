@@ -202,7 +202,13 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
     resolutionId: string,
     action: OfflineResolutionGenericAction,
   ) => Promise<ResultType<void, OfflineResolutionActionError>>;
-  /** Returns the latest session-scoped offline uploads for this manager. */
+  /**
+   * Returns the latest session-scoped offline uploads for this manager.
+   *
+   * Right after a reload it is empty until the session listed its stored
+   * uploads. Mutations whose operation declares `dependsOnUploads` wait for
+   * that list before calling it, so `dependsOnUploads` can read this list.
+   */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
   /**
    * Returns the server ref an upload id already resolved to, synchronously

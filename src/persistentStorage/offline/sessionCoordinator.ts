@@ -916,6 +916,7 @@ class SessionOfflineCoordinator {
   #uploadsConfig: OfflineSessionUploadsConfig | undefined;
   #uploads = new Map<string, OfflineStoredUploadRecord>();
   #storedUploadsRestore: Promise<void> | null = null;
+  #storedUploadsListed = false;
   /**
    * Ids other tabs deleted while this tab's stored uploads were being listed,
    * so the list result can't bring them back. `null` outside the listing.
@@ -2833,7 +2834,19 @@ class SessionOfflineCoordinator {
       this.#onPersistentStorageError?.(error);
     } finally {
       this.#uploadsRemovedWhileListing = null;
+      this.#storedUploadsListed = true;
     }
+  }
+
+  /**
+   * Waits for the stored uploads to be listed, which right after a reload
+   * leaves `getUploads()` empty for a moment. `undefined` once they are (or
+   * without uploads), so callers only yield when there is something to wait
+   * for.
+   */
+  waitForStoredUploads(): Promise<void> | undefined {
+    if (this.#storedUploadsListed) return undefined;
+    return this.#restoreStoredUploads();
   }
 
   async #getUploadRecord(
