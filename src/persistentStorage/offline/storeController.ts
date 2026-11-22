@@ -697,6 +697,12 @@ export function createOfflineStoreController<
      * the user sent again.
      */
     mayHaveBeenApplied?: boolean;
+    /**
+     * Queue position reserved when the mutation was called, so that a direct
+     * request that falls back to the queue goes before the work queued while
+     * it was in flight.
+     */
+    queueOrder?: number;
   };
 
   type PlannedQueuedMutation = {
@@ -4291,12 +4297,19 @@ export function createOfflineStoreController<
             entries: workingQueue.values(),
           });
       const existingWork = heldResolution ?? existingEntry;
+      // A direct request that fell back to the queue is older than the entry
+      // queued while it was in flight, so its input is the existing one. The
+      // merged entry keeps the newer entry's place, after the work that entry
+      // may depend on.
+      const isIncomingOlder = existingEntry
+        ? queueOrder < getQueueOrder(existingEntry)
+        : false;
 
       if (existingWork) {
         const mergedInput = await operation.accumulation.mergeInput({
           sessionKey: current.sessionKey,
-          existingInput: existingWork.input,
-          incomingInput: validatedInput,
+          existingInput: isIncomingOlder ? validatedInput : existingWork.input,
+          incomingInput: isIncomingOlder ? existingWork.input : validatedInput,
         });
         const validatedMergedInput = validateWithSchema(
           operation.inputSchema,
@@ -4487,7 +4500,11 @@ export function createOfflineStoreController<
       throw new OfflineSessionUnavailableError();
     }
 
-    const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
+    const reservedQueueOrder = preparedMutation.queueOrder;
+    const { queueOrders, nextQueueOrderValue } =
+      reservedQueueOrder === undefined
+        ? previewQueueOrders(1)
+        : { queueOrders: [reservedQueueOrder], nextQueueOrderValue: null };
     const queueOrder = queueOrders[0];
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
@@ -4623,7 +4640,7 @@ export function createOfflineStoreController<
         await removeResolution(removedResolution.id, current, true);
       }
 
-      nextQueueOrder = nextQueueOrderValue;
+      if (nextQueueOrderValue !== null) nextQueueOrder = nextQueueOrderValue;
 
       if (
         storeAdapter.applyPendingEntity &&
@@ -4714,7 +4731,7 @@ export function createOfflineStoreController<
         }
       }
 
-      nextQueueOrder = previousNextQueueOrder;
+      if (nextQueueOrderValue !== null) nextQueueOrder = previousNextQueueOrder;
       refreshDerivedState(current);
 
       throw error;
@@ -5205,11 +5222,18 @@ export function createOfflineStoreController<
       throw new OfflineSessionUnavailableError();
     }
 
-    const prepared = prepareMutationWithSession(current, {
-      operation: args.offline.operation,
-      input: args.offline.input,
-      upload: args.upload,
-    });
+    const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
+    const prepared: PreparedQueuedMutation = {
+      ...prepareMutationWithSession(current, {
+        operation: args.offline.operation,
+        input: args.offline.input,
+        upload: args.upload,
+      }),
+      // Reserved now: if the direct request falls back to the queue, it keeps
+      // the place it had when called, before the mutations queued meanwhile.
+      queueOrder: queueOrders[0],
+    };
+    nextQueueOrder = nextQueueOrderValue;
     await current.session.refreshNetworkState();
 
     const { dependencyUploadIds } = prepared;

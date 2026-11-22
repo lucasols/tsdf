@@ -1200,9 +1200,13 @@ export type OfflineResolutionActionForOperation<
 export type OfflineAccumulationMergeContext<TInput> = {
   /** Session key used to isolate queued mutations. */
   sessionKey: string;
-  /** Existing input already present in queue. */
+  /**
+   * Input of the older mutation, in the order the mutations were called. It is
+   * usually the one already queued, but a mutation whose online request failed
+   * and was queued after newer mutations of the entity is the older one.
+   */
   existingInput: TInput;
-  /** Incoming input for merge attempt. */
+  /** Input of the newer mutation, merged into `existingInput`. */
   incomingInput: TInput;
 };
 

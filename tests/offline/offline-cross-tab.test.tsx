@@ -2026,6 +2026,45 @@ test('"+1" clicks queued at the same moment in two tabs all reach the server', a
   `);
 });
 
+test('an edit whose request fails after another tab queued a newer edit is sent first', async () => {
+  const tabA = await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+
+  // Tab A is online, so its edit goes straight to the server, which hangs
+  let failTabAEdit: (error: Error) => void = () => {};
+  const tabAEdit = tabA.getEnv().apiStore.performMutation({
+    mutation: () =>
+      new Promise<number>((_, reject) => {
+        failTabAEdit = reject;
+      }),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+  await advanceTime(100);
+
+  // The connection drops and the user edits the same value in tab B, which
+  // queues the newer edit
+  network.goOffline();
+  await advanceTime(100);
+  await tabB.queueEdit(3);
+
+  // Tab A's request then fails with a network error and is queued
+  failTabAEdit(new Error('Network request failed'));
+  const tabAResult = await tabAEdit;
+  expect(
+    tabAResult.ok ? tabAResult.value : tabAResult.error,
+  ).toMatchInlineSnapshot(`kind: 'queued'`);
+
+  network.goOnline();
+  await advanceTime(5_000);
+
+  // The edits reach the server in the order they were made, so the newer
+  // edit of tab B is kept
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A sent doc = 2', 'tab A sent doc = 3']`,
+  );
+  expect(tabA.getEnv().serverMock.current).toBe(3);
+});
+
 test('an edit another tab turned into a conflict keeps showing in the tab that made it', async () => {
   network.setOffline();
   // Tab A keeps the focus and leads
