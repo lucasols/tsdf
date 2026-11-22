@@ -754,20 +754,21 @@ describe('temp entities declared in list queries', () => {
         `[]`,
       );
 
-      // Back offline, the user opens the list: the saved row took the place of
-      // the pending one, instead of missing until the next online fetch.
+      // Back offline, the user opens the list: the saved row (server id 3)
+      // took the place of the pending one, instead of missing until the next
+      // online fetch.
       act(() => {
         network.goOffline();
       });
       await flushAllTimers();
       const hook = renderHook(() =>
         restarted.env.apiStore.useListQuery(usersQuery, {
-          itemSelector: (item) => item.name,
+          itemSelector: (item) => `${item.id}:${item.name}`,
         }),
       );
       await flushAllTimers();
       expect(hook.result.current.items).toMatchInlineSnapshot(`
-        ['Linus', 'Ada', 'Grace']
+        ['3:Linus', '1:Ada', '2:Grace']
       `);
 
       hook.unmount();

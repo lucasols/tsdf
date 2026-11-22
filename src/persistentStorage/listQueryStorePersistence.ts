@@ -253,8 +253,13 @@ type ListQueryPersistenceSetup<
   preloadItemsByDerivedQueryGroup(groupKeys: string[]): Promise<boolean[]>;
   getHydratedItemKeys(this: void): string[];
   getHydratedQueryKeys(this: void): string[];
-  /** Keys of every query saved in persistent storage for the session. */
-  listPersistedQueryKeys(this: void): Promise<string[]>;
+  /**
+   * Keys of every query saved in persistent storage for the session, read
+   * synchronously when they are already known.
+   */
+  getPersistedQueryKeys(
+    this: void,
+  ): ReadonlySet<string> | Promise<ReadonlySet<string>>;
   readHydratedItem(
     this: void,
     itemKey: string,
@@ -4154,9 +4159,8 @@ export function setupListQueryPersistence<
     preloadItemsByDerivedQueryGroup,
     getHydratedItemKeys: () => [...hydratedPersistedItemKeys],
     getHydratedQueryKeys: () => [...hydratedPersistedQueryKeys],
-    listPersistedQueryKeys: async () => [
-      ...(await ensureKnownPersistedQueryKeys()),
-    ],
+    getPersistedQueryKeys: () =>
+      knownPersistedQueryKeys ?? ensureKnownPersistedQueryKeys(),
     readHydratedItem,
     readHydratedQuery,
     hasAsyncPreload: localStorageAdapter === null,

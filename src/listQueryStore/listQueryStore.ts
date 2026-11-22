@@ -2740,23 +2740,37 @@ export function createListQueryStore<
         if (store.state.queries[key] === undefined) unloadedQueryKeys.add(key);
       }
     }
+    // A filter can match any saved query, so all the ones that are only in
+    // persistent storage are loaded for it
+    const addUnloadedPersistedQueryKeys = (
+      persistedQueryKeys: ReadonlySet<string>,
+    ): void => {
+      for (const queryKey of persistedQueryKeys) {
+        if (store.state.queries[queryKey] === undefined) {
+          unloadedQueryKeys.add(queryKey);
+        }
+      }
+    };
+    let persistedQueryKeysLoad: Promise<ReadonlySet<string>> | undefined;
+    if (isDeclaredWithFilter) {
+      const persistedQueryKeys = persistence.getPersistedQueryKeys();
+      if (persistedQueryKeys instanceof Promise) {
+        persistedQueryKeysLoad = persistedQueryKeys;
+      } else {
+        addUnloadedPersistedQueryKeys(persistedQueryKeys);
+      }
+    }
     if (
       unloadedItemKeys.length === 0 &&
       unloadedQueryKeys.size === 0 &&
-      !isDeclaredWithFilter
+      !persistedQueryKeysLoad
     ) {
       return undefined;
     }
 
     const loadQueries = async (): Promise<void> => {
-      // A filter can match any saved query, so all the ones that are only in
-      // persistent storage are loaded for it
-      if (isDeclaredWithFilter) {
-        for (const queryKey of await persistence.listPersistedQueryKeys()) {
-          if (store.state.queries[queryKey] === undefined) {
-            unloadedQueryKeys.add(queryKey);
-          }
-        }
+      if (persistedQueryKeysLoad) {
+        addUnloadedPersistedQueryKeys(await persistedQueryKeysLoad);
       }
       if (unloadedQueryKeys.size === 0) return;
       await preloadQueriesFromPersistentStorage([...unloadedQueryKeys]);
