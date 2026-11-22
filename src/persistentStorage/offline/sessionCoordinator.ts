@@ -1903,10 +1903,16 @@ class SessionOfflineCoordinator {
 
   async resolveUploadIds(
     uploadIds: readonly string[],
+    /** Same as in `resolveReplayUploadIds` */
+    canSendUploads?: () => boolean,
   ): Promise<Record<string, ValidPayload>> {
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
-        const resolvedRef = await this.#ensureUploadResolved(id);
+        const resolvedRef = await this.#ensureUploadResolved(
+          id,
+          false,
+          canSendUploads,
+        );
         return [id, resolvedRef] as const;
       }),
     );
@@ -1923,6 +1929,13 @@ class SessionOfflineCoordinator {
    */
   async resolveReplayUploadIds(
     uploadIds: readonly string[],
+    /**
+     * Checked before each upload that still has to be sent: `false` (the app
+     * switched to another session meanwhile) fails it without calling the
+     * transport, and the upload stays `pending` for when its session is
+     * active again.
+     */
+    canSendUploads?: () => boolean,
   ): Promise<
     | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
     | { failedUploadId: string; error: unknown }
@@ -1934,7 +1947,10 @@ class SessionOfflineCoordinator {
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
         try {
-          return [id, await this.#ensureUploadResolved(id, true)] as const;
+          return [
+            id,
+            await this.#ensureUploadResolved(id, true, canSendUploads),
+          ] as const;
         } catch (error) {
           failures.push({ failedUploadId: id, error });
           throw error;
@@ -2087,10 +2103,11 @@ class SessionOfflineCoordinator {
 
   /**
    * Reads the session gate (`offlineSession.enabled`): while it is closed the
-   * session behaves as if no offline session existed.
+   * session behaves as if no offline session existed. `'replay-only'` keeps
+   * it open, with mutation queueing disallowed.
    */
   #isSessionEnabled(): boolean {
-    return this.#canonicalConfig.isSessionEnabled?.() ?? true;
+    return this.#canonicalConfig.isSessionEnabled?.() !== false;
   }
 
   #isNetworkEnabled(): boolean {
@@ -2158,6 +2175,11 @@ class SessionOfflineCoordinator {
   #resolveMutationQueueingPolicy(
     cause: 'network' | 'outage',
   ): OfflineMutationQueueingPolicy {
+    // The queued work is replayed, but no new work is queued for the cause
+    if (this.#canonicalConfig.isSessionEnabled?.() === 'replay-only') {
+      return 'disallow';
+    }
+
     return (
       this.#mutationQueueingOverrides?.[cause] ??
       this.#canonicalConfig.mutationQueueingByDefault[cause]
@@ -3284,6 +3306,7 @@ class SessionOfflineCoordinator {
      * the upload keeps waiting (`pending`) instead of becoming `failed` here.
      */
     forReplay = false,
+    canSend?: () => boolean,
   ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
@@ -3322,6 +3345,14 @@ class SessionOfflineCoordinator {
           return queuedRecord.resolvedRef;
         }
 
+        // Waiting for its turn, the upload may now belong to a session the
+        // app switched away from: it is not sent from the new one
+        const notSentError = (): Error =>
+          new Error(
+            `[tsdf] Offline upload "${id}" was not sent: session "${this.sessionKey}" is no longer active`,
+          );
+        if (canSend?.() === false) throw notSentError();
+
         const file = queuedRecord.file;
         await this.#updateUploadState({
           id,
@@ -3332,6 +3363,17 @@ class SessionOfflineCoordinator {
             progress: 0,
           },
         });
+
+        // The session can also switch while that state is written: the
+        // upload goes back to how it was, without counting a failure
+        if (canSend?.() === false) {
+          await this.#updateUploadState({
+            id,
+            state: queuedRecord.state,
+            progress: queuedRecord.progress,
+          });
+          throw notSentError();
+        }
 
         try {
           const resolvedRef = await uploadsConfig.upload({

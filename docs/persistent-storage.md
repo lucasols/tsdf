@@ -128,7 +128,7 @@ value (`create`, `createAndUpdate`, `update`, or `delete`) so queue-aware UI
 can read one stable lifecycle field instead of inferring it from store
 snapshots.
 
-Session-level `mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads.
+Session-level `mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads. With `'disallow'`, a mutation of an entity that already has queued work still joins the queue behind it, so the older work does not overwrite it.
 
 ## Adapter behavior
 

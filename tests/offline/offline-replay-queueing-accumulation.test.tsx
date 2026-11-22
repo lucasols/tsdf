@@ -540,6 +540,352 @@ test('collection offline accumulation keeps a single persisted queue entry and r
   );
 });
 
+/**
+ * A record whose edits carry the permission context they were made with (e.g.
+ * a table view or an app block): the server checks the edit against it, so
+ * edits with different contexts must reach it as separate requests. Offline
+ * edits with the same context are merged.
+ */
+type UpdateRecordOperations = {
+  updateRecord: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { itemId: string; permissionCtx: string; name: string },
+    unknown
+  >;
+  /** A rename from another screen (e.g. a bulk rename), never merged. */
+  renameRecord: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { itemId: string; name: string },
+    unknown
+  >;
+};
+
+function createUpdateRecordEnv(
+  sessionKey: string,
+  storeName: string,
+  {
+    sendAppBlockEditsAlone = false,
+  }: {
+    /**
+     * App block edits are never merged into earlier work, while other edits
+     * can merge into anything, including an app block edit.
+     */
+    sendAppBlockEditsAlone?: boolean;
+  } = {},
+) {
+  const execute = vi
+    .fn<
+      (ctx: {
+        input: { itemId: string; permissionCtx: string; name: string };
+      }) => Promise<{ value: { name: string } }>
+    >()
+    .mockImplementation(async ({ input }) => {
+      await env.serverTable.delayedUpdateItem(input.itemId, {
+        name: input.name,
+      });
+      return { value: { name: input.name } };
+    });
+
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    UpdateRecordOperations
+  >(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            updateRecord: {
+              inputSchema: rc_object({
+                itemId: rc_string,
+                permissionCtx: rc_string,
+                name: rc_string,
+              }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              accumulation: {
+                // Only edits made with the same permissions are combined, or
+                // with `sendAppBlockEditsAlone`, any edit but an app block one
+                canMerge: ({ existingInput, incomingInput }) =>
+                  sendAppBlockEditsAlone
+                    ? incomingInput.permissionCtx !== 'app-block'
+                    : existingInput.permissionCtx ===
+                      incomingInput.permissionCtx,
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (draft) => {
+                  draft.value.name = input.name;
+                });
+              },
+            },
+            renameRecord: {
+              inputSchema: rc_object({ itemId: rc_string, name: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: async ({ input }) => {
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  name: input.name,
+                });
+                return { value: { name: input.name } };
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (draft) => {
+                  draft.value.name = input.name;
+                });
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  async function updateRecord(permissionCtx: string, name: string) {
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (draft) => {
+          draft.value.name = name;
+        });
+      },
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('users||1', { name });
+        return { value: { name } };
+      },
+      offline: {
+        operation: 'updateRecord',
+        input: { itemId: 'users||1', permissionCtx, name },
+      },
+    });
+  }
+
+  async function renameRecord(name: string) {
+    await env.apiStore.performMutation('users||1', {
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('users||1', { name });
+        return { value: { name } };
+      },
+      offline: {
+        operation: 'renameRecord',
+        input: { itemId: 'users||1', name },
+      },
+    });
+  }
+
+  return { env, execute, updateRecord, renameRecord };
+}
+
+test('offline accumulation keeps edits apart when canMerge refuses, and sends them in order', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-can-merge-session';
+  const storeName = 'offline-accumulation-can-merge';
+  const { env, execute, updateRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+  );
+
+  // Two table edits, an app block edit and another table edit of the same
+  // record, made offline
+  await updateRecord('table', 'Ada table 1');
+  await advanceTime(50);
+  await updateRecord('table', 'Ada table 2');
+  await advanceTime(50);
+  await updateRecord('app-block', 'Ada block');
+  await advanceTime(50);
+  await updateRecord('table', 'Ada table 3');
+
+  // The two consecutive table edits are merged. The app block edit is queued
+  // apart, and the last table edit is not merged into the first one, which
+  // would send it before the app block edit
+  expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada block', permissionCtx: 'app-block' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada table 3', permissionCtx: 'table' }
+      operation: 'updateRecord'
+  `);
+  expect(
+    env.apiStore
+      .getOfflineEntities()
+      .map((entity) => pick(entity, ['entityKey', 'pendingMutations'])),
+  ).toMatchInlineSnapshot(`
+    - entityKey: '"users||1'
+      pendingMutations: 3
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Each entry is a separate request, in the order the edits were made
+  expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
+    - { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+    - { itemId: 'users||1', name: 'Ada block', permissionCtx: 'app-block' }
+    - { itemId: 'users||1', name: 'Ada table 3', permissionCtx: 'table' }
+  `);
+  expect(pick(env.apiStore.getItemState('users||1'), ['data', 'status']))
+    .toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Ada table 3' }
+
+      status: 'success'
+    `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+});
+
+test('a table edit made together with a refused app block edit is not merged ahead of it, and the server ends with the last edit', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-can-merge-concurrent-session';
+  const storeName = 'offline-accumulation-can-merge-concurrent';
+  const { env, execute, updateRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+  );
+
+  // Offline: a table edit is queued
+  await updateRecord('table', 'Ada table 1');
+  await advanceTime(50);
+
+  // Then the app sends an app block edit and another table edit of the record
+  // at once, without waiting for the first one to be queued (e.g. two blocks
+  // saving on the same blur)
+  await Promise.all([
+    updateRecord('app-block', 'Ada block'),
+    updateRecord('table', 'Ada table 2'),
+  ]);
+
+  // The app block edit is queued apart. The second table edit is not merged
+  // into the first one, which would send it before the app block edit
+  expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', name: 'Ada table 1', permissionCtx: 'table' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada block', permissionCtx: 'app-block' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+      operation: 'updateRecord'
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Sent in the order the edits were made: the server keeps the last one
+  expect(
+    execute.mock.calls.map(([ctx]) => ctx.input.name),
+  ).toMatchInlineSnapshot(`['Ada table 1', 'Ada block', 'Ada table 2']`);
+  expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
+    `name: 'Ada table 2'`,
+  );
+});
+
+test('an edit made together with a later edit that is sent alone is not merged into it, and the server ends with the last edit', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-can-merge-alone-session';
+  const storeName = 'offline-accumulation-can-merge-alone';
+  const { env, execute, updateRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+    { sendAppBlockEditsAlone: true },
+  );
+
+  // Offline: a table edit is queued
+  await updateRecord('table', 'Ada table 1');
+  await advanceTime(50);
+
+  // Then the app sends another table edit and an app block edit of the record
+  // at once (e.g. two blocks saving on the same blur). The table edit is made
+  // first, so it merges into the first one, while the app block edit, which
+  // is always sent alone, is queued after it
+  await Promise.all([
+    updateRecord('table', 'Ada table 2'),
+    updateRecord('app-block', 'Ada block'),
+  ]);
+
+  // The table edit is not merged into the newer app block edit, which would
+  // replace the app block edit with the older table edit
+  expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada block', permissionCtx: 'app-block' }
+      operation: 'updateRecord'
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Sent in the order the edits were made: the server keeps the last one
+  expect(
+    execute.mock.calls.map(([ctx]) => ctx.input.name),
+  ).toMatchInlineSnapshot(`['Ada table 2', 'Ada block']`);
+  expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
+    `name: 'Ada block'`,
+  );
+});
+
+test('an offline edit is not merged into an older edit when another operation changed the record in between, and the server ends with the last edit', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-other-operation-session';
+  const storeName = 'offline-accumulation-other-operation';
+  const { env, updateRecord, renameRecord } = createUpdateRecordEnv(
+    sessionKey,
+    storeName,
+  );
+
+  // Offline: a table edit, a rename from another screen, then another table
+  // edit of the same record
+  await updateRecord('table', 'Ada table 1');
+  await advanceTime(50);
+  await renameRecord('Ada renamed');
+  await advanceTime(50);
+  await updateRecord('table', 'Ada table 2');
+
+  // The last table edit is queued after the rename instead of being merged
+  // into the first table edit, which would send it before the rename and let
+  // the rename overwrite it on the server
+  expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', name: 'Ada table 1', permissionCtx: 'table' }
+      operation: 'updateRecord'
+    - input: { itemId: 'users||1', name: 'Ada renamed' }
+      operation: 'renameRecord'
+    - input: { itemId: 'users||1', name: 'Ada table 2', permissionCtx: 'table' }
+      operation: 'updateRecord'
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Sent in the order the edits were made: the server keeps the last one
+  expect(env.serverTable.getAll()['users||1']).toMatchInlineSnapshot(
+    `name: 'Ada table 2'`,
+  );
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+});
+
 test('list-query offline accumulation keeps a single persisted queue entry and replays only the merged input', async () => {
   network.setOffline();
   const sessionKey = 'offline-accumulation-list-query-session';

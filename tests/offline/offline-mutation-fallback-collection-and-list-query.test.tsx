@@ -1691,9 +1691,10 @@ describe('direct mutation that falls back to the queue after later edits were qu
       city: 'Paris'
       name: 'Edit 2'
     `);
-    // Each fallback kept its own entry, at the place it had when called
+    // Edit 2 was merged into edit 1, the entry before it in call order, and
+    // the city edit queued while both were in flight kept its own entry after
+    // them
     expect(replayedInputs).toMatchInlineSnapshot(`
-      - name: 'Edit 1'
       - name: 'Edit 2'
       - city: 'Paris'
     `);
@@ -1735,10 +1736,9 @@ describe('direct mutation that falls back to the queue after later edits were qu
     edit2.fail(new Error('Network request failed'));
     await edit2.result;
 
-    // Each edit keeps its own entry, in call order
+    // Edit 3 kept its own entry. Edit 2 was merged into edit 1, the entry
+    // before it in call order, so the queue still follows call order
     expect(getSortedQueueSummary(sessionKey, storeName)).toMatchInlineSnapshot(`
-      - input: { id: 'users||1', name: 'Edit 1' }
-        operation: 'patchItem'
       - input: { id: 'users||1', name: 'Edit 2' }
         operation: 'patchItem'
       - input: { id: 'users||1', name: 'Edit 3' }
@@ -1752,7 +1752,6 @@ describe('direct mutation that falls back to the queue after later edits were qu
 
     // Edit 3 is the latest edit, so its name is the one the server keeps
     expect(replayedInputs).toMatchInlineSnapshot(`
-      - name: 'Edit 1'
       - name: 'Edit 2'
       - name: 'Edit 3'
     `);
@@ -1826,9 +1825,9 @@ describe('direct mutation that falls back to the queue after later edits were qu
       city: 'Lisbon'
       name: 'Edit 3'
     `);
-    // Each edit kept its own entry, at the place it had when called
+    // Edit 3 kept its own entry after edit 2, which was merged into edit 1,
+    // the entry before it in call order
     expect(replayedInputs).toMatchInlineSnapshot(`
-      - name: 'Edit 1'
       - name: 'Edit 2'
       - name: 'Edit 3'
     `);

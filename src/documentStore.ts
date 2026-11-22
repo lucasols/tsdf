@@ -108,7 +108,12 @@ import {
   type BrowserTabsTransportFactory,
 } from './utils/browserTabsSync';
 import { createOptimisticMutationTracker } from './utils/optimisticMutationTracker';
-import { performMutationWithLifecycle } from './utils/performMutation';
+import {
+  cancelPendingDebouncedMutation,
+  performMutationWithLifecycle,
+  type MutationDebounceKey,
+  type PendingDebouncedMutation,
+} from './utils/performMutation';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
@@ -610,6 +615,18 @@ export type DocumentStore<
    * mutation, rollback/error handling, revalidation, and offline queue fallback.
    */
   performMutation: DocumentPerformMutation<State, TOfflineOperations>;
+  /**
+   * Cancels the `performMutation` call waiting for the debounce window of the
+   * `debounce` group with this `context` and `payload`. The call never runs
+   * its mutation (nor is queued offline) and resolves `Err(mutationSkipped)`,
+   * and the optimistic updates of the group (the call and the calls it
+   * superseded) are reverted as on a failure. Call it before starting the
+   * mutation that replaces it.
+   *
+   * Returns `false` when no call of the group is waiting, e.g. its mutation
+   * already started, which is not cancelled.
+   */
+  cancelDebouncedMutation: (debounce: MutationDebounceKey) => boolean;
   /** Notifies the store that a shared transport reconnected and should revalidate active data. */
   onTransportReconnect: () => void;
 };
@@ -1423,9 +1440,15 @@ export function createDocumentStore<
     };
   }
 
-  const pendingDebounceRollbacks = new Map<
+  type DocumentMutationRollback = {
+    before: State | null;
+    after: State | null;
+    mutationId: number;
+  };
+
+  const pendingDebounces = new Map<
     string,
-    { before: State | null; after: State | null; mutationId: number }[]
+    PendingDebouncedMutation<DocumentMutationRollback>
   >();
   const optimisticMutations = createOptimisticMutationTracker();
 
@@ -1521,6 +1544,52 @@ export function createDocumentStore<
       ),
     });
 
+    const revertOptimisticUpdates = (rollbacks: DocumentMutationRollback[]) => {
+      let data = store.state.data;
+      let changedSince = false;
+      // Newest first. An update is only reverted if nothing changed the
+      // data since, otherwise the newer data is kept and revalidated
+      for (let i = rollbacks.length - 1; i >= 0; i--) {
+        const rollback = rollbacks[i];
+        if (!rollback || rollback.before === rollback.after) continue;
+        if (data !== rollback.after) {
+          changedSince = true;
+          break;
+        }
+        data = rollback.before;
+      }
+
+      const reverted = data !== store.state.data;
+      // A newer optimistic update may have left the data as it was, e.g.
+      // saving the same value, so a revert can contradict a newer mutation
+      // that succeeded
+      const revalidate =
+        changedSince ||
+        (reverted &&
+          optimisticMutations.hasNewer(
+            DOC_REQUEST_ID,
+            rollbacks[0]?.mutationId ?? mutationId,
+            mutationId,
+          ));
+
+      if (reverted) {
+        runWithBroadcastConsistency('confirmed', () => {
+          store.setKey('data', data, { action: 'rollback-mutation-error' });
+          // Data kept until the revalidation, or still carrying another
+          // in-flight optimistic update, isn't confirmed by the server, so
+          // other tabs must not treat it as such
+          publishDocumentSnapshot(
+            revalidate ||
+              optimisticMutations.hasOtherInFlight(DOC_REQUEST_ID, mutationId)
+              ? 'optimistic'
+              : 'confirmed',
+          );
+        });
+      }
+
+      if (revalidate) invalidateData();
+    };
+
     // Whether the server accepted the mutation, even if `onSuccess` threw
     let accepted = false;
     const result = await performMutationWithLifecycle(
@@ -1543,49 +1612,7 @@ export function createDocumentStore<
               : runOnlineMutation()
         : runOnlineMutation,
       (exception, rollbacks) => {
-        let data = store.state.data;
-        let changedSince = false;
-        // Newest first. An update is only reverted if nothing changed the
-        // data since, otherwise the newer data is kept and revalidated
-        for (let i = rollbacks.length - 1; i >= 0; i--) {
-          const rollback = rollbacks[i];
-          if (!rollback || rollback.before === rollback.after) continue;
-          if (data !== rollback.after) {
-            changedSince = true;
-            break;
-          }
-          data = rollback.before;
-        }
-
-        const reverted = data !== store.state.data;
-        // A newer optimistic update may have left the data as it was, e.g.
-        // saving the same value, so a revert can contradict a newer mutation
-        // that succeeded
-        const revalidate =
-          changedSince ||
-          (reverted &&
-            optimisticMutations.hasNewer(
-              DOC_REQUEST_ID,
-              rollbacks[0]?.mutationId ?? mutationId,
-              mutationId,
-            ));
-
-        if (reverted) {
-          runWithBroadcastConsistency('confirmed', () => {
-            store.setKey('data', data, { action: 'rollback-mutation-error' });
-            // Data kept until the revalidation, or still carrying another
-            // in-flight optimistic update, isn't confirmed by the server, so
-            // other tabs must not treat it as such
-            publishDocumentSnapshot(
-              revalidate ||
-                optimisticMutations.hasOtherInFlight(DOC_REQUEST_ID, mutationId)
-                ? 'optimistic'
-                : 'confirmed',
-            );
-          });
-        }
-
-        if (revalidate) invalidateData();
+        revertOptimisticUpdates(rollbacks);
 
         if (resolvedOnMutationError) {
           resolvedOnMutationError(exception, { silentErrors });
@@ -1614,7 +1641,8 @@ export function createDocumentStore<
       },
       debounce,
       blockWindowClose ?? undefined,
-      pendingDebounceRollbacks,
+      pendingDebounces,
+      revertOptimisticUpdates,
     ).finally(() => {
       optimisticMutations.end(DOC_REQUEST_ID, mutationId, accepted);
     });
@@ -2046,6 +2074,8 @@ export function createDocumentStore<
     useListItemIsDeleted,
     useListItem,
     performMutation,
+    cancelDebouncedMutation: (debounce: MutationDebounceKey) =>
+      cancelPendingDebouncedMutation(pendingDebounces, debounce),
     onTransportReconnect,
   };
 }

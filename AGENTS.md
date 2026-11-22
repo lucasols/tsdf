@@ -168,6 +168,17 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
 - Rank findings by realistic user impact and likelihood, not theoretical severity alone; rare edge cases are not automatically merge blockers because their worst-case outcome is serious.
 - Treat TSDF runtime performance as part of correctness: before recommending a fix, account for added work on common paths (especially storage reads/writes, serialization, iteration, locking, memory), and defer the fix when its real-usage cost outweighs the issue unless a low-overhead solution exists.
 
+### Overhead in PR descriptions and explanations
+
+Every PR description (`gh pr create`, and `gh pr edit` when a push changes the overhead) and every PR explanation (e.g. `/explain-pr`) states whether apps using TSDF pay more after the PR. The reader must be able to see it at a glance.
+
+- Give it its own part with the same weight as breaking changes: an `## Overhead for apps` section in the PR description, a **Does it add overhead for apps?** part right after the breaking-changes part in an explanation, and a callout next to the breaking-changes verdict in an explanation artifact.
+- Open with a verdict: **yes**, **no**, or **only in <situation>**. Never leave the part out or fold it into another section, even when the answer is no.
+- Say which paths of an app pay and how often: every fetch, mutation, render or queued entry, or only in the situation the PR handles. Flag overhead on common paths prominently.
+- Name the added work concretely: storage reads/writes, serialization, iterations, session key reads, locks, timers, subscriptions or re-renders, and memory kept around. Give counts per operation when you can derive them from the code (e.g. "two extra session key reads per replayed entry").
+- Mention bundle size when the PR adds code that ships to production, and note what is tree-shaken behind `import.meta.env.DEV` / `TEST` guards.
+- When the overhead is real, say whether it looks avoidable with a cheaper implementation. When it is negligible, give the reason in one line.
+
 ## Feature implementation
 
 When adding a new feature, or adjust a existing one:
@@ -179,7 +190,10 @@ When adding a new feature, or adjust a existing one:
   - when adding jsdoc to function arguments prefer adding them to the types/interfaces instead of the implementation, to ensure they are visible in IDEs when users hover the relevant types
 - if adding new public exports, update the relevant barrel file (`src/main.ts`)
 - if the feature requires changes to the documentation, update the relevant docs files in `docs/` and public api jsdoc comments in `src/`
-- if the feature changes the public API surface (new/removed/renamed exports, hooks, options, return shapes) or introduces/removes a concept covered in `skills/tsdf/SKILL.md`, update the skill so the high-level map stays accurate. Keep the skill concise — defer details to `docs/` and `src/main.ts` types
+- if the feature changes the public API surface (new/removed/renamed exports, hooks, options, return shapes) or introduces/removes a concept covered in `skills/tsdf/SKILL.md`, update the skill so the high-level map stays accurate
+  - the skill is a high-level map, not documentation: add only the key information an agent needs to know a feature exists and when to reach for it (name, one-line purpose, the doc to read)
+  - keep details in `docs/` and the jsdoc in `src/`: parameter lists, context fields, edge cases, ordering rules, caveats and examples don't belong in the skill
+  - not every new option or field needs a skill entry; skip it when the existing entry and its doc link already lead to it
 - run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
 - after implementing the changes, check if there are no performance regressions compared to previous implementation that could be avoided with a better implementation
 

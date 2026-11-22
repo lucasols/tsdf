@@ -112,12 +112,18 @@ export type OfflineMutationQueueingConfig = {
   /**
    * Controls whether offline-enabled mutations may queue while network mode is
    * active, including browser-detected offline and classified network failures.
+   *
+   * With `'disallow'`, a mutation of an entity that already has queued work
+   * still joins the queue behind it, so that older work does not overwrite it.
    * @default 'allow'
    */
   network?: OfflineMutationQueueingPolicy;
   /**
    * Controls whether offline-enabled mutations may queue while outage mode is
    * active.
+   *
+   * With `'disallow'`, a mutation of an entity that already has queued work
+   * still joins the queue behind it, so that older work does not overwrite it.
    * @default 'allow'
    */
   outage?: OfflineMutationQueueingPolicy;
@@ -405,6 +411,16 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * storage untouched (and stay visible through the offline entities /
      * resolutions) and are replayed after the gate reopens while online.
      *
+     * Return `'replay-only'` to stop queueing new work but keep sending the
+     * work already queued, e.g. when a workspace loses offline mode with
+     * changes still waiting. The session works as with the gate open (offline
+     * status, recovery, replay and resolutions), except that mutations with an
+     * `offline` descriptor are never queued because the session is offline,
+     * as with `mutationQueueing` `'disallow'` for both causes: they run as
+     * online mutations and fail with their normal errors. A mutation of an
+     * entity with queued work still joins the queue behind it, also while the
+     * session is offline, so it is not overwritten by that older work.
+     *
      * It is read before every fetch and every mutation with an `offline`
      * descriptor, on browser online/offline events, before each recovery
      * check and before replaying queued mutations, so it must be synchronous
@@ -416,7 +432,7 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * per workspace, include the workspace in the session key).
      * @default () => true
      */
-    enabled?: () => boolean;
+    enabled?: () => boolean | 'replay-only';
     /**
      * Classify a remote failure as `outage`, `network`, or `ignore`.
      * `outage` activates outage recovery behavior.
@@ -1209,6 +1225,12 @@ export type OfflineAccumulationMergeContext<TInput> = {
 /**
  * Optional in-memory accumulation strategy for queued offline mutations.
  *
+ * A mutation is merged into the newest queued mutation of the operation for
+ * the same entity refs that was never sent, unless newer queued work of the
+ * entity follows it (a mutation of another operation, or one queued by another
+ * tab): that work is sent after the merged one and could overwrite it, so the
+ * incoming mutation is queued after it instead.
+ *
  * @typeParam TInput - Input type that will be merged and revalidated before persisting.
  */
 export type OfflineAccumulationConfig<TInput> = {
@@ -1216,6 +1238,27 @@ export type OfflineAccumulationConfig<TInput> = {
   mergeInput: (
     ctx: OfflineAccumulationMergeContext<TInput>,
   ) => Promise<TInput> | TInput;
+  /**
+   * Whether the incoming mutation may be merged into the existing one. Return
+   * `false` to queue the incoming mutation as a separate entry, sent after the
+   * existing one (e.g. edits of the same record made with different
+   * permissions, which the server must receive as separate requests).
+   *
+   * Only the newest queued mutation of the operation for the same entity is a
+   * merge candidate: when it is refused, the incoming mutation is not merged
+   * into an older one either, since that would send it before the newer work.
+   * Later mutations can still merge into the separate entry.
+   *
+   * A refused merge into a mutation held behind the creation of an entity
+   * that waits for a manual resolution is the exception: unless the incoming
+   * mutation depends on that entity too, it is sent first, and the held one is
+   * sent after it once the creation is retried (overwriting fields both
+   * changed), like a mutation of an operation without `accumulation`. Later
+   * mutations keep merging into the held one, not the separate entry.
+   *
+   * Omit it to always merge.
+   */
+  canMerge?: (ctx: OfflineAccumulationMergeContext<TInput>) => boolean;
 };
 
 /**

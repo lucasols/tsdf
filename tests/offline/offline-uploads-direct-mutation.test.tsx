@@ -87,9 +87,10 @@ function createDirectUploadTestEnv({
   const requests: string[] = [];
   let uploadCalls = 0;
   let directRequestCalls = 0;
+  let activeSessionKey = sessionKey;
 
   const storeManager = createStoreManager({
-    getSessionKey: () => sessionKey,
+    getSessionKey: () => activeSessionKey,
     errorNormalizer: normalizeError,
     offlineSession: {
       ...offlineSession,
@@ -175,6 +176,10 @@ function createDirectUploadTestEnv({
     storeManager,
     requests,
     unmount: () => uiHook.unmount(),
+    /** Switches session in place (e.g. to another org), without a reload. */
+    switchSession: (nextSessionKey: string) => {
+      activeSessionKey = nextSessionKey;
+    },
     /** Uploads as the UI currently sees them through `useOfflineUploads()`. */
     getUploads: () =>
       uiHook.result.current.map((upload) =>
@@ -718,6 +723,66 @@ test('with the session gate closed, the mutation still gets the declared uploads
 
   unmount();
 });
+
+for (const gate of ['open', 'closed'] as const) {
+  test(`with the session gate ${gate}, switching org while a direct run uploads its files fails the mutation without sending it in the new org`, async () => {
+    createMockBrowserOpfs();
+    const { env, storeManager, requests, unmount, switchSession, ...actions } =
+      createDirectUploadTestEnv({
+        sessionKey: 'direct-upload-org-a',
+        offlineSession: { enabled: () => gate === 'open' },
+      });
+    await flushAllTimers();
+
+    await actions.stageUpload();
+
+    // The user switches to org B 100ms into the save, while the 200ms upload
+    // of org A's file is still being sent.
+    setTimeout(() => switchSession('direct-upload-org-b'), 100);
+    const result = await actions.saveAttachment();
+
+    // The upload already in flight finishes, but the request of org A is not
+    // sent while org B is active: the mutation fails with a normal error and
+    // goes through the usual error handling, like any failed request.
+    expect(requests).toMatchInlineSnapshot(
+      `['upload asset-1 -> server:asset-1']`,
+    );
+    expect(result.ok ? null : result.error).toMatchInlineSnapshot(`
+      Error#:
+        message: 'Offline session unavailable'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 460
+        id: 'offline-session-unavailable'
+        cause:
+          Error#:
+            message: 'Offline session unavailable'
+            name: 'OfflineSessionUnavailableError'
+            code: 460
+            id: 'offline-session-unavailable'
+    `);
+
+    // Back in org A, nothing was queued: the save is not replayed on its
+    // own. The uploaded file stays staged in org A, so saving again sends
+    // the request with its ref without uploading it again.
+    switchSession('direct-upload-org-a');
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(
+      storeManager
+        .getOfflineUploads()
+        .map((upload) => pick(upload, ['id', 'state', 'resolvedRef'])),
+    ).toMatchInlineSnapshot(
+      `- { id: 'asset-1', resolvedRef: 'server:asset-1', state: 'uploaded' }`,
+    );
+
+    (await actions.saveAttachment()).unwrap();
+    expect(requests).toMatchInlineSnapshot(
+      `['upload asset-1 -> server:asset-1', 'direct request with "server:asset-1"']`,
+    );
+
+    unmount();
+  });
+}
 
 type AttachmentCollectionOperations = {
   attachFile: CollectionOfflineOperationDefinition<

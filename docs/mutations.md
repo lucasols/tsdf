@@ -163,17 +163,46 @@ For frequent mutations (e.g., typing), use debounce to batch them:
 ```ts
 await store.performMutation({
   debounce: {
-    context: 'update-name', // debounce key
-    payload: newName, // only the latest payload is used
+    context: 'update-name',
+    payload: taskId, // calls with the same context and payload supersede each other
     ms: 500, // wait 500ms of inactivity
   },
-  mutation: () => api.updateName(newName),
+  mutation: () => api.updateName(taskId, newName),
 });
 ```
+
+Only the latest call of a debounce group (same `context` and `payload`) sends its mutation, so the payload should identify what is being edited (e.g. the entity id), not the edited value. Debounce groups are scoped to the store: calls on different stores never supersede each other.
 
 The window close stays blocked during the debounce period too, so a pending debounced mutation isn't lost if the tab is closed.
 
 Superseded calls never send their mutation, so their optimistic updates are handed to the call that superseded them: if that call fails, the state goes back to what it was before the first superseded call.
+
+### Cancelling a Debounced Mutation
+
+`cancelDebouncedMutation` cancels the call that is still waiting for its debounce window, identified by the `context` and `payload` of its `debounce` option. Use it when the pending save no longer makes sense, e.g. the user deletes the entity being edited within the window:
+
+```ts
+function deleteTask(taskId: string) {
+  // Drops the pending autosave of the task, so it's never sent or queued
+  // offline for a task that no longer exists
+  taskStore.cancelDebouncedMutation({
+    context: 'update-task',
+    payload: taskId,
+  });
+
+  return taskStore.performMutation(taskId, {
+    optimisticUpdate: () => taskStore.deleteItemState(taskId),
+    mutation: () => api.deleteTask(taskId),
+  });
+}
+```
+
+- The cancelled call, and the calls it superseded, resolve `Err({ kind: 'skipped' })` without calling `onError` or `onMutationError`.
+- Their optimistic updates are reverted right away, as on a failure, since the server never gets them: if the delete fails, the task comes back without the cancelled edits.
+- Call it before starting the replacing mutation (not inside its `optimisticUpdate`), so the replacing mutation starts from the reverted state.
+- It returns `false` and does nothing when no call of the group is waiting, e.g. once its request started or it was queued offline: a queued offline edit is handled by the queue (see `supersedes` in [Offline](./offline.md#deleting-entities-created-offline)).
+
+Deleting an entity doesn't cancel its debounced mutations automatically, since the debounce `context` and `payload` are not tied to the entity.
 
 ## Revalidation on Success
 

@@ -748,7 +748,10 @@ export function createOfflineStoreController<
     touchedReplacedResolution: boolean;
   };
 
-  /** Reads the session gate (`offlineSession.enabled`). */
+  /**
+   * Reads the session gate (`offlineSession.enabled`). `'replay-only'` keeps it
+   * open: the session disallows the queueing instead.
+   */
   function isSessionEnabled(): boolean {
     return sessionConfig.enabled?.() !== false;
   }
@@ -909,22 +912,20 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     prepared: PreparedQueuedMutation,
   ): PreparedOfflineMutation['initialAction'] {
-    const status = current.session.getStatus();
+    const cause = current.session.getStatus().isOfflineMode
+      ? current.session.getActiveOfflineCause()
+      : null;
+    if (cause !== null && isMutationQueueingAllowed(cause)) return 'queue';
 
-    if (!status.isOfflineMode) {
-      // Sent on its own, an online mutation would reach the server before
-      // the older mutations still queued for the same entities, which would
-      // then overwrite it (or it would target an entity that does not exist
-      // there yet). It joins the queue to keep the order the user made them.
-      return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
-    }
-
-    const cause = current.session.getActiveOfflineCause();
-    if (cause === null) return 'run';
-
-    if (isMutationQueueingAllowed(cause)) return 'queue';
-
-    return 'run';
+    // Sent on its own, a mutation would reach the server before the older
+    // mutations still queued for the same entities, which would then
+    // overwrite it (or it would target an entity that does not exist there
+    // yet). It joins the queue to keep the order the user made them, also
+    // when new offline work is not queued: in offline mode the server may
+    // already be reachable (e.g. an outage that ended before the next
+    // recovery check), and the direct run succeeding would replay the older
+    // work over it.
+    return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
   }
 
   async function clearOfflineStatusOnSuccess(
@@ -1045,6 +1046,15 @@ export function createOfflineStoreController<
 
   function isActiveSessionState(current: ActiveSessionState): boolean {
     return activeSession?.sessionKey === current.sessionKey;
+  }
+
+  /**
+   * Whether the app still uses the session of `current`. Unlike
+   * `isActiveSessionState`, it reads the session key again, so it notices an
+   * in-place switch (e.g. to another org) that nothing reported yet.
+   */
+  function isSessionStillActive(current: ActiveSessionState): boolean {
+    return ensureActiveSession()?.sessionKey === current.sessionKey;
   }
 
   function teardownActiveSession(): void {
@@ -2137,12 +2147,33 @@ export function createOfflineStoreController<
   function findAccumulationCandidate(args: {
     operationName: string;
     entityRefs: OfflineEntityRef[];
+    /**
+     * The queue order of the incoming mutation. Entries ordered after it come
+     * from mutations made after it (queued while it was planned), so they are
+     * neither merged into nor block a merge: they are sent after it anyway.
+     */
+    queueOrder: number;
     entries?: Iterable<OfflineQueueEntry>;
   }): OfflineQueueEntry | null {
     const normalizedEntityRefs = normalizeEntityRefs(args.entityRefs);
     let candidate: OfflineQueueEntry | null = null;
+    let newestEntityEntry: OfflineQueueEntry | null = null;
 
     for (const entry of args.entries ?? queueEntries.values()) {
+      if (getQueueOrder(entry) > args.queueOrder) continue;
+
+      if (
+        entry.entityRefs.some((entryRef) =>
+          args.entityRefs.some((entityRef) =>
+            isSameEntityRef(entityRef, entryRef),
+          ),
+        ) &&
+        (!newestEntityEntry ||
+          compareQueueEntries(entry, newestEntityEntry) > 0)
+      ) {
+        newestEntityEntry = entry;
+      }
+
       if (entry.operation !== args.operationName) continue;
       if (!isUnsentQueueEntry(entry)) continue;
       if (entryIdsFromAnotherTab.has(entry.id)) continue;
@@ -2159,7 +2190,14 @@ export function createOfflineStoreController<
       }
     }
 
-    return candidate;
+    // Newer queued work of the entity (of another operation, from another
+    // tab, or not mergeable) is sent after the candidate and could overwrite
+    // the incoming change merged into it, so the mutation is queued after it.
+    return candidate &&
+      (!newestEntityEntry ||
+        compareQueueEntries(newestEntityEntry, candidate) <= 0)
+      ? candidate
+      : null;
   }
 
   /**
@@ -2171,12 +2209,19 @@ export function createOfflineStoreController<
   }
 
   function hasReservedMutationBetween(
+    sessionKey: string,
     afterQueueOrder: number,
     beforeQueueOrder: number,
     entityRefs: OfflineEntityRef[],
   ): boolean {
     for (const [queueOrder, prepared] of reservedMutations) {
-      if (queueOrder <= afterQueueOrder || queueOrder >= beforeQueueOrder) {
+      // A mutation of a session the app switched away from is never queued
+      // in this one
+      if (
+        prepared.currentSessionKey !== sessionKey ||
+        queueOrder <= afterQueueOrder ||
+        queueOrder >= beforeQueueOrder
+      ) {
         continue;
       }
       const runEntityRefs = getPreparedEntityRefs(prepared);
@@ -4326,31 +4371,41 @@ export function createOfflineStoreController<
         : findAccumulationCandidate({
             operationName,
             entityRefs,
+            queueOrder,
             entries: workingQueue.values(),
           });
-      // Merged, the input is replayed at the candidate's place. A direct
-      // request that fell back to the queue is older than the entries queued
-      // while it was in flight, and a mutation called between the candidate
-      // and this one but not queued yet would be replayed after it: either way
-      // the work would reach the server out of call order, so the mutation
-      // keeps its own entry instead.
-      const candidateQueueOrder = candidateEntry
-        ? getQueueOrder(candidateEntry)
-        : undefined;
+      // Merged, the input is replayed at the candidate's place. A mutation
+      // called between the candidate and this one but not queued yet (checking
+      // the connection, or sent as a direct request that can fall back to the
+      // queue) would then be replayed after it, out of call order, so this
+      // mutation keeps its own entry instead.
       const existingEntry =
-        candidateQueueOrder !== undefined &&
-        candidateQueueOrder < queueOrder &&
-        !hasReservedMutationBetween(candidateQueueOrder, queueOrder, entityRefs)
+        candidateEntry &&
+        !hasReservedMutationBetween(
+          current.sessionKey,
+          getQueueOrder(candidateEntry),
+          queueOrder,
+          entityRefs,
+        )
           ? candidateEntry
           : undefined;
       const existingWork = heldResolution ?? existingEntry;
+      const mergeContext = existingWork && {
+        sessionKey: current.sessionKey,
+        existingInput: existingWork.input,
+        incomingInput: validatedInput,
+      };
 
-      if (existingWork) {
-        const mergedInput = await operation.accumulation.mergeInput({
-          sessionKey: current.sessionKey,
-          existingInput: existingWork.input,
-          incomingInput: validatedInput,
-        });
+      // A refused merge queues the incoming mutation as a separate entry
+      // after the existing work. Refused against held work, it is sent first
+      // unless it is held behind the same creation, like a mutation of an
+      // operation without `accumulation`.
+      if (
+        mergeContext &&
+        operation.accumulation.canMerge?.(mergeContext) !== false
+      ) {
+        const mergedInput =
+          await operation.accumulation.mergeInput(mergeContext);
         const validatedMergedInput = validateWithSchema(
           operation.inputSchema,
           mergedInput,
@@ -4549,6 +4604,10 @@ export function createOfflineStoreController<
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
     }
+    // Reserved right away: a mutation made while this one is planned is
+    // queued after it, in the order the user made them. A reserved order was
+    // already taken when the mutation was called.
+    if (nextQueueOrderValue !== null) nextQueueOrder = nextQueueOrderValue;
     let plannedMutation: PlannedQueuedMutation;
     let pendingEntityQueriesLoaded = false;
     for (;;) {
@@ -4575,12 +4634,18 @@ export function createOfflineStoreController<
       // being merged into before it is committed. Merging into it then would
       // drop the incoming input or send the existing one twice, so the
       // mutation is planned again. The same applies to held work merged into
-      // when it changes meanwhile. The check runs with no `await` before the
-      // commit below.
+      // when it changes meanwhile, and to an entry that is no longer the
+      // newest candidate (e.g. an earlier concurrent mutation whose merge was
+      // refused queued a newer one, which merging into the older entry would
+      // send after it). The check runs with no `await` before the commit
+      // below.
       if (
         (!plannedMutation.accumulatedEntry ||
-          queueEntries.get(plannedMutation.accumulatedEntry.id) ===
-            plannedMutation.accumulatedEntry) &&
+          findAccumulationCandidate({
+            operationName: plannedMutation.operationName,
+            entityRefs: plannedMutation.accumulatedEntry.entityRefs,
+            queueOrder,
+          }) === plannedMutation.accumulatedEntry) &&
         (!plannedMutation.accumulatedResolution ||
           resolutions.get(plannedMutation.accumulatedResolution.id) ===
             plannedMutation.accumulatedResolution)
@@ -4609,7 +4674,6 @@ export function createOfflineStoreController<
       validatedInput: unknown;
       pendingEntities: PendingTempEntity[];
     }> = [];
-    const previousNextQueueOrder = nextQueueOrder;
 
     try {
       const appliedMutation: AppliedQueuedMutation = {
@@ -4679,8 +4743,6 @@ export function createOfflineStoreController<
         appliedMutation.removedResolutionsApplied.push(removedResolution);
         await removeResolution(removedResolution.id, current, true);
       }
-
-      if (nextQueueOrderValue !== null) nextQueueOrder = nextQueueOrderValue;
 
       if (
         storeAdapter.applyPendingEntity &&
@@ -4771,7 +4833,6 @@ export function createOfflineStoreController<
         }
       }
 
-      if (nextQueueOrderValue !== null) nextQueueOrder = previousNextQueueOrder;
       refreshDerivedState(current);
 
       throw error;
@@ -5009,8 +5070,18 @@ export function createOfflineStoreController<
       // Set when the replay failed while resolving a dependency upload, which
       // means `execute` was never called for this attempt.
       let failedUploadId: string | undefined;
+      let executeStarted = false;
+      // The app can switch to another session (e.g. another org) without a
+      // reload while the replay awaits: the work of the old session must not
+      // be sent, nor judged by app callbacks, from the new one.
+      const throwIfSessionChanged = (): void => {
+        if (!isSessionStillActive(current)) {
+          throw new OfflineSessionUnavailableError();
+        }
+      };
 
       try {
+        throwIfSessionChanged();
         const shouldPrepareReplayCheckCtx = Boolean(
           (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) ||
           conflictHandling,
@@ -5024,11 +5095,14 @@ export function createOfflineStoreController<
             }
           : null;
 
+        if (replayCheckCtx) throwIfSessionChanged();
+
         if (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) {
           if (!replayCheckCtx) {
             throw new Error('Replay check context was not prepared');
           }
           const shouldSkip = await operation.shouldSkipSync(replayCheckCtx);
+          throwIfSessionChanged();
 
           if (shouldSkip) {
             // The server already has the change: a delete is done.
@@ -5047,6 +5121,7 @@ export function createOfflineStoreController<
                 ({ ...replayCheckBaseCtx, serverSnapshot: undefined } as const),
             )
           : false;
+        if (conflictHandling) throwIfSessionChanged();
 
         if (conflict) {
           if (!conflictHandling) {
@@ -5084,6 +5159,7 @@ export function createOfflineStoreController<
 
         const dependencyUploads = await current.session.resolveReplayUploadIds(
           entryToUse.dependencyUploadIds ?? [],
+          () => isSessionStillActive(current),
         );
         if (dependencyUploads.failedUploadId !== undefined) {
           failedUploadId = dependencyUploads.failedUploadId;
@@ -5103,6 +5179,8 @@ export function createOfflineStoreController<
             resolvedRefsById: dependencyUploads.refs,
           }),
         );
+        throwIfSessionChanged();
+        executeStarted = true;
         const result = await operation.execute(executeContext);
 
         if (entryToUse.tempIds) {
@@ -5143,6 +5221,15 @@ export function createOfflineStoreController<
         // the files does not hold back the next queued entry.
         void deleteOrphanedDependencyUploads(current, [entryToUse]);
       } catch (error) {
+        // The session changed before the entry was sent: whatever failed
+        // (the check above, or an upload sent before the switch) says nothing
+        // about the entry, so it stays queued for its session as it was, to
+        // be replayed once that session is active again.
+        if (!executeStarted && !isSessionStillActive(current)) {
+          await persistEntry(nextEntry, current, true);
+          return;
+        }
+
         const lastError = { message: unknownToError(error).message };
         const failureCtx: OfflineStoreFailureContext = {
           phase: 'sync',
@@ -5309,7 +5396,21 @@ export function createOfflineStoreController<
       // failure is classified, since it is retried if the mutation is queued.
       resolveDirectUploads:
         dependencyUploadIds.length > 0
-          ? () => current.session.resolveReplayUploadIds(dependencyUploadIds)
+          ? async () => {
+              const resolution = await current.session.resolveReplayUploadIds(
+                dependencyUploadIds,
+                () => isSessionStillActive(current),
+              );
+              // The app switched to another session while the uploads were
+              // sent: the request is not sent from the new session. Thrown
+              // here, the run fails with this error (`classifyError` rejects
+              // for a session that is no longer active), nothing is queued
+              // and the uploads stay staged in their session.
+              if (!isSessionStillActive(current)) {
+                throw new OfflineSessionUnavailableError();
+              }
+              return resolution;
+            }
           : null,
       // Like replay: the uploads that did not fail are left untouched.
       markUploadsFailed: () =>
@@ -5386,10 +5487,25 @@ export function createOfflineStoreController<
 
     // Nothing is queued, so a failed upload is `failed` right away, as with
     // `resolveOfflineUploads`.
+    let resolvedRefsById: Record<string, ValidPayload>;
+    try {
+      resolvedRefsById = await current.session.resolveUploadIds(
+        dependencyUploadIds,
+        () => isSessionStillActive(current),
+      );
+    } catch (error) {
+      if (!isSessionStillActive(current)) {
+        throw new OfflineSessionUnavailableError();
+      }
+      throw error;
+    }
+    // As with a direct run that can be queued: the request is not sent from
+    // a session the app switched to while the uploads were sent.
+    if (!isSessionStillActive(current)) {
+      throw new OfflineSessionUnavailableError();
+    }
     const result = await directMutation(
-      createDirectMutationContext(
-        await current.session.resolveUploadIds(dependencyUploadIds),
-      ),
+      createDirectMutationContext(resolvedRefsById),
     );
     void deleteOrphanedDependencyUploads(current, [{ dependencyUploadIds }]);
     return result;

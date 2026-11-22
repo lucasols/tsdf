@@ -1,7 +1,13 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
+import {
+  rc_array,
+  rc_number,
+  rc_object,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
 import { expect, test } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import { createStoreManager, opfsOfflineUploadAdapter } from '../../src/main';
@@ -26,6 +32,7 @@ import {
 import { docSchema } from './offlineTestShared';
 import {
   network,
+  resolveWithin,
   setupOfflineUploadTests,
   type UploadDependencyOperations,
 } from './offlineUploadsTestShared';
@@ -1183,4 +1190,519 @@ test('replacing a staged upload keeps its metadata unless new metadata is provid
   `);
 
   uploadHook.unmount();
+});
+
+const ORG_A = 'offline-upload-org-a';
+const ORG_B = 'offline-upload-org-b';
+const ORG_SWITCH_STORE = 'offline-upload-org-switch-doc';
+
+/**
+ * An app that switches org in place (the session key changes without a
+ * reload), with an edit queued offline in org A that depends on `fileIds`.
+ * Each upload takes 1s, then `uploadResult` decides whether it succeeds.
+ * The switch happens 500ms after reconnecting.
+ */
+async function setupOrgSwitchReplay(args: {
+  fileIds: string[];
+  uploadConcurrency?: number;
+  uploadResult?: (id: string) => 'ok' | 'rejected';
+  /**
+   * The edit loads the server snapshot (1s) and checks it for conflicts
+   * before it is sent.
+   */
+  checksServerConflicts?: boolean;
+  /** A slow device: saving an upload as `uploading` takes this long. */
+  uploadingStateSaveMs?: number;
+  switchMark?: string;
+}) {
+  createMockBrowserOpfs();
+  const session = { key: ORG_A };
+  const events = createLoggerStore();
+  const { uploadingStateSaveMs } = args;
+
+  network.setOffline();
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => session.key,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter:
+          uploadingStateSaveMs === undefined
+            ? opfsOfflineUploadAdapter
+            : {
+                save: async (sessionKey, id, record) => {
+                  if (record.state === 'uploading') {
+                    await new Promise((resolve) =>
+                      setTimeout(resolve, uploadingStateSaveMs),
+                    );
+                  }
+                  await opfsOfflineUploadAdapter.save(sessionKey, id, record);
+                },
+                load: (sessionKey, id) =>
+                  opfsOfflineUploadAdapter.load(sessionKey, id),
+                list: (sessionKey) => opfsOfflineUploadAdapter.list(sessionKey),
+                remove: (sessionKey, id) =>
+                  opfsOfflineUploadAdapter.remove(sessionKey, id),
+                clearSession: (sessionKey) =>
+                  opfsOfflineUploadAdapter.clearSession(sessionKey),
+              },
+        concurrency: args.uploadConcurrency,
+        upload: async ({ id, sessionKey }) => {
+          events.add({ event: `upload-start ${id} (owner: ${sessionKey})` });
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          if (args.uploadResult?.(id) === 'rejected') {
+            events.add({ event: `upload-rejected ${id}` });
+            throw new Error(`upload of ${id} rejected`);
+          }
+          events.add({ event: `upload-finish ${id}` });
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<
+    number,
+    {
+      updateWithAttachments: DocumentOfflineOperationDefinition<
+        { value: number },
+        { input: { attachmentIds: string[]; value: number } }
+      >;
+    }
+  >(1, {
+    id: ORG_SWITCH_STORE,
+    getSessionKey: () => session.key,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateWithAttachments: {
+            inputSchema: rc_object({
+              attachmentIds: rc_array(rc_string),
+              value: rc_number,
+            }),
+            kind: 'update',
+            dependsOnUploads: ({ input }) => input.attachmentIds,
+            ...(args.checksServerConflicts
+              ? {
+                  getServerSnapshot: async () => {
+                    events.add({
+                      event: `get-server-snapshot while ${session.key} is active`,
+                    });
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return { value: 1 };
+                  },
+                  conflictHandling: {
+                    // Never stored: the edit has no conflict
+                    schema: rc_unknown,
+                    detectConflict: () => {
+                      events.add({
+                        event: `detect-conflict while ${session.key} is active`,
+                      });
+                      return false;
+                    },
+                  },
+                }
+              : {}),
+            execute: async (ctx) => {
+              events.add({
+                event: `execute while ${session.key} is active`,
+                refs: ctx.uploads.resolvedRefsById,
+              });
+              await env.serverMock.delayedSetData(ctx.input.value);
+              return { value: ctx.input.value };
+            },
+          },
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  // Offline in org A: stage the files and queue the edit that needs them.
+  for (const id of args.fileIds) {
+    await resolveWithin(
+      storeManager.saveOfflineUpload({
+        id,
+        file: new File([id], `${id}.txt`, { type: 'text/plain' }),
+      }),
+    );
+  }
+  await resolveWithin(
+    env.apiStore.performMutation({
+      mutation: () => Promise.resolve({ value: 2 }),
+      offline: {
+        operation: 'updateWithAttachments',
+        input: { attachmentIds: args.fileIds, value: 2 },
+      },
+    }),
+  );
+
+  // Back online, the replay starts uploading the files of org A; the user
+  // switches to org B while the first upload is still being sent.
+  events.addMark('back online in org A');
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(500);
+  events.addMark(
+    args.switchMark ?? 'switch to org B while the first upload is being sent',
+  );
+  session.key = ORG_B;
+  await advanceTime(5_000);
+
+  return {
+    events,
+    getOrgAQueue: () =>
+      getOfflineQueueEntries(ORG_A, ORG_SWITCH_STORE).map((entry) =>
+        pick(getOfflineQueueEntryData(entry), [
+          'syncState',
+          'attempts',
+          'lastError',
+          'input',
+        ]),
+      ),
+    /** The uploads and resolutions of the active session (org A once back). */
+    getUploadsAndResolutions: () => ({
+      uploads: storeManager
+        .getOfflineUploads()
+        .map((upload) => `${upload.id}: ${upload.state}`),
+      resolutions: storeManager.getOfflineResolutions(),
+    }),
+    switchBackToOrgA: () => {
+      events.addMark('switch back to org A');
+      session.key = ORG_A;
+    },
+    /** The next fetch of the store resumes the replay of the active session. */
+    fetchAndWaitForReplay: async () => {
+      env.scheduleFetch('highPriority');
+      await advanceTime(5_000);
+    },
+  };
+}
+
+test('switching org while a replayed mutation waits for its uploads keeps the work queued for the old org instead of sending it in the new one', async () => {
+  // One upload at a time: the second file is still waiting for its turn when
+  // the user switches org.
+  const { events, getOrgAQueue, switchBackToOrgA, fetchAndWaitForReplay } =
+    await setupOrgSwitchReplay({
+      fileIds: ['file-1', 'file-2'],
+      uploadConcurrency: 1,
+    });
+
+  // The upload already in flight finishes, but nothing else of org A runs
+  // while org B is active: the second file is not sent and the edit does not
+  // reach the server.
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+
+    >>> switch to org B while the first upload is being sent
+
+    -> event: upload-finish file-1
+    "
+  `);
+
+  // The edit is still queued for org A as it was: no failed attempt is
+  // recorded, so it does not end up in manual resolution.
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`
+    - attempts: 0
+      input:
+        attachmentIds: ['file-1', 'file-2']
+        value: 2
+      syncState: 'pending'
+  `);
+
+  // Switching back to org A resumes the work: the file already uploaded is
+  // not sent again, and the edit is replayed with both refs.
+  switchBackToOrgA();
+  await fetchAndWaitForReplay();
+
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+
+    >>> switch to org B while the first upload is being sent
+
+    -> event: upload-finish file-1
+    ⋅⋅⋅
+    >>> switch back to org A
+
+    -> event: upload-start file-2 (owner: offline-upload-org-a)
+    -> event: upload-finish file-2
+    ┌─
+    ⋅ event: execute while offline-upload-org-a is active
+    ⋅ refs: {file-1:server:file-1, file-2:server:file-2}
+    └─
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`[]`);
+});
+
+test('an upload that finishes after switching org does not let the old org mutation be sent in the new org', async () => {
+  const { events, getOrgAQueue, switchBackToOrgA, fetchAndWaitForReplay } =
+    await setupOrgSwitchReplay({ fileIds: ['file-1'] });
+
+  // The only upload of the edit finishes after the switch, which is when the
+  // replay would send the edit: it waits for org A instead.
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+
+    >>> switch to org B while the first upload is being sent
+
+    -> event: upload-finish file-1
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`
+    - attempts: 0
+      input:
+        attachmentIds: ['file-1']
+        value: 2
+      syncState: 'pending'
+  `);
+
+  switchBackToOrgA();
+  await fetchAndWaitForReplay();
+
+  // Back in org A, the edit is sent with the ref uploaded before the switch.
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+
+    >>> switch to org B while the first upload is being sent
+
+    -> event: upload-finish file-1
+    ⋅⋅⋅
+    >>> switch back to org A
+
+    ┌─
+    ⋅ event: execute while offline-upload-org-a is active
+    ⋅ refs: {file-1:server:file-1}
+    └─
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`[]`);
+});
+
+test('an upload rejected after switching org leaves the old org mutation queued instead of sending it to manual resolution', async () => {
+  // The first transport attempt is rejected after the switch, e.g. because
+  // the app's credentials now belong to org B.
+  let uploadAttempts = 0;
+  const {
+    events,
+    getOrgAQueue,
+    getUploadsAndResolutions,
+    switchBackToOrgA,
+    fetchAndWaitForReplay,
+  } = await setupOrgSwitchReplay({
+    fileIds: ['file-1'],
+    uploadResult: () => {
+      uploadAttempts += 1;
+      return uploadAttempts === 1 ? 'rejected' : 'ok';
+    },
+  });
+
+  // An unclassified upload failure normally moves the edit to manual
+  // resolution and marks the upload `failed`. Rejected after the switch, it
+  // says nothing about the edit, which stays queued as it was.
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+
+    >>> switch to org B while the first upload is being sent
+
+    -> event: upload-rejected file-1
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`
+    - attempts: 0
+      input:
+        attachmentIds: ['file-1']
+        value: 2
+      syncState: 'pending'
+  `);
+
+  // Back in org A, before the replay resumes: the upload is still `pending`,
+  // not `failed`, and no resolution was created for the edit.
+  switchBackToOrgA();
+  expect(getUploadsAndResolutions()).toMatchInlineSnapshot(`
+    resolutions: []
+    uploads: ['file-1: pending']
+  `);
+
+  // The upload is sent again and the edit replays.
+  await fetchAndWaitForReplay();
+
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+
+    >>> switch to org B while the first upload is being sent
+
+    -> event: upload-rejected file-1
+    ⋅⋅⋅
+    >>> switch back to org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+    -> event: upload-finish file-1
+    ┌─
+    ⋅ event: execute while offline-upload-org-a is active
+    ⋅ refs: {file-1:server:file-1}
+    └─
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`[]`);
+  expect(getUploadsAndResolutions()).toMatchInlineSnapshot(`
+    resolutions: []
+    uploads: []
+  `);
+});
+
+test('switching org while a replayed mutation loads its server snapshot keeps it queued without checking it for conflicts or sending it', async () => {
+  // No uploads: the edit only loads the server snapshot (1s) before it is
+  // checked for conflicts and sent, and the user switches org meanwhile.
+  const {
+    events,
+    getOrgAQueue,
+    getUploadsAndResolutions,
+    switchBackToOrgA,
+    fetchAndWaitForReplay,
+  } = await setupOrgSwitchReplay({
+    fileIds: [],
+    checksServerConflicts: true,
+    switchMark: 'switch to org B while the server snapshot is loading',
+  });
+
+  // The snapshot of org A is not judged, nor the edit sent, from org B: the
+  // app's conflict check could compare it with org B's data.
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: get-server-snapshot while offline-upload-org-a is active
+
+    >>> switch to org B while the server snapshot is loading
+    "
+  `);
+
+  // Still queued for org A as it was, with no attempt counted.
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`
+    - attempts: 0
+      input:
+        attachmentIds: []
+        value: 2
+      syncState: 'pending'
+  `);
+
+  // Back in org A, before the replay resumes: no resolution was created.
+  switchBackToOrgA();
+  expect(getUploadsAndResolutions().resolutions).toMatchInlineSnapshot(`[]`);
+
+  // The snapshot is loaded again and the edit is sent.
+  await fetchAndWaitForReplay();
+
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    -> event: get-server-snapshot while offline-upload-org-a is active
+
+    >>> switch to org B while the server snapshot is loading
+    ⋅⋅⋅
+    >>> switch back to org A
+
+    -> event: get-server-snapshot while offline-upload-org-a is active
+    -> event: detect-conflict while offline-upload-org-a is active
+    -> event: execute while offline-upload-org-a is active ⋅ refs: {}
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`[]`);
+});
+
+test('switching org while the upload state is saved on a slow device does not send the old org upload', async () => {
+  // Saving the upload as `uploading` takes 1s, and the user switches org
+  // while it is saved, just before the file would be sent.
+  const {
+    events,
+    getOrgAQueue,
+    getUploadsAndResolutions,
+    switchBackToOrgA,
+    fetchAndWaitForReplay,
+  } = await setupOrgSwitchReplay({
+    fileIds: ['file-1'],
+    uploadingStateSaveMs: 1_000,
+    switchMark: 'switch to org B while the upload state is being saved',
+  });
+
+  // The file of org A is never sent while org B is active.
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    >>> switch to org B while the upload state is being saved
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`
+    - attempts: 0
+      input:
+        attachmentIds: ['file-1']
+        value: 2
+      syncState: 'pending'
+  `);
+
+  // Back in org A, the upload is `pending` again, with no failure recorded.
+  switchBackToOrgA();
+  expect(getUploadsAndResolutions()).toMatchInlineSnapshot(`
+    resolutions: []
+    uploads: ['file-1: pending']
+  `);
+
+  await fetchAndWaitForReplay();
+
+  expect(events.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> back online in org A
+
+    >>> switch to org B while the upload state is being saved
+    ⋅⋅⋅
+    >>> switch back to org A
+
+    -> event: upload-start file-1 (owner: offline-upload-org-a)
+    -> event: upload-finish file-1
+    ┌─
+    ⋅ event: execute while offline-upload-org-a is active
+    ⋅ refs: {file-1:server:file-1}
+    └─
+    "
+  `);
+  expect(getOrgAQueue()).toMatchInlineSnapshot(`[]`);
 });

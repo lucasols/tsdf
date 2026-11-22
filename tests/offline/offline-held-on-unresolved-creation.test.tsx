@@ -19,9 +19,10 @@ describe('tasks whose creation waits for a manual decision', () => {
   async function createTaskWhoseCreationKeepsFailing(
     sessionKey: string,
     storeName: string,
+    options?: Parameters<typeof createTasksEnv>[3],
   ) {
     network.setOffline();
-    const env = createTasksEnv(sessionKey, storeName);
+    const env = createTasksEnv(sessionKey, storeName, undefined, options);
     const list = env.renderTaskList();
     await flushAllTimers();
 
@@ -345,6 +346,86 @@ describe('tasks whose creation waits for a manual decision', () => {
     expect(pick(env.serverTable.getAll()['tasks||1'], ['name', 'parentId']))
       .toMatchInlineSnapshot(`
       name: 'Write final report'
+      parentId: 'tasks||3'
+    `);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
+  test('when moves and renames are kept apart, a rename made after a held move is sent first, and a later move is merged into the held move', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWhoseCreationKeepsFailing(
+        'refused-merge-held-move-session',
+        'refused-merge-held-move-store',
+        { keepMovesAndRenamesApart: true },
+      );
+
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+
+    // Offline: move an existing task under the task whose creation waits for
+    // a decision (held behind it), rename it, then move it again with another
+    // name. The app never merges a move with a rename.
+    await env.editTask({ itemId: 'tasks||1', parentId: 'temp:Plan trip' });
+    await env.editTask({ itemId: 'tasks||1', name: 'Write draft' });
+    await env.editTask({
+      itemId: 'tasks||1',
+      name: 'Write trip report',
+      parentId: 'temp:Plan trip',
+    });
+
+    // The rename cannot be merged into the held move. It does not need the
+    // waiting task, so it is queued on its own, and is sent before the move.
+    // The last move is merged into the held move, not into the queued rename.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { itemId: 'tasks||1', name: 'Write draft' }
+        operation: 'editTask'
+        syncState: 'pending'
+    `);
+    expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+      .toMatchInlineSnapshot(`
+        - blocks: 1
+          error: 'connection lost'
+          input: 'name: "Plan trip"'
+          kind: 'retry-exhausted'
+          on: 'item:temp:Plan trip'
+          op: 'createTask'
+          tempIds: ['temp:Plan trip']
+        - blockedBy: 1
+          error: 'Blocked by unresolved dependency'
+          input: 'itemId: "tasks||1", name: "Write trip report", parentId: "temp:Plan trip"'
+          kind: 'retry-exhausted'
+          on: 'item:tasks||1'
+          op: 'editTask'
+      `);
+
+    // Back online the rename is sent; then the user sends the creation again,
+    // and the held move follows it with the id the server assigned.
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    expect(env.sentRequests.slice(3)).toMatchInlineSnapshot(`
+      - 'editTask tasks||1 {"name":"Write draft"}'
+      - 'createTask "Plan trip"'
+      - 'editTask tasks||1 {"name":"Write trip report","parentId":"tasks||3"}'
+    `);
+    // The server ends with the last move and name the user made
+    expect(pick(env.serverTable.getAll()['tasks||1'], ['name', 'parentId']))
+      .toMatchInlineSnapshot(`
+      name: 'Write trip report'
       parentId: 'tasks||3'
     `);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
