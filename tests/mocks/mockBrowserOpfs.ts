@@ -147,6 +147,11 @@ const opfsSnapshotFiles = new WeakSet<Blob>();
 class MockOpfsBackedFile extends NativeFile {
   readonly #snapshot: Blob | undefined;
 
+  // Files created before the mock was installed are still files
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return value instanceof NativeFile;
+  }
+
   constructor(parts: BlobPart[], name: string, options?: FilePropertyBag) {
     super(parts, name, options);
     const [part] = parts;
@@ -247,6 +252,7 @@ export class MockBrowserOpfsEnvironment {
   readonly operations: MockBrowserOpfsOperation[] = [];
 
   readonly #removeEntryFailures = new Map<string, number>();
+  readonly #writeFailures = new Map<string, number>();
   readonly #handlePaths = new WeakMap<FileSystemHandle, string[]>();
   readonly #pendingLatencies = new Set<Promise<void>>();
   readonly #root = createDirectoryNode('');
@@ -309,6 +315,20 @@ export class MockBrowserOpfsEnvironment {
     }
 
     this.#removeEntryFailures.set(normalizedPath, times);
+  }
+
+  /**
+   * Fails the next `times` writes of the file at `path` when the writable is
+   * closed, like a write over the storage quota, keeping the previous content.
+   */
+  failWrite(path: string, times = 1): void {
+    const normalizedPath = normalizePath(path);
+    if (times <= 0) {
+      this.#writeFailures.delete(normalizedPath);
+      return;
+    }
+
+    this.#writeFailures.set(normalizedPath, times);
   }
 
   ensureDir(path: string): void {
@@ -763,6 +783,7 @@ export class MockBrowserOpfsEnvironment {
     readyAtRef: ReadyAtRef,
   ): FileSystemFileHandle {
     const operations = this.operations;
+    const writeFailures = this.#writeFailures;
     const waitLatency = this.#waitLatency.bind(this);
     const getReadDelay = this.#getReadDelay.bind(this);
     const handlePaths = this.#handlePaths;
@@ -940,6 +961,15 @@ export class MockBrowserOpfsEnvironment {
             readyAtRef.value = streamReadyAtRef.value;
             let liveNode: MockFileNode;
             try {
+              const remainingFailures = writeFailures.get(path) ?? 0;
+              if (remainingFailures > 0) {
+                if (remainingFailures === 1) writeFailures.delete(path);
+                else writeFailures.set(path, remainingFailures - 1);
+                throw createDomException(
+                  'QuotaExceededError',
+                  'The quota has been exceeded.',
+                );
+              }
               liveNode = getCurrentFileNode();
             } catch (error) {
               operations.push({

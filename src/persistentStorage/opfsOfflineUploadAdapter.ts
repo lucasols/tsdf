@@ -158,12 +158,14 @@ function getUploadPath(sessionKey: string, encodedId: string): string {
 class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
   #rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
   /**
-   * The file each upload path's stored binary holds, for the binaries this
-   * driver wrote or restored. Restored files are read lazily from their
-   * binary, so writing one over its own binary would leave it unreadable
-   * (browsers fail reads of a file snapshot once the file changed).
+   * The files known to hold the bytes of each upload path's stored binary:
+   * the file this driver last wrote there and the files restored from it
+   * since. Restored files are read lazily from their binary, so writing one
+   * over its own binary would leave it unreadable (browsers fail reads of a
+   * file snapshot once the file changed). Held weakly, so files the session
+   * no longer holds aren't kept in memory.
    */
-  readonly #storedFiles = new Map<string, File>();
+  readonly #storedFiles = new Map<string, WeakSet<File>>();
 
   async save<TResolvedRef extends ValidPayload>(
     sessionKey: string,
@@ -181,7 +183,7 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     // is only written when it doesn't already hold this file. It is written
     // before the metadata, so a failed binary write keeps the previous record.
     const isFileStored =
-      this.#storedFiles.get(uploadPath) === file &&
+      this.#storedFiles.get(uploadPath)?.has(file) === true &&
       (await getFileHandleIfExists(uploadDir, BINARY_FILE_NAME)) !== null;
     if (!isFileStored) {
       const binaryHandle = await uploadDir.getFileHandle(BINARY_FILE_NAME, {
@@ -190,16 +192,25 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
       // The binary no longer holds the previous file once the write starts
       this.#storedFiles.delete(uploadPath);
       await writeFile(binaryHandle, file);
-      this.#storedFiles.set(uploadPath, file);
+      this.#storedFiles.set(uploadPath, new WeakSet([file]));
     }
 
-    const metadataHandle = await uploadDir.getFileHandle(METADATA_FILE_NAME, {
-      create: true,
-    });
-    await writeFile(
-      metadataHandle,
-      serializeStoredUploadMetadataRecord(metadataRecord),
-    );
+    try {
+      const metadataHandle = await uploadDir.getFileHandle(METADATA_FILE_NAME, {
+        create: true,
+      });
+      await writeFile(
+        metadataHandle,
+        serializeStoredUploadMetadataRecord(metadataRecord),
+      );
+    } catch (error) {
+      // The previous metadata doesn't describe the new binary, so it is
+      // removed instead of being restored with it
+      if (!isFileStored) {
+        await uploadDir.removeEntry(METADATA_FILE_NAME).catch(() => {});
+      }
+      throw error;
+    }
   }
 
   async load<TResolvedRef extends ValidPayload>(
@@ -321,7 +332,9 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
           lastModified: metadataRecord.lastModified,
         },
       );
-      this.#storedFiles.set(uploadPath, file);
+      const storedFiles = this.#storedFiles.get(uploadPath);
+      if (storedFiles) storedFiles.add(file);
+      else this.#storedFiles.set(uploadPath, new WeakSet([file]));
 
       return { ...metadataRecord, file };
     } catch {

@@ -1267,6 +1267,50 @@ test('undoing a file replacement by staging the previous file again keeps that f
   `);
 });
 
+test('a replacement whose metadata write fails is never restored as the new file under the previous file name', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-replace-metadata-failure-session';
+
+  // --- Setup: offline, the user attaches a photo ---
+  network.setOffline();
+  const session = createOpfsUploadSession(sessionKey);
+  await flushAllTimers();
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'photo',
+        file: textFile('original photo', 'original.jpg', 1),
+      }),
+    )
+  ).unwrap();
+
+  // --- Action: they replace it, and storage runs out right after the new
+  // photo's bytes were written, so its metadata can't be saved ---
+  mockBrowserOpfs.failWrite(
+    getOfflineUploadOpfsPath(sessionKey, 'photo', 'metadata.json'),
+  );
+  const replaceResult = await resolveAfterAllTimers(
+    session.replaceOfflineUpload({
+      id: 'photo',
+      file: textFile('edited photo, longer', 'edited.jpg', 2),
+    }),
+  );
+
+  // The failure is reported to the app
+  expect(replaceResult.ok).toBe(false);
+
+  // --- Reload: the previous metadata isn't paired with the edited photo's
+  // bytes, which would restore a record whose name, type, size and upload
+  // state don't match its file. The upload is not restored at all ---
+  resetSessionForTests();
+  const reloadedSession = createOpfsUploadSession(sessionKey);
+  const restoredFile = (
+    await resolveAfterAllTimers(reloadedSession.loadOfflineUpload('photo'))
+  ).unwrap();
+
+  expect(restoredFile).toBeNull();
+});
+
 test('replacing an upload right after a restart keeps the metadata saved before the restart', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'offline-upload-metadata-replace-after-restart-session';
