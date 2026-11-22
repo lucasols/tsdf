@@ -2775,12 +2775,12 @@ export function createCollectionStore<
     // A plain online mutation is called with the payload only. An
     // offline-enabled one is called with the final payload of an item whose
     // creation was saved since the call (e.g. while it was prepared).
-    const directMutation = async (ctx?: OfflineDirectMutationContext) =>
-      unwrapTSDFResult(
-        await (ctx
-          ? mutationFn(resolveSavedTempPayloads(payloadToUse), ctx)
-          : mutationFn(payloadToUse)),
-      );
+    let sentPayload = payloadToUse;
+    const directMutation = async (ctx?: OfflineDirectMutationContext) => {
+      if (!ctx) return unwrapTSDFResult(await mutationFn(payloadToUse));
+      sentPayload = resolveSavedTempPayloads(payloadToUse);
+      return unwrapTSDFResult(await mutationFn(sentPayload, ctx));
+    };
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
       // An offline-enabled mutation always gets its uploads context
@@ -3037,11 +3037,13 @@ export function createCollectionStore<
         : undefined,
       (result) => {
         accepted = true;
-        // The temp item of a creation saved since the call was replaced by
-        // the saved one, which is the item the server changed
-        const finalPayload = offline
-          ? resolveSavedTempPayloads(payloadToUse)
-          : payloadToUse;
+        // An online run changed the items it was sent for, even if their temp
+        // ids were reused since. A queued one is replayed for the saved item
+        // of a creation saved since the call.
+        const finalPayload =
+          result.kind === 'online'
+            ? sentPayload
+            : resolveSavedTempPayloads(payloadToUse);
         if (revalidateOnSuccess && affectedItems.length > 0) {
           invalidateItem(finalPayload);
         }

@@ -1988,12 +1988,12 @@ export function createMutationApi<
     // A plain online mutation is called with the payload only. An
     // offline-enabled one is called with the final payload of an item whose
     // creation was saved since the call (e.g. during the debounce window).
-    const directMutation = async (ctx?: OfflineDirectMutationContext) =>
-      unwrapTSDFResult(
-        await (ctx
-          ? mutationFn(resolveSavedTempPayloads(payloadToUse), ctx)
-          : mutationFn(payloadToUse)),
-      );
+    let sentPayload = payloadToUse;
+    const directMutation = async (ctx?: OfflineDirectMutationContext) => {
+      if (!ctx) return unwrapTSDFResult(await mutationFn(payloadToUse));
+      sentPayload = resolveSavedTempPayloads(payloadToUse);
+      return unwrapTSDFResult(await mutationFn(sentPayload, ctx));
+    };
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
       // An offline-enabled mutation always gets its uploads context
@@ -2131,11 +2131,6 @@ export function createMutationApi<
               )
             : [];
 
-        // The temp item of a creation saved since the call was replaced by
-        // the saved one, which is the item the server changed
-        const finalPayload = offline
-          ? resolveSavedTempPayloads(payloadToUse)
-          : payloadToUse;
         if (
           result.kind === 'online' &&
           (normalizedRevalidateOnSuccess.shouldRevalidate ||
@@ -2146,7 +2141,9 @@ export function createMutationApi<
               !normalizedRevalidateOnSuccess.includeItems ||
               affectedItems.length === 0
                 ? false
-                : finalPayload,
+                : // The items the request was sent for, even if their temp
+                  // ids were reused since
+                  sentPayload,
             queryPayload:
               successInvalidationQueryPayloads.length > 0
                 ? successInvalidationQueryPayloads
@@ -2155,7 +2152,7 @@ export function createMutationApi<
         }
 
         if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, finalPayload);
+          onSuccess(result.data, sentPayload);
         }
       },
       debounce,

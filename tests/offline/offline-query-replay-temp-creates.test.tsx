@@ -1630,6 +1630,56 @@ describe('an edit of a row created offline that is not queued yet when the creat
     hook.unmount();
   });
 
+  test('a rename sent for the saved user while its temp id is reused for another user applies its result to the saved user', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-reused-during-request-session';
+    const storeName = 'temp-edit-reused-during-request-store';
+    const {
+      env,
+      hook,
+      directRenames,
+      onSuccessPayloads,
+      renameResults,
+      renameLinus,
+      createLinus,
+    } = await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The user reconnects and renames Linus: Linus is saved as users||3
+    // during the debounce, and the rename is then sent for users||3 (1.2s)
+    renameLinus('Linus edited');
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(1600);
+    expect(directRenames).toMatchInlineSnapshot(
+      `- { itemId: 'users||3', name: 'Linus edited' }`,
+    );
+
+    // While the rename request is in flight, the app creates another Linus
+    // with the same temp id, which now stands for the new user. (This test's
+    // creation can only be replayed, so being online it fails and is undone,
+    // but the temp id stopped standing for users||3 when it was prepared.)
+    await createLinus();
+    await flushAllTimers();
+
+    // The rename result is applied to the user it was sent for, not to the
+    // new temp user or to a user saved since
+    expect(renameResults).toMatchInlineSnapshot(`
+      - data: { name: 'Linus edited' }
+        kind: 'online'
+    `);
+    expect(onSuccessPayloads).toMatchInlineSnapshot(`['users||3']`);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus edited'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus edited']`,
+    );
+
+    hook.unmount();
+  });
+
   test('a temp id reused after its creation was saved creates another user, whose rename is not sent for the first one', async () => {
     network.setOffline();
     const sessionKey = 'temp-edit-reused-temp-id-session';
