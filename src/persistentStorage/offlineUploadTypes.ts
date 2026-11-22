@@ -220,12 +220,17 @@ export type OfflineUploadAdapter = {
    * `list` returned), so an adapter can skip rewriting a file it already
    * stores. An adapter whose listed files read from storage must do so: a
    * file is usually not readable from a snapshot of storage it is replacing.
+   *
+   * After writing a new file, such an adapter can resolve with a file read
+   * from what it stored. TSDF then holds that file for the upload instead of
+   * the saved one, which may read from storage that is later removed or
+   * replaced: a file restored for another upload, or built from one.
    */
   save<TResolvedRef extends ValidPayload>(
     sessionKey: string,
     id: string,
     record: OfflineStoredUploadRecord<TResolvedRef>,
-  ): Promise<void>;
+  ): Promise<File | void>;
   /** Loads one staged upload record by id. */
   load<TResolvedRef extends ValidPayload>(
     sessionKey: string,

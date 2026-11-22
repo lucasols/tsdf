@@ -413,7 +413,11 @@ test('replacing a staged file hands the new file to every consumer and revokes t
     return first;
   });
   await flushAllTimers();
-  expect(await fileHook.result.current.file?.text()).toBe('draft bytes');
+  expect(
+    await resolveAfterAllTimers(
+      Promise.resolve(fileHook.result.current.file?.text()),
+    ),
+  ).toBe('draft bytes');
 
   // The user picks another file for the same attachment.
   renders.addMark('replace the staged file');
@@ -437,7 +441,11 @@ test('replacing a staged file hands the new file to every consumer and revokes t
     -> first: success blob:staged-2 final.png ⋅ second: success blob:staged-2 final.png
     "
   `);
-  expect(await fileHook.result.current.file?.text()).toBe('final bytes');
+  expect(
+    await resolveAfterAllTimers(
+      Promise.resolve(fileHook.result.current.file?.text()),
+    ),
+  ).toBe('final bytes');
   // The URL of the replaced file is revoked; only the new one stays alive.
   expect(objectUrls.events).toMatchInlineSnapshot(`
     - 'create blob:staged-1 (draft.png)'

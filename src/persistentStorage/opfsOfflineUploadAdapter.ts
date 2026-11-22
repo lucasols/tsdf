@@ -171,7 +171,7 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     sessionKey: string,
     id: string,
     record: OfflineStoredUploadRecord<TResolvedRef>,
-  ): Promise<void> {
+  ): Promise<File | undefined> {
     const uploadPath = getUploadPath(sessionKey, encodePathSegment(id));
     const uploadDir = await this.#getUploadDir(sessionKey, id, true);
     if (!uploadDir) {
@@ -185,8 +185,9 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     const isFileStored =
       this.#storedFiles.get(uploadPath)?.has(file) === true &&
       (await getFileHandleIfExists(uploadDir, BINARY_FILE_NAME)) !== null;
+    let binaryHandle: FileSystemFileHandle | null = null;
     if (!isFileStored) {
-      const binaryHandle = await uploadDir.getFileHandle(BINARY_FILE_NAME, {
+      binaryHandle = await uploadDir.getFileHandle(BINARY_FILE_NAME, {
         create: true,
       });
       // Writes are committed when the writable closes, so the previous files
@@ -210,6 +211,23 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
       // save of the record writes both again.
       if (!isFileStored) await this.remove(sessionKey, id);
       throw error;
+    }
+
+    if (!binaryHandle) return undefined;
+
+    // The saved file can read from storage that is removed or replaced later
+    // (a file restored for another upload, or built from one), so the session
+    // holds a file of the binary it was written to instead
+    try {
+      const storedFile = new File(
+        [await binaryHandle.getFile()],
+        record.fileName,
+        { type: record.mimeType, lastModified: record.lastModified },
+      );
+      this.#storedFiles.get(uploadPath)?.add(storedFile);
+      return storedFile;
+    } catch {
+      return undefined;
     }
   }
 
