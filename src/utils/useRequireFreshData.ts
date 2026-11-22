@@ -3,6 +3,7 @@ import { useConst } from '@ls-stack/react-utils/useConst';
 import { useOnChange } from '@ls-stack/react-utils/useOnChange';
 import { evtmitter } from 'evtmitter';
 import { useMemo, useState } from 'react';
+import type { RequireFreshData } from './storeShared';
 
 type RequireFreshDataResultModifier = <
   T extends { isLoading: boolean; status: string },
@@ -11,8 +12,10 @@ type RequireFreshDataResultModifier = <
 ) => T;
 
 export function useRequireFreshData(
-  requireFreshData: boolean | undefined,
+  requireFreshData: RequireFreshData | undefined,
   enabled: boolean,
+  targetKey: string,
+  isRestoredFromStorage: boolean,
   /**
    * Schedules the fetch, or calls `skipRefresh` when there is nothing to fetch
    * (e.g. an item that only exists locally), so the result stops loading
@@ -23,13 +26,24 @@ export function useRequireFreshData(
     evtmitter<{ refreshSettled: boolean }>(),
   );
 
-  const [isWaitingForRefresh, setIsWaitingForRefresh] = useState(true);
+  // `true` requires one settled refresh per mount, while `'ifFromStorage'`
+  // tracks it per target so switching to other restored data waits again
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+  const isWaitingForRefresh =
+    requireFreshData === true ? settledKey === null : settledKey !== targetKey;
+  const required =
+    requireFreshData === true ||
+    (requireFreshData === 'ifFromStorage' && isRestoredFromStorage);
+  const waitsForRefresh = required && isWaitingForRefresh && enabled;
 
   useOnChange(
-    requireFreshData && isWaitingForRefresh && enabled,
+    waitsForRefresh && (requireFreshData === true || targetKey),
     ({ current }) => {
-      if (current) {
-        forceFetch(() => setIsWaitingForRefresh(false));
+      if (current !== false) {
+        // the skip can be reported after the target changed, so it settles
+        // the target the fetch was scheduled for
+        const scheduledKey = targetKey;
+        forceFetch(() => setSettledKey(scheduledKey));
       }
     },
     { callOnMount: true },
@@ -39,8 +53,8 @@ export function useRequireFreshData(
     refreshSettledEvtEmitter,
     'refreshSettled',
     ({ payload: refreshSettled }) => {
-      if (requireFreshData && enabled && refreshSettled) {
-        setIsWaitingForRefresh(false);
+      if (required && enabled && refreshSettled) {
+        setSettledKey(targetKey);
       }
     },
   );
@@ -50,7 +64,7 @@ export function useRequireFreshData(
   ): T {
     return useGetModifyResult<T>(
       result,
-      requireFreshData,
+      required,
       enabled,
       isWaitingForRefresh,
     );
@@ -64,12 +78,12 @@ export function useRequireFreshData(
 
 function useGetModifyResult<T extends { isLoading: boolean; status: string }>(
   result: T,
-  requireFreshData: boolean | undefined,
+  required: boolean,
   enabled: boolean,
   isWaitingForRefresh: boolean,
 ) {
   return useMemo(() => {
-    if (requireFreshData) {
+    if (required) {
       const newStatus =
         enabled && isWaitingForRefresh ? 'loading' : result.status;
 
@@ -81,5 +95,5 @@ function useGetModifyResult<T extends { isLoading: boolean; status: string }>(
     }
 
     return result;
-  }, [requireFreshData, isWaitingForRefresh, result, enabled]);
+  }, [required, isWaitingForRefresh, result, enabled]);
 }

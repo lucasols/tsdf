@@ -87,6 +87,13 @@ type DocumentPersistenceSetup<State extends ValidStoreState> = {
   maybeHydrateFromStorage(): Promise<void>;
   preloadPersistentStorage(): Promise<void>;
   hasAsyncPreload: boolean;
+  /**
+   * Whether the document in state was restored from storage and was not
+   * refreshed with server data since.
+   */
+  isRestoredFromStorage(this: void): boolean;
+  /** Records that the document in state now holds server data. */
+  markServerData(this: void): void;
   dispose(): void;
   clear(): Promise<void>;
 };
@@ -131,6 +138,7 @@ export function setupDocumentPersistence<
   let generation = 0;
   let preloadPromise: Promise<void> | null = null;
   let syncHydrationMissKnown = false;
+  let restoredFromStorage = false;
 
   function isOfflineNetworkActive(): boolean {
     return isOfflineNetworkModeActiveSync(config.offline?.session.getConfig());
@@ -186,6 +194,7 @@ export function setupDocumentPersistence<
     const validated = readSyncHydratedDocumentData();
     if (validated === null) return;
 
+    restoredFromStorage = true;
     storeRef.setPartialState(
       { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
       { action: 'persistent-storage-hydrate' },
@@ -207,6 +216,7 @@ export function setupDocumentPersistence<
     const validated = readSyncHydratedDocumentData();
     if (validated === null) return baseState;
 
+    restoredFromStorage = true;
     return {
       ...baseState,
       data: validated,
@@ -245,6 +255,7 @@ export function setupDocumentPersistence<
           return;
         }
 
+        restoredFromStorage = true;
         storeRef.setPartialState(
           { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
           { action: 'persistent-storage-hydrate' },
@@ -297,6 +308,7 @@ export function setupDocumentPersistence<
     generation++;
     preloadPromise = null;
     syncHydrationMissKnown = false;
+    restoredFromStorage = false;
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
@@ -313,6 +325,10 @@ export function setupDocumentPersistence<
     maybeHydrateFromStorage,
     preloadPersistentStorage,
     hasAsyncPreload: localStorageAdapter === null,
+    isRestoredFromStorage: () => restoredFromStorage,
+    markServerData: () => {
+      restoredFromStorage = false;
+    },
     dispose,
     clear,
   };

@@ -66,6 +66,7 @@ import type {
   OfflineDirectMutationContext,
   OfflineMutationUploadsInput,
 } from '../persistentStorage/offlineUploadTypes';
+import { getPersistenceSessionKeyGetter } from '../persistentStorage/persistenceUtils';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionOfflineOperationsConfig,
@@ -125,6 +126,7 @@ import {
   unwrapTSDFResult,
   type MaybeTSDFResult,
   type MutationSkipped,
+  type RequireFreshData,
   type StoreError,
   type StoreMutationErrorOptions,
   type TSDFStatus,
@@ -769,8 +771,8 @@ export type CollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called if the sub-item is still missing and no refetch is in progress. */
       loadItemFallback?: () => void;
-      /** Requires a mount refresh before reporting ready. May cause an extra request. */
-      requireFreshData?: boolean;
+      /** Requires a mount refresh before reporting ready, see `useItem`'s `requireFreshData`. May cause an extra request. */
+      requireFreshData?: RequireFreshData;
     },
   ) => boolean;
   /** React hook that tracks whether a nested list item has been deleted. */
@@ -783,8 +785,8 @@ export type CollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called once when deletion is detected. */
       onDelete?: () => void;
-      /** Requires a mount refresh before reporting ready. May cause an extra request. */
-      requireFreshData?: boolean;
+      /** Requires a mount refresh before reporting ready, see `useItem`'s `requireFreshData`. May cause an extra request. */
+      requireFreshData?: RequireFreshData;
     },
   ) => boolean;
   /** React hook for selecting one nested list item plus loading/deleted flags. */
@@ -799,8 +801,8 @@ export type CollectionStore<
       loadItemFallback?: () => void;
       /** Called once when deletion is detected. */
       onDelete?: () => void;
-      /** Requires a mount refresh before reporting ready. May cause an extra request. */
-      requireFreshData?: boolean;
+      /** Requires a mount refresh before reporting ready, see `useItem`'s `requireFreshData`. May cause an extra request. */
+      requireFreshData?: RequireFreshData;
     },
   ) => { isLoading: boolean; isDeleted: boolean; data: Selected };
   /** Clears in-memory state and cancels store-local runtime state. */
@@ -1097,7 +1099,10 @@ export function createCollectionStore<
           : undefined,
         debugLogger: storeManager.debugLogger,
         logger: storeManager.logger,
-        getSessionKey: getSessionKeyForRuntime,
+        getSessionKey: getPersistenceSessionKeyGetter(
+          getSessionKeyForRuntime,
+          persistentStorageConfig.enabled,
+        ),
         storeName: id,
       })
     : null;
@@ -1938,6 +1943,11 @@ export function createCollectionStore<
       ({ requestId }) => results.get(requestId) === true,
     );
     if (successfulRequests.length > 0) {
+      if (persistence) {
+        for (const { requestId } of successfulRequests) {
+          persistence.restoredItemKeys.delete(requestId);
+        }
+      }
       touchItemsAndMaybeEnforceLimits(
         successfulRequests.map(({ requestId }) => requestId),
       );
@@ -1977,6 +1987,7 @@ export function createCollectionStore<
 
   function cleanupItemResources(itemKey: string, payload: ItemPayload): void {
     invalidationWasTriggered.delete(itemKey);
+    persistence?.restoredItemKeys.delete(itemKey);
     ignoredConfirmedSnapshots.delete(itemKey);
     itemKeyToPayload.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
@@ -2114,6 +2125,7 @@ export function createCollectionStore<
 
       if (hydratedItem?.data) {
         item = hydratedItem;
+        persistence?.restoredItemKeys.add(itemId);
         store.produceState(
           (draft) => {
             draft[itemId] = hydratedItem;
@@ -2161,6 +2173,16 @@ export function createCollectionStore<
     }
 
     return Result.ok(result.data);
+  }
+
+  function isItemRestoredFromStorage(itemKey: string): boolean {
+    if (!persistence) return false;
+    if (Object.hasOwn(store.state, itemKey)) {
+      return persistence.restoredItemKeys.has(itemKey);
+    }
+
+    // Hooks render an item not materialized yet straight from storage
+    return persistence.readHydratedItem(itemKey) !== undefined;
   }
 
   function getItemFromStateOrPersistence(
@@ -2398,6 +2420,7 @@ export function createCollectionStore<
       store,
       scheduleAutomaticFetch,
       useMultipleItems,
+      persistence ? isItemRestoredFromStorage : undefined,
     );
   }
 
@@ -2563,6 +2586,7 @@ export function createCollectionStore<
     after: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
     mutationId: number;
     hadPendingFetch: boolean;
+    wasRestoredFromStorage: boolean;
   };
 
   const pendingDebounces = new Map<
@@ -2766,15 +2790,27 @@ export function createCollectionStore<
         // delayed refetch), so restoring it must resume that work, even
         // when no hook is mounted to react to an invalidation
         const interruptedFetchPayloads: ItemPayload[] = [];
+        // Deleting an item also drops its restored from storage mark, which
+        // the restored data brings back
+        const itemsBackFromStorage = new Set<string>();
 
         for (const rollbackGroup of rollbacks) {
           for (const rollback of rollbackGroup) {
             const { itemKey } = rollback;
             if (
-              rollback.before &&
+              !rollback.before ||
+              store.state[itemKey] ||
+              !revertedItems.get(itemKey)?.item
+            ) {
+              continue;
+            }
+
+            if (rollback.wasRestoredFromStorage) {
+              itemsBackFromStorage.add(itemKey);
+            }
+
+            if (
               rollback.hadPendingFetch &&
-              !store.state[itemKey] &&
-              revertedItems.get(itemKey)?.item &&
               !interruptedFetchPayloads.includes(rollback.payload)
             ) {
               interruptedFetchPayloads.push(rollback.payload);
@@ -2803,6 +2839,9 @@ export function createCollectionStore<
           ] of revertedItems) {
             if (item) {
               restoredItemKeys.push(itemKey);
+              if (itemsBackFromStorage.has(itemKey)) {
+                persistence?.restoredItemKeys.add(itemKey);
+              }
             } else {
               cleanupItemResources(itemKey, itemPayload);
             }
@@ -2882,6 +2921,8 @@ export function createCollectionStore<
                     itemKey,
                     itemPayload,
                   ).hasPendingRequest(itemKey),
+                  wasRestoredFromStorage:
+                    !!persistence?.restoredItemKeys.has(itemKey),
                 };
               },
             );
@@ -2918,6 +2959,8 @@ export function createCollectionStore<
                     after: store.state[itemKey],
                     mutationId,
                     hadPendingFetch: before[index]?.hadPendingFetch ?? false,
+                    wasRestoredFromStorage:
+                      before[index]?.wasRestoredFromStorage ?? false,
                   }),
                 ),
               );
@@ -3129,8 +3172,8 @@ export function createCollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called after a timeout if the sub-item is still missing and no refetch is in progress. Defaults to `invalidateItem(payload)`. */
       loadItemFallback?: () => void;
-      /** Requires a mount refresh before reporting ready. May cause an extra request. */
-      requireFreshData?: boolean;
+      /** Requires a mount refresh before reporting ready, see `useItem`'s `requireFreshData`. May cause an extra request. */
+      requireFreshData?: RequireFreshData;
     },
   ): boolean {
     const item = useItem(payload, {
@@ -3169,8 +3212,8 @@ export function createCollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called once when the deletion is detected */
       onDelete?: () => void;
-      /** Requires a mount refresh before reporting ready. May cause an extra request. */
-      requireFreshData?: boolean;
+      /** Requires a mount refresh before reporting ready, see `useItem`'s `requireFreshData`. May cause an extra request. */
+      requireFreshData?: RequireFreshData;
     },
   ): boolean {
     const item = useItem(payload, {
@@ -3209,8 +3252,8 @@ export function createCollectionStore<
       loadItemFallback?: () => void;
       /** Called once when the deletion is detected */
       onDelete?: () => void;
-      /** Requires a mount refresh before reporting ready. May cause an extra request. */
-      requireFreshData?: boolean;
+      /** Requires a mount refresh before reporting ready, see `useItem`'s `requireFreshData`. May cause an extra request. */
+      requireFreshData?: RequireFreshData;
     },
   ): { isLoading: boolean; isDeleted: boolean; data: Selected } {
     const item = useItem(payload, {

@@ -74,6 +74,7 @@ export type {
   MaybeTSDFResult,
   MutationSkipped,
   PayloadDebounce,
+  RequireFreshData,
   StoreError,
   StoreMutationErrorOptions,
   TSDFStatus,

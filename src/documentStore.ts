@@ -67,6 +67,7 @@ import type {
   OfflineDirectMutationContext,
   OfflineMutationUploadsInput,
 } from './persistentStorage/offlineUploadTypes';
+import { getPersistenceSessionKeyGetter } from './persistentStorage/persistenceUtils';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type {
   DocumentPersistentStorageConfig,
@@ -130,6 +131,7 @@ import {
   unwrapTSDFResult,
   type MaybeTSDFResult,
   type MutationSkipped,
+  type RequireFreshData,
   type StoreError,
   type StoreMutationErrorOptions,
   type TSDFStatus,
@@ -567,11 +569,13 @@ export type DocumentStore<
     /** Returns `idle` instead of `loading` while the document has not been fetched. */
     returnIdleStatus?: boolean;
     /**
-     * Unconditionally schedules a high-priority fetch on mount and reports
-     * `loading` until that refresh succeeds or fails, even when cached data
-     * exists. Use sparingly because each mount can cause an extra request.
+     * Schedules a high-priority fetch on mount and reports `loading` until
+     * that refresh succeeds or fails, even when cached data exists. `true`
+     * refreshes on every mount, so use it sparingly. `'ifFromStorage'` only
+     * refreshes while the cached data was restored from persistent storage
+     * and not refreshed from the server yet in this tab.
      */
-    requireFreshData?: boolean;
+    requireFreshData?: RequireFreshData;
     /** Returns `refetching` instead of keeping `loaded` status during refetches. */
     returnRefetchingStatus?: boolean;
   }) => TSDFUseDocumentReturn<Selected>;
@@ -583,8 +587,8 @@ export type DocumentStore<
     selector: (data: State | null) => unknown;
     /** Called if the item is still missing and no refetch is in progress. */
     loadItemFallback?: () => void;
-    /** Requires a mount refresh before reporting ready. May cause an extra request. */
-    requireFreshData?: boolean;
+    /** Requires a mount refresh before reporting ready, see `useDocument`'s `requireFreshData`. May cause an extra request. */
+    requireFreshData?: RequireFreshData;
   }) => boolean;
   /** React hook that tracks whether a nested list item has been deleted. */
   useListItemIsDeleted: (args: {
@@ -594,8 +598,8 @@ export type DocumentStore<
     selector: (data: State | null) => unknown;
     /** Called once when deletion is detected. */
     onDelete?: () => void;
-    /** Requires a mount refresh before reporting ready. May cause an extra request. */
-    requireFreshData?: boolean;
+    /** Requires a mount refresh before reporting ready, see `useDocument`'s `requireFreshData`. May cause an extra request. */
+    requireFreshData?: RequireFreshData;
   }) => boolean;
   /** React hook for selecting one nested list item plus loading/deleted flags. */
   useListItem: <Selected>(args: {
@@ -607,8 +611,8 @@ export type DocumentStore<
     loadItemFallback?: () => void;
     /** Called once when deletion is detected. */
     onDelete?: () => void;
-    /** Requires a mount refresh before reporting ready. May cause an extra request. */
-    requireFreshData?: boolean;
+    /** Requires a mount refresh before reporting ready, see `useDocument`'s `requireFreshData`. May cause an extra request. */
+    requireFreshData?: RequireFreshData;
   }) => { isLoading: boolean; isDeleted: boolean; data: Selected };
   /**
    * Runs the full mutation lifecycle: optional optimistic update, async
@@ -783,7 +787,10 @@ export function createDocumentStore<
           : undefined,
         debugLogger: storeManager.debugLogger,
         logger: storeManager.logger,
-        getSessionKey: getSessionKeyForRuntime,
+        getSessionKey: getPersistenceSessionKeyGetter(
+          getSessionKeyForRuntime,
+          persistentStorageConfig.enabled,
+        ),
         storeName: id,
       })
     : null;
@@ -1147,6 +1154,7 @@ export function createDocumentStore<
 
       if (fetchCtx.shouldAbort()) return false;
 
+      persistence?.markServerData();
       store.setPartialState(
         { data: reusePrevIfEqual(store.state.data, data), status: 'success' },
         { action: 'fetch-success' },
@@ -1721,11 +1729,13 @@ export function createDocumentStore<
     /** Returns `idle` instead of `loading` while the document has not been fetched. */
     returnIdleStatus?: boolean;
     /**
-     * Unconditionally schedules a high-priority fetch on mount and reports
-     * `loading` until that refresh succeeds or fails, even when cached data
-     * exists. Use sparingly because each mount can cause an extra request.
+     * Schedules a high-priority fetch on mount and reports `loading` until
+     * that refresh succeeds or fails, even when cached data exists. `true`
+     * refreshes on every mount, so use it sparingly. `'ifFromStorage'` only
+     * refreshes while the cached data was restored from persistent storage
+     * and not refreshed from the server yet in this tab.
      */
-    requireFreshData?: boolean;
+    requireFreshData?: RequireFreshData;
     /** Returns `refetching` instead of keeping `loaded` status during refetches. */
     returnRefetchingStatus?: boolean;
   } = {}) {
@@ -1876,7 +1886,21 @@ export function createDocumentStore<
     const [useModifyResult, markRefreshSettled] = useRequireFreshData(
       requireFreshData,
       !disabled,
+      DOC_TARGET_KEY,
+      !!persistence?.isRestoredFromStorage(),
       () => {
+        // A refresh already in flight brings server data newer than the
+        // restored one, so it settles this hook without another request. A
+        // retry after a failed fetch is in flight as `loading`, not
+        // `refetching`
+        const status = store.state.status;
+        if (
+          requireFreshData === 'ifFromStorage' &&
+          (status === 'refetching' || status === 'loading')
+        ) {
+          return;
+        }
+
         scheduleFetch('highPriority');
       },
     );
@@ -1909,8 +1933,8 @@ export function createDocumentStore<
     selector: (data: State | null) => unknown;
     /** Called after a timeout if the item is still missing and no refetch is in progress. Defaults to `invalidateData()`. */
     loadItemFallback?: () => void;
-    /** Requires a mount refresh before reporting ready. May cause an extra request. */
-    requireFreshData?: boolean;
+    /** Requires a mount refresh before reporting ready, see `useDocument`'s `requireFreshData`. May cause an extra request. */
+    requireFreshData?: RequireFreshData;
   }): boolean {
     const doc = useDocument({
       returnRefetchingStatus: true,
@@ -1946,8 +1970,8 @@ export function createDocumentStore<
     selector: (data: State | null) => unknown;
     /** Called once when the deletion is detected */
     onDelete?: () => void;
-    /** Requires a mount refresh before reporting ready. May cause an extra request. */
-    requireFreshData?: boolean;
+    /** Requires a mount refresh before reporting ready, see `useDocument`'s `requireFreshData`. May cause an extra request. */
+    requireFreshData?: RequireFreshData;
   }): boolean {
     const doc = useDocument({
       returnRefetchingStatus: true,
@@ -1983,8 +2007,8 @@ export function createDocumentStore<
     loadItemFallback?: () => void;
     /** Called once when the deletion is detected */
     onDelete?: () => void;
-    /** Requires a mount refresh before reporting ready. May cause an extra request. */
-    requireFreshData?: boolean;
+    /** Requires a mount refresh before reporting ready, see `useDocument`'s `requireFreshData`. May cause an extra request. */
+    requireFreshData?: RequireFreshData;
   }): { isLoading: boolean; isDeleted: boolean; data: Selected } {
     const doc = useDocument({
       returnRefetchingStatus: true,

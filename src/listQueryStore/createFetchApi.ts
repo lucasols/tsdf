@@ -145,6 +145,8 @@ type CreateFetchApiOptions<
       this: void,
       queryKey: string,
     ): TSFDListQuery<QueryPayload> | undefined;
+    restoredItemKeys: Set<string>;
+    restoredQueryKeys: Set<string>;
   } | null;
   testInitialLastFetchStartTime?: number;
   onQueryFetchStart?: (
@@ -1106,6 +1108,12 @@ export function createFetchApi<
     const nextHasMore =
       end < hydratedQuery.items.length || hydratedQuery.hasMore;
 
+    // The rows appended from storage were not refreshed from the server
+    persistence.restoredQueryKeys.add(queryKey);
+    for (const { itemKey } of appendedHydratedItems) {
+      persistence.restoredItemKeys.add(itemKey);
+    }
+
     store.produceState(
       (draft) => {
         const currentQuery = draft.queries[queryKey];
@@ -1278,11 +1286,13 @@ export function createFetchApi<
         store.produceState(
           (draft) => {
             draft.queries[queryKey] = hydratedQuery;
+            persistence?.restoredQueryKeys.add(queryKey);
 
             for (const itemKey of hydratedQuery.items) {
               const hydratedItem = persistence?.readHydratedItem(itemKey);
               if (!hydratedItem) continue;
 
+              persistence?.restoredItemKeys.add(itemKey);
               draft.items[itemKey] = hydratedItem.item;
               draft.itemQueries[itemKey] = hydratedItem.itemQuery;
               if (hydratedItem.loadedFields !== undefined) {
@@ -1523,6 +1533,7 @@ export function createFetchApi<
 
       if (hydratedItem) {
         itemState = hydratedItem;
+        persistence?.restoredItemKeys.add(itemKey);
         store.produceState(
           (draft) => {
             draft.items[itemKey] = hydratedItem.item;

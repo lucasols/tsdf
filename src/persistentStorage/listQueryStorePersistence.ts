@@ -260,6 +260,16 @@ type ListQueryPersistenceSetup<
   getPersistedQueryKeys(
     this: void,
   ): ReadonlySet<string> | Promise<ReadonlySet<string>>;
+  /**
+   * Reads saved queries without loading them into the store or counting them
+   * as used. Synchronous for local storage.
+   */
+  peekPersistedQueries(
+    this: void,
+    queryKeys: string[],
+  ):
+    | (ParsedPersistedListQueryData<QueryPayload> | undefined)[]
+    | Promise<(ParsedPersistedListQueryData<QueryPayload> | undefined)[]>;
   readHydratedItem(
     this: void,
     itemKey: string,
@@ -275,6 +285,13 @@ type ListQueryPersistenceSetup<
     queryKey: string,
   ): TSFDListQuery<QueryPayload> | undefined;
   hasAsyncPreload: boolean;
+  /**
+   * Keys of the items in state restored from storage that were not
+   * refreshed with server data since. The store removes the keys it fetches.
+   */
+  restoredItemKeys: Set<string>;
+  /** Same as `restoredItemKeys`, for the queries in state. */
+  restoredQueryKeys: Set<string>;
   dispose(): void;
   clear(): Promise<void>;
 };
@@ -623,6 +640,8 @@ export function setupListQueryPersistence<
   const querySizeBytesByKey = new Map<string, number>();
   const hydratedPersistedItemKeys = new Set<string>();
   const hydratedPersistedQueryKeys = new Set<string>();
+  const storageRestoredItemKeys = new Set<string>();
+  const storageRestoredQueryKeys = new Set<string>();
   // Persisted queries restored without some of the rows they list (see
   // `createRestoredQueryState`). Their stored entry is the only record that
   // rows are missing, so flushes keep it as is until the query is loaded again.
@@ -1454,6 +1473,7 @@ export function setupListQueryPersistence<
   ): void {
     if (!storeRef) return;
 
+    storageRestoredItemKeys.add(itemKey);
     suppressedPersistedStateFlushes++;
     storeRef.produceState((draft) => {
       draft.items[itemKey] = itemState.item;
@@ -1470,6 +1490,7 @@ export function setupListQueryPersistence<
   ): void {
     if (!storeRef) return;
 
+    storageRestoredQueryKeys.add(queryKey);
     suppressedPersistedStateFlushes++;
     storeRef.produceState((draft) => {
       draft.queries[queryKey] = query;
@@ -1720,6 +1741,70 @@ export function setupListQueryPersistence<
     }
 
     return previousPersistedQuery;
+  }
+
+  function peekPersistedQueries(
+    queryKeys: string[],
+  ):
+    | (ParsedPersistedListQueryData<QueryPayload> | undefined)[]
+    | Promise<(ParsedPersistedListQueryData<QueryPayload> | undefined)[]> {
+    const parse = (value: unknown) =>
+      parsePersistedListQueryData(value, config.queryPayloadSchema) ??
+      undefined;
+
+    // A query loaded before (e.g. dropped from memory since, or still
+    // loading) is read from its snapshot, which is newer than storage until
+    // the next flush
+    const savedQueries: (
+      | ParsedPersistedListQueryData<QueryPayload>
+      | undefined
+    )[] = [];
+    const unread: { index: number; queryKey: string }[] = [];
+    for (const [index, queryKey] of queryKeys.entries()) {
+      const snapshot = querySnapshotByKey.get(queryKey);
+      if (snapshot === undefined) {
+        savedQueries.push(undefined);
+        unread.push({ index, queryKey });
+      } else {
+        savedQueries.push(parseHydratedQuerySnapshot(snapshot));
+      }
+    }
+    if (unread.length === 0) return savedQueries;
+
+    if (localStorageAdapter === null) {
+      return queryNamespace
+        .loadMany(
+          unread.map(({ queryKey }) => queryKey),
+          { touch: 'never' },
+        )
+        .then((entries) => {
+          for (const [position, { index }] of unread.entries()) {
+            const entry = entries[position];
+            if (entry) savedQueries[index] = parse(entry);
+          }
+          return savedQueries;
+        })
+        .catch(() => savedQueries);
+    }
+
+    const adapter = localStorageAdapter;
+    for (const { index, queryKey } of unread) {
+      const storageKey = getLocalStorageQueryStorageKey(queryKey);
+      const rawEntry =
+        storageKey === false ? null : adapter.readRaw(storageKey);
+      const entry =
+        rawEntry === null
+          ? null
+          : parseCompactListQueryLocalStorageEntry(rawEntry);
+      if (entry === null || entry.version !== version) continue;
+      savedQueries[index] = parse({
+        payload: entry.payload,
+        items: entry.items,
+        hasMore: entry.hasMore,
+        missingItems: entry.missingItems,
+      });
+    }
+    return savedQueries;
   }
 
   function readHydratedLocalStorageQuery(
@@ -2099,6 +2184,7 @@ export function setupListQueryPersistence<
             activeStore.state.itemQueries[itemKey] !== undefined
           );
         });
+        storageRestoredQueryKeys.add(queryKey);
         suppressedPersistedStateFlushes++;
         activeStore.setState({
           ...activeStore.state,
@@ -3075,6 +3161,10 @@ export function setupListQueryPersistence<
 
   async function flushPersistedState(): Promise<void> {
     if (!storeRef) return;
+    // Without a session (or while persistence is disabled) nothing is written,
+    // so what is known to be persisted must not be updated either: entries
+    // skipped now would be taken as saved once storage is written again
+    if (config.getSessionKey() === false) return;
 
     const state = storeRef.state;
     syncMaintenanceRegistration();
@@ -3997,6 +4087,11 @@ export function setupListQueryPersistence<
       });
     }
 
+    // Persistence can be disabled while the metadata reads above are pending:
+    // the commits would then be skipped, so what is persisted must not be
+    // updated as if they were written
+    if (config.getSessionKey() === false) return;
+
     const commitTasks: Promise<void>[] = [];
     if (removedQueryKeys.length > 0 || queryUpserts.size > 0) {
       commitTasks.push(
@@ -4104,6 +4199,8 @@ export function setupListQueryPersistence<
     pendingQueryPreloads.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    storageRestoredItemKeys.clear();
+    storageRestoredQueryKeys.clear();
     incompleteRestoredQueryKeys.clear();
     syncHydrationItemMissCache.clearAll();
     syncHydrationQueryMissCache.clearAll();
@@ -4165,9 +4262,12 @@ export function setupListQueryPersistence<
     getHydratedQueryKeys: () => [...hydratedPersistedQueryKeys],
     getPersistedQueryKeys: () =>
       knownPersistedQueryKeys ?? ensureKnownPersistedQueryKeys(),
+    peekPersistedQueries,
     readHydratedItem,
     readHydratedQuery,
     hasAsyncPreload: localStorageAdapter === null,
+    restoredItemKeys: storageRestoredItemKeys,
+    restoredQueryKeys: storageRestoredQueryKeys,
     dispose,
     clear,
   };

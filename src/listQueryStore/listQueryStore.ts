@@ -65,6 +65,8 @@ import type {
   OfflineDirectMutationContext,
   OfflineMutationUploadsInput,
 } from '../persistentStorage/offlineUploadTypes';
+import type { ParsedPersistedListQueryData } from '../persistentStorage/parsePersistedData';
+import { getPersistenceSessionKeyGetter } from '../persistentStorage/persistenceUtils';
 import {
   createProtectedStorageKey,
   isOfflineNetworkModeActiveSync,
@@ -76,6 +78,7 @@ import type {
   ResolvedListQueryPersistentStorageConfig,
 } from '../persistentStorage/types';
 import {
+  BatchRequest,
   FetchType,
   RequestSchedulerEventData,
   RequestSchedulerEvents,
@@ -115,7 +118,7 @@ import {
   type ValidPayload,
   type ValidStoreState,
 } from '../utils/storeShared';
-import { createFetchApi } from './createFetchApi';
+import { createFetchApi, type FilterQueryFn } from './createFetchApi';
 import {
   createMutationApi,
   type DroppedFieldInvalidation,
@@ -142,6 +145,8 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type PartialResourcesConfig,
+  type PartialResourcesHookOptions,
+  type QueryFetchPayload,
   type TSDFItemQuery,
   type TSFDListQuery,
   type TSFDListQueryState,
@@ -450,7 +455,7 @@ type ListQueryUseListQueryApi<
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
       ? [
           options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> &
-            FieldsOption<true>,
+            PartialResourcesHookOptions,
         ]
       : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
   ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
@@ -483,7 +488,10 @@ type ListQueryUseItemApi<
   <Selected = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
-      ? [options: UseItemOptions<ItemState, Selected> & FieldsOption<true>]
+      ? [
+          options: UseItemOptions<ItemState, Selected> &
+            PartialResourcesHookOptions,
+        ]
       : [options?: UseItemOptions<ItemState, Selected>]
   ): TSFDUseListItemReturn<Selected, ItemPayload>;
 };
@@ -1621,7 +1629,10 @@ export function createListQueryStore<
           : undefined,
         debugLogger: storeManager.debugLogger,
         logger: storeManager.logger,
-        getSessionKey: getSessionKeyForRuntime,
+        getSessionKey: getPersistenceSessionKeyGetter(
+          getSessionKeyForRuntime,
+          persistentStorageConfig.enabled,
+        ),
         storeName: id,
       })
     : null;
@@ -2220,6 +2231,7 @@ export function createListQueryStore<
       const successfulQueryKeys = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map(({ requestId }) => requestId);
+      forgetRestoredQueriesLoadedFromServer(requests, results);
       if (successfulQueryKeys.length > 0) {
         const committedItemKeys = successfulQueryKeys.flatMap(
           (queryKey) => store.state.queries[queryKey]?.items ?? [],
@@ -2267,6 +2279,14 @@ export function createListQueryStore<
     },
     ({ requests, results, startedAt, duration }) => {
       pruneItemInvalidationTracking();
+      if (persistence) {
+        for (const { requestId, payload } of requests) {
+          // An item loaded with only some fields keeps the other ones restored
+          if (results.get(requestId) === true && !payload.fields) {
+            persistence.restoredItemKeys.delete(requestId);
+          }
+        }
+      }
       const successfulItems = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map((request) => ({ itemKey: request.requestId }));
@@ -2369,6 +2389,7 @@ export function createListQueryStore<
         getRecapturableOfflineOverlayKeys(offlineOverlayStore.state, itemKeys),
       );
     },
+    persistence?.restoredItemKeys,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2691,6 +2712,53 @@ export function createListQueryStore<
     });
   }
 
+  // Hooks render queries and items not materialized yet straight from storage
+  function isQueryRestoredFromStorage(queryKey: string): boolean {
+    if (!persistence) return false;
+    if (store.state.queries[queryKey] !== undefined) {
+      return persistence.restoredQueryKeys.has(queryKey);
+    }
+
+    return persistence.readHydratedQuery(queryKey) !== undefined;
+  }
+
+  function isItemRestoredFromStorage(itemKey: string): boolean {
+    if (!persistence) return false;
+    if (store.state.itemQueries[itemKey] !== undefined) {
+      return persistence.restoredItemKeys.has(itemKey);
+    }
+
+    return persistence.readHydratedItem(itemKey) !== undefined;
+  }
+
+  function forgetRestoredQueriesLoadedFromServer(
+    requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
+    results: Map<string, boolean>,
+  ): void {
+    if (!persistence) return;
+
+    for (const { requestId: queryKey, payload } of requests) {
+      if (results.get(queryKey) !== true) continue;
+      // An offset `loadMore` only appends a page to the rows already loaded
+      if (
+        offsetPagination &&
+        payload.type === 'loadMore' &&
+        payload.offset > 0
+      ) {
+        continue;
+      }
+
+      persistence.restoredQueryKeys.delete(queryKey);
+
+      // Rows loaded with only some fields keep the other ones restored
+      if (payload.fields) continue;
+
+      for (const itemKey of store.state.queries[queryKey]?.items ?? []) {
+        persistence.restoredItemKeys.delete(itemKey);
+      }
+    }
+  }
+
   function pruneItemInvalidationTracking(): void {
     for (const [itemKey, pendingFields] of itemPendingInvalidationFields) {
       const loadedFields = store.state.itemLoadedFields[itemKey];
@@ -2760,49 +2828,97 @@ export function createListQueryStore<
       return store.state.items[itemKey] === undefined ? itemKey : false;
     });
     const unloadedQueryKeys = new Set<string>();
-    let isDeclaredWithFilter = false;
+    const filters: FilterQueryFn<QueryPayload>[] = [];
     for (const { queries } of addToQueries) {
-      // A filter needs each query's state, so it runs once they are loaded
       if (typeof queries === 'function') {
-        isDeclaredWithFilter = true;
+        filters.push(queries);
         continue;
       }
       for (const { key } of getQueriesKeyArray(queries)) {
         if (store.state.queries[key] === undefined) unloadedQueryKeys.add(key);
       }
     }
-    // A filter can match any saved query, so all the ones that are only in
-    // persistent storage are loaded for it
-    const addUnloadedPersistedQueryKeys = (
-      persistedQueryKeys: ReadonlySet<string>,
+
+    // A filter can match any saved query. It runs on the saved data of the
+    // ones not loaded yet, and only the matches are loaded, so the others don't
+    // count as used
+    const tempItemKeys = new Set(
+      tempPayloads.map((tempPayload) => getItemKey(tempPayload)),
+    );
+    const addMatchingQueryKeys = (
+      queryKeys: string[],
+      savedQueries: (ParsedPersistedListQueryData<QueryPayload> | undefined)[],
     ): void => {
-      for (const queryKey of persistedQueryKeys) {
-        if (store.state.queries[queryKey] === undefined) {
+      for (const [index, queryKey] of queryKeys.entries()) {
+        const savedQuery = savedQueries[index];
+        if (!savedQuery) continue;
+        // At replay only the lists that hold a temp row are reconciled, so
+        // they are loaded whatever the filter returns now, and the filter is
+        // not run on the others
+        if (tempItemKeys.size > 0) {
+          if (savedQuery.items.some((itemKey) => tempItemKeys.has(itemKey))) {
+            unloadedQueryKeys.add(queryKey);
+          }
+          continue;
+        }
+        const query: TSFDListQuery<QueryPayload> = {
+          error: null,
+          hasMore: savedQuery.hasMore,
+          items: savedQuery.items,
+          payload: savedQuery.payload,
+          refetchOnMount: 'lowPriority',
+          status: 'success',
+          wasLoaded: true,
+        };
+        try {
+          if (
+            filters.some((filter) => filter(query.payload, query, queryKey))
+          ) {
+            unloadedQueryKeys.add(queryKey);
+          }
+        } catch {
+          // Loaded so the filter runs again when the item is added to the
+          // queries, and throws there as it does for the lists in memory
           unloadedQueryKeys.add(queryKey);
         }
       }
     };
-    let persistedQueryKeysLoad: Promise<ReadonlySet<string>> | undefined;
-    if (isDeclaredWithFilter) {
-      const persistedQueryKeys = persistence.getPersistedQueryKeys();
-      if (persistedQueryKeys instanceof Promise) {
-        persistedQueryKeysLoad = persistedQueryKeys;
-      } else {
-        addUnloadedPersistedQueryKeys(persistedQueryKeys);
+    const matchSavedQueries = (
+      persistedQueryKeys: ReadonlySet<string>,
+    ): Promise<void> | undefined => {
+      const candidateQueryKeys = [...persistedQueryKeys].filter(
+        (queryKey) =>
+          store.state.queries[queryKey] === undefined &&
+          !unloadedQueryKeys.has(queryKey),
+      );
+      if (candidateQueryKeys.length === 0) return undefined;
+      const savedQueries = persistence.peekPersistedQueries(candidateQueryKeys);
+      if (!(savedQueries instanceof Promise)) {
+        addMatchingQueryKeys(candidateQueryKeys, savedQueries);
+        return undefined;
       }
+      return savedQueries.then((queries) => {
+        addMatchingQueryKeys(candidateQueryKeys, queries);
+      });
+    };
+    let savedQueriesMatch: Promise<void> | undefined;
+    if (filters.length > 0) {
+      const persistedQueryKeys = persistence.getPersistedQueryKeys();
+      savedQueriesMatch =
+        persistedQueryKeys instanceof Promise
+          ? persistedQueryKeys.then(matchSavedQueries)
+          : matchSavedQueries(persistedQueryKeys);
     }
     if (
       unloadedItemKeys.length === 0 &&
       unloadedQueryKeys.size === 0 &&
-      !persistedQueryKeysLoad
+      !savedQueriesMatch
     ) {
       return undefined;
     }
 
     const loadQueries = async (): Promise<void> => {
-      if (persistedQueryKeysLoad) {
-        addUnloadedPersistedQueryKeys(await persistedQueryKeysLoad);
-      }
+      await savedQueriesMatch;
       if (unloadedQueryKeys.size === 0) return;
       await preloadQueriesFromPersistentStorage([...unloadedQueryKeys]);
     };
@@ -2884,11 +3000,13 @@ export function createListQueryStore<
     itemDroppedFieldInvalidations.delete(itemKey);
     itemInvalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
+    persistence?.restoredItemKeys.delete(itemKey);
   }
 
   function cleanupQueryStateMetadata(queryKey: string): void {
     queryInvalidationWasTriggered.delete(queryKey);
     queryCacheRuntime.clear(queryKey);
+    persistence?.restoredQueryKeys.delete(queryKey);
   }
 
   function clearOfflineOverlays(nextSessionKey: string | null = null): void {
@@ -3537,7 +3655,7 @@ export function createListQueryStore<
       ...args: ListQueryHasPartialResources<TPartialResources> extends true
         ? [
             options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> &
-              FieldsOption<true>,
+              PartialResourcesHookOptions,
           ]
         : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
     ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
@@ -3552,6 +3670,7 @@ export function createListQueryStore<
       getQueryKey,
       scheduleListQueryFetch,
       useMultipleListQueries,
+      persistence ? isQueryRestoredFromStorage : undefined,
     );
   };
 
@@ -3623,7 +3742,10 @@ export function createListQueryStore<
     <Selected = ItemState | null>(
       itemPayload: ItemPayload | false | null | undefined,
       ...args: ListQueryHasPartialResources<TPartialResources> extends true
-        ? [options: UseItemOptions<ItemState, Selected> & FieldsOption<true>]
+        ? [
+            options: UseItemOptions<ItemState, Selected> &
+              PartialResourcesHookOptions,
+          ]
         : [options?: UseItemOptions<ItemState, Selected>]
     ): TSFDUseListItemReturn<Selected, ItemPayload>;
   } = function useItem<Selected = ItemState | null>(
@@ -3636,6 +3758,7 @@ export function createListQueryStore<
       store,
       scheduleAutomaticItemFetch,
       useMultipleItems,
+      persistence ? isItemRestoredFromStorage : undefined,
     );
   };
 

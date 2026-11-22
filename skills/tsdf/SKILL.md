@@ -69,7 +69,7 @@ Every store ships React hooks with consistent behavior:
 - Auto-fetch on mount; refetch on invalidation; deep equality to skip re-renders.
 - Falsy payload (`null` / `undefined` / `false`) disables the hook — no fetch, status `idle`. Use this instead of a separate `enabled` flag.
 - Common options: `disabled`, `disableRefetches`, `disableRefetchOnMount`, `returnIdleStatus`, `returnRefetchingStatus`, `requireFreshData`, `selector`, `debouncePayload`.
-- Use `requireFreshData` sparingly: every enabled mount schedules a high-priority fetch even with cached data and reports `loading` until it settles, so broad use multiplies requests. Prefer normal cache behavior or targeted invalidation. See `docs/hooks.md#requirefreshdata`.
+- Use `requireFreshData: true` sparingly: every enabled mount schedules a high-priority fetch even with cached data and reports `loading` until it settles, so broad use multiplies requests. Prefer normal cache behavior or targeted invalidation. `requireFreshData: 'ifFromStorage'` does it only while the data was restored from persistent storage and not refreshed from the server yet in this tab. See `docs/hooks.md#requirefreshdata`.
 
 | Store             | Hooks                                                                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -179,6 +179,7 @@ persistentStorage: {
   adapter: 'local-sync',     // or async adapters from 'tsdf/opfs-storage' / 'tsdf/indexed-db-storage'
   schema: stateSchema,        // PersistentStorageSchema or ConvertedPersistentStorageDataSchema
   version: 1,                 // bump to invalidate older entries
+  enabled: () => !isPublicSession, // optional runtime switch: false skips all reads/writes of this store
   // Collection / ListQuery: payloadSchema, itemPayloadSchema, queryPayloadSchema, maxBytes/maxItemBytes/maxQueryBytes, maxQuerySize, pinnedItems, pinnedQueries, ignoreItems
   // optional: offline: { operations: { ... } }
   onPersistentStorageError: (err) => log(err), // overrides the manager fallback; use null to disable it

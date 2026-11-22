@@ -4,6 +4,7 @@ import { Store, useSubscribeToStore } from 't-state';
 import { FetchType } from '../requestScheduler';
 import { assertNoRequireFreshDataWithDebouncePayload } from '../utils/payloadDebounce';
 import {
+  RequireFreshData,
   ValidPayload,
   ValidStoreState,
   invalidPayloadError,
@@ -21,12 +22,14 @@ export type UseItemOptions<
   Selected,
 > = UseMultipleItemsOptions<ItemState, Selected> & {
   /**
-   * Unconditionally schedules a high-priority fetch on mount and reports
-   * `loading` until that refresh succeeds or fails, even when cached data
-   * exists. Use sparingly because each mount can cause an extra request.
-   * Cannot be combined with `debouncePayload`.
+   * Schedules a high-priority fetch on mount and reports `loading` until that
+   * refresh succeeds or fails, even when cached data exists. `true` refreshes
+   * on every mount, so use it sparingly. `'ifFromStorage'` only refreshes
+   * while the cached item was restored from persistent storage and not
+   * refreshed from the server yet in this tab. Cannot be combined with
+   * `debouncePayload`.
    */
-  requireFreshData?: boolean;
+  requireFreshData?: RequireFreshData;
 };
 
 export function useItem<
@@ -56,6 +59,7 @@ export function useItem<
     items: CollectionUseMultipleItemsQuery<ItemPayload, undefined>[],
     options: UseMultipleItemsOptions<ItemState, S>,
   ) => readonly TSFDUseCollectionItemReturn<S, ItemPayload, undefined>[],
+  isItemRestoredFromStorage: ((itemKey: string) => boolean) | undefined,
 ): TSFDUseCollectionItemReturn<Selected, ItemPayload> {
   const isInvalidPayload = payload === '';
   const hasPayload =
@@ -137,10 +141,23 @@ export function useItem<
   const [useModifyResult, markRefreshSettled] = useRequireFreshData(
     requireFreshData,
     hasPayload,
+    result.itemStateKey,
+    requireFreshData === 'ifFromStorage' &&
+      hasPayload &&
+      !!isItemRestoredFromStorage?.(result.itemStateKey),
     (skipRefresh) => {
-      if (fetchQuery) {
-        scheduleAutomaticFetch('highPriority', fetchQuery.payload, skipRefresh);
+      if (!fetchQuery) return;
+
+      // A refresh already in flight brings server data newer than the
+      // restored one, so it settles this hook without another request
+      if (
+        requireFreshData === 'ifFromStorage' &&
+        store.state[result.itemStateKey]?.status === 'refetching'
+      ) {
+        return;
       }
+
+      scheduleAutomaticFetch('highPriority', fetchQuery.payload, skipRefresh);
     },
   );
 

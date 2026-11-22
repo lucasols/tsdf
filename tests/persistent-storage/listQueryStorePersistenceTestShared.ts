@@ -110,6 +110,7 @@ export function createEnv(options: {
   pinnedItems?: string[];
   pinnedQueries?: ListQueryParams[];
   ignoreItems?: string[] | ((payload: string) => boolean);
+  persistenceEnabled?: () => boolean;
   serverData?: Tables<Row>;
   onPersistentStorageError?: (error: unknown) => void;
   partialResources?: PartialResourcesConfig<Row>;
@@ -158,6 +159,7 @@ export function createEnv(options: {
       pinnedItems: options.pinnedItems,
       pinnedQueries: options.pinnedQueries,
       ignoreItems: options.ignoreItems,
+      enabled: options.persistenceEnabled,
       onPersistentStorageError: options.onPersistentStorageError,
       offline: options.offlineNetwork ? { operations: {} } : undefined,
     },
