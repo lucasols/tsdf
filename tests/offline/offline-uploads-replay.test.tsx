@@ -671,6 +671,8 @@ test('online mutations can resolve staged upload ids after reconnect and use the
       }),
     )
   ).unwrap();
+  // Staged but not sent yet: there is no server ref to read.
+  expect(session.getResolvedOfflineUploadRef('asset-1')).toBeNull();
 
   await act(async () => {
     network.goOnline();
@@ -723,6 +725,8 @@ test('online mutations can resolve staged upload ids after reconnect and use the
       source: 'manual'
       state: 'uploaded'
   `);
+  // Synchronous code reads the ref of the uploaded file without uploading.
+  expect(session.getResolvedOfflineUploadRef('asset-1')).toBe('server:asset-1');
 });
 
 test('upload metadata is exposed by the upload status APIs and handed to the transport when a queued mutation replays its upload dependency', async () => {

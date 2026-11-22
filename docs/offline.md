@@ -708,6 +708,7 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `deleteOfflineUpload(id)`
 - `resolveOfflineUpload(id)`
 - `resolveOfflineUploads(ids)`
+- `getResolvedOfflineUploadRef(id)` — see [Following a released upload to its server ref](#following-a-released-upload-to-its-server-ref)
 - `useOfflineUploads()`
 - `useOfflineUploadFile(id)` — see [Rendering staged files](#rendering-staged-files)
 
@@ -941,6 +942,16 @@ function ImageNode({ uploadId }: { uploadId: string }) {
   if (staged.resolvedRef) return <img src={staged.resolvedRef.url} />;
 
   return <ImagePlaceholder isLoading={staged.status === 'loading'} />;
+}
+```
+
+Code that runs outside of render (building a mutation input, replacing ids in editor content, cleaning up removed files) reads the same ref synchronously with `storeManager.getResolvedOfflineUploadRef(id)`. It returns the `resolvedRef` of a staged upload in `uploaded` state (the entry `getOfflineUploads()` lists, also when another tab sent it), or the ref of a sent upload that was deleted, and `null` otherwise: not sent yet, last attempt failed, unknown id, or while the session is still restoring its stored uploads after a reload. It is typed with the upload ref of the manager.
+
+```ts
+function serializeBody(body: EditorContent) {
+  return replaceImageIds(body, (uploadId) =>
+    storeManager.getResolvedOfflineUploadRef(uploadId),
+  );
 }
 ```
 

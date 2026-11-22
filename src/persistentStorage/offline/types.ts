@@ -876,6 +876,11 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the latest session-scoped offline uploads for the session. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
   /**
+   * Returns the server ref an upload id resolves to without uploading, or
+   * `null`. See `storeManager.getResolvedOfflineUploadRef`.
+   */
+  getResolvedOfflineUploadRef: (id: string) => TUploadRef | null;
+  /**
    * Resolves a staged upload id to its latest final ref, uploading first if
    * needed. Rejects with the error thrown by the `upload` transport, leaving
    * the upload `failed`; the session failure classifiers are not consulted.

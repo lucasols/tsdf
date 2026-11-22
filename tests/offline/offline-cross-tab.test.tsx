@@ -1655,6 +1655,46 @@ test('deleting a sent file in one tab makes its id unknown in every open tab', a
   );
 });
 
+test('every open tab reads the server ref of a file synchronously once it is sent, also after another tab deleted it', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+  // What the app's synchronous code (e.g. serializing editor content) reads
+  // for the photo id in each tab.
+  const readRefInBothTabs = () =>
+    [tabA, tabB].map((tab) =>
+      tab.storeManager.getResolvedOfflineUploadRef('photo'),
+    );
+
+  // Offline, the user picks a photo in tab B and saves an edit with it: the
+  // photo is not sent yet, so it has no ref anywhere.
+  await tabB.stageFile('photo');
+  await tabB.queueEditWithStagedFile(2, 'photo');
+  expect(readRefInBothTabs()).toMatchInlineSnapshot(`[null, null]`);
+
+  // The user switches to tab A, which uploads the photo on reconnect, sends
+  // the edit and deletes the staged photo: no queued work uses it anymore.
+  setDocumentHidden(false);
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A uploaded photo', 'tab A sent doc = 2 with "server:photo"']`,
+  );
+
+  // Both tabs, including the one that did not send it, read its server ref.
+  expect(readRefInBothTabs()).toMatchInlineSnapshot(
+    `['server:photo', 'server:photo']`,
+  );
+
+  // Deleting the sent photo forgets its ref in every tab.
+  const deleted = tabA.storeManager.deleteOfflineUpload('photo');
+  await advanceTime(100);
+  expect((await deleted).ok).toBe(true);
+  expect(readRefInBothTabs()).toMatchInlineSnapshot(`[null, null]`);
+});
+
 test('discarding a conflict in one tab deletes the file another tab staged for it', async () => {
   const opfs = createMockBrowserOpfs();
   network.setOffline();

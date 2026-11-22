@@ -136,6 +136,7 @@ Synchronous equivalents:
 - `getOfflineEntities()`
 - `getOfflineResolutions()`
 - `getOfflineUploads()`
+- `getResolvedOfflineUploadRef(id)`: the server ref of a sent upload (staged as `uploaded`, or deleted after it was sent), or `null`. See [Offline](./offline.md#following-a-released-upload-to-its-server-ref)
 
 Runtime controls:
 

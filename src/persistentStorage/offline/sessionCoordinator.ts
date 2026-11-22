@@ -1697,6 +1697,22 @@ class SessionOfflineCoordinator {
     return this.store.state.uploads;
   }
 
+  /**
+   * Server ref `id` resolves to without uploading anything: the ref of a
+   * staged upload in `uploaded` state, or of an upload released after it was
+   * sent. `null` otherwise.
+   */
+  getResolvedUploadRef(id: string): ValidPayload | null {
+    // The published list, so uploads another tab sent count too.
+    const upload = this.store.state.uploads.find(
+      (candidate) => candidate.id === id,
+    );
+    if (upload) {
+      return upload.state === 'uploaded' ? (upload.resolvedRef ?? null) : null;
+    }
+    return this.#releasedUploadRefs.get(id) ?? null;
+  }
+
   async saveUpload(args: {
     id: string;
     file: Blob | File;
@@ -4401,6 +4417,15 @@ export function createOfflineSession<
       return castUploads<TUploadRef>(
         getActiveCoordinator(false)?.getUploads() ?? [],
       );
+    },
+    getResolvedOfflineUploadRef: (id) => {
+      if (getSessionKey() === false) return null;
+
+      const resolvedRef =
+        getActiveCoordinator(false)?.getResolvedUploadRef(id) ?? null;
+      return resolvedRef === null
+        ? null
+        : castResolvedUploadRef<TUploadRef>(resolvedRef);
     },
     resolveOfflineUpload: async (id) => {
       const coordinator = getActiveCoordinator();
