@@ -248,21 +248,8 @@ type ListQueryPersistenceSetup<
   ): void;
   maybeHydrateItems(itemKeys: string[]): Promise<boolean[]>;
   maybeHydrateQueries(queryKeys: string[]): Promise<boolean[]>;
-  /**
-   * Loads items from persistent storage. With `touch: false` they don't count
-   * as used until `touchItemsLoadedWithoutTouch` is called for them.
-   */
-  preloadItems(itemKeys: string[], touch?: boolean): Promise<boolean[]>;
-  /**
-   * Loads queries and their rows from persistent storage. With `touch: false`
-   * they don't count as used until `touchQueriesLoadedWithoutTouch` is called
-   * for them.
-   */
-  preloadQueries(queryKeys: string[], touch?: boolean): Promise<boolean[]>;
-  /** Records in storage the use of queries (and their rows) loaded without touch. */
-  touchQueriesLoadedWithoutTouch(this: void, queryKeys: string[]): void;
-  /** Records in storage the use of items loaded without touch. */
-  touchItemsLoadedWithoutTouch(this: void, itemKeys: string[]): void;
+  preloadItems(itemKeys: string[]): Promise<boolean[]>;
+  preloadQueries(queryKeys: string[]): Promise<boolean[]>;
   preloadItemsByDerivedQueryGroup(groupKeys: string[]): Promise<boolean[]>;
   getHydratedItemKeys(this: void): string[];
   getHydratedQueryKeys(this: void): string[];
@@ -273,6 +260,16 @@ type ListQueryPersistenceSetup<
   getPersistedQueryKeys(
     this: void,
   ): ReadonlySet<string> | Promise<ReadonlySet<string>>;
+  /**
+   * Reads saved queries without loading them into the store or counting them
+   * as used. Synchronous for local storage.
+   */
+  peekPersistedQueries(
+    this: void,
+    queryKeys: string[],
+  ):
+    | (ParsedPersistedListQueryData<QueryPayload> | undefined)[]
+    | Promise<(ParsedPersistedListQueryData<QueryPayload> | undefined)[]>;
   readHydratedItem(
     this: void,
     itemKey: string,
@@ -630,11 +627,6 @@ export function setupListQueryPersistence<
   let suppressedPersistedStateFlushes = 0;
   const pendingItemPreloads = new Map<string, Promise<boolean>>();
   const pendingQueryPreloads = new Map<string, Promise<boolean>>();
-  // Entries loaded for internal work (e.g. matching a temp entity's filter)
-  // without counting as used: their storage access time is updated only once
-  // the app uses them
-  const itemKeysLoadedWithoutTouch = new Set<string>();
-  const queryKeysLoadedWithoutTouch = new Set<string>();
   const itemSnapshotByKey = new Map<string, string>();
   const querySnapshotByKey = new Map<string, string>();
   const itemSizeBytesByKey = new Map<string, number>();
@@ -1539,7 +1531,6 @@ export function setupListQueryPersistence<
 
   function readHydratedLocalStorageItem(
     itemKey: string,
-    touch = true,
   ):
     | {
         item: ItemState;
@@ -1616,17 +1607,12 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    if (touch) {
-      itemKeysLoadedWithoutTouch.delete(itemKey);
-      scheduleIdleCleanup(() =>
-        refreshLocalStorageTimestamp(storageKey, {
-          metadata: 'namespace',
-          namespacePrefix: prefix,
-        }),
-      );
-    } else {
-      itemKeysLoadedWithoutTouch.add(itemKey);
-    }
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(storageKey, {
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      }),
+    );
     rememberHydratedItem(itemKey, cacheEntry.data);
     return itemState;
   }
@@ -1746,9 +1732,45 @@ export function setupListQueryPersistence<
     return previousPersistedQuery;
   }
 
+  function peekPersistedQueries(
+    queryKeys: string[],
+  ):
+    | (ParsedPersistedListQueryData<QueryPayload> | undefined)[]
+    | Promise<(ParsedPersistedListQueryData<QueryPayload> | undefined)[]> {
+    const parse = (value: unknown) =>
+      parsePersistedListQueryData(value, config.queryPayloadSchema) ??
+      undefined;
+
+    if (localStorageAdapter === null) {
+      return queryNamespace
+        .loadMany(queryKeys, { touch: 'never' })
+        .then((entries) =>
+          entries.map((entry) => (entry ? parse(entry) : undefined)),
+        )
+        .catch(() => []);
+    }
+
+    const adapter = localStorageAdapter;
+    return queryKeys.map((queryKey) => {
+      const storageKey = getLocalStorageQueryStorageKey(queryKey);
+      const rawEntry =
+        storageKey === false ? null : adapter.readRaw(storageKey);
+      const entry =
+        rawEntry === null
+          ? null
+          : parseCompactListQueryLocalStorageEntry(rawEntry);
+      if (entry === null || entry.version !== version) return undefined;
+      return parse({
+        payload: entry.payload,
+        items: entry.items,
+        hasMore: entry.hasMore,
+        missingItems: entry.missingItems,
+      });
+    });
+  }
+
   function readHydratedLocalStorageQuery(
     queryKey: string,
-    touch = true,
   ): ParsedPersistedListQueryData<QueryPayload> | undefined {
     if (syncHydrationQueryMissCache.has(queryKey)) return undefined;
 
@@ -1794,14 +1816,9 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    if (touch) {
-      queryKeysLoadedWithoutTouch.delete(queryKey);
-      scheduleIdleCleanup(() => {
-        void touchLocalStorageQueryEntry(queryKey);
-      });
-    } else {
-      queryKeysLoadedWithoutTouch.add(queryKey);
-    }
+    scheduleIdleCleanup(() => {
+      void touchLocalStorageQueryEntry(queryKey);
+    });
     rememberHydratedQuery(
       queryKey,
       {
@@ -1956,37 +1973,7 @@ export function setupListQueryPersistence<
     return true;
   }
 
-  function trackItemLoadTouch(
-    itemKey: string,
-    loaded: boolean,
-    touch: boolean,
-  ): boolean {
-    if (!loaded) return loaded;
-    if (touch) {
-      itemKeysLoadedWithoutTouch.delete(itemKey);
-    } else {
-      itemKeysLoadedWithoutTouch.add(itemKey);
-    }
-    return loaded;
-  }
-
-  /**
-   * A touching load that joins a pending one without touch records the use
-   * itself once it resolves.
-   */
-  function joinItemPreload(
-    itemKey: string,
-    pending: Promise<boolean>,
-    touch: boolean,
-  ): Promise<boolean> {
-    if (!touch) return pending;
-    return pending.then((loaded) => {
-      if (loaded) touchItemsLoadedWithoutTouch([itemKey]);
-      return loaded;
-    });
-  }
-
-  async function preloadItem(itemKey: string, touch = true): Promise<boolean> {
+  async function preloadItem(itemKey: string): Promise<boolean> {
     if (!storeRef) return false;
     const existingItemQuery = storeRef.state.itemQueries[itemKey];
     const existingItem = storeRef.state.items[itemKey];
@@ -1999,9 +1986,7 @@ export function setupListQueryPersistence<
     if (existingItemQuery === null) return false;
 
     if (localStorageAdapter !== null) {
-      const itemState =
-        readRememberedHydratedItem(itemKey) ??
-        readHydratedLocalStorageItem(itemKey, touch);
+      const itemState = readHydratedItem(itemKey);
       if (!itemState) return false;
 
       materializeHydratedItemState(itemKey, itemState);
@@ -2010,18 +1995,13 @@ export function setupListQueryPersistence<
     }
 
     const existingPromise = pendingItemPreloads.get(itemKey);
-    if (existingPromise)
-      return joinItemPreload(itemKey, existingPromise, touch);
+    if (existingPromise) return existingPromise;
 
     const currentGeneration = generation;
     const promise = itemNamespace
-      .load(itemKey, { touch: touch ? 'coarse' : 'never' })
+      .load(itemKey, { touch: 'coarse' })
       .then((cached) =>
-        trackItemLoadTouch(
-          itemKey,
-          resolveAsyncPreloadedItem(itemKey, cached, currentGeneration),
-          touch,
-        ),
+        resolveAsyncPreloadedItem(itemKey, cached, currentGeneration),
       )
       .finally(() => {
         if (currentGeneration === generation) {
@@ -2033,14 +2013,9 @@ export function setupListQueryPersistence<
     return promise;
   }
 
-  async function preloadItems(
-    itemKeys: string[],
-    touch = true,
-  ): Promise<boolean[]> {
+  async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
     if (localStorageAdapter !== null || itemKeys.length <= 1) {
-      return Promise.all(
-        itemKeys.map((itemKey) => preloadItem(itemKey, touch)),
-      );
+      return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
     }
     if (!storeRef) return itemKeys.map(() => false);
 
@@ -2061,10 +2036,7 @@ export function setupListQueryPersistence<
 
       const existingPromise = pendingItemPreloads.get(itemKey);
       if (existingPromise !== undefined) {
-        resultsByKey.set(
-          itemKey,
-          joinItemPreload(itemKey, existingPromise, touch),
-        );
+        resultsByKey.set(itemKey, existingPromise);
         continue;
       }
 
@@ -2074,20 +2046,16 @@ export function setupListQueryPersistence<
     if (batchKeys.length > 0) {
       const currentGeneration = generation;
       const batchPromise = itemNamespace
-        .loadMany(batchKeys, { touch: touch ? 'coarse' : 'never' })
+        .loadMany(batchKeys, { touch: 'coarse' })
         .then((cachedEntries) => {
           const resolved = new Map<string, boolean>();
           for (const [index, itemKey] of batchKeys.entries()) {
             resolved.set(
               itemKey,
-              trackItemLoadTouch(
+              resolveAsyncPreloadedItem(
                 itemKey,
-                resolveAsyncPreloadedItem(
-                  itemKey,
-                  cachedEntries[index] ?? null,
-                  currentGeneration,
-                ),
-                touch,
+                cachedEntries[index] ?? null,
+                currentGeneration,
               ),
             );
           }
@@ -2114,23 +2082,18 @@ export function setupListQueryPersistence<
     );
   }
 
-  async function preloadQuery(
-    queryKey: string,
-    touch = true,
-  ): Promise<boolean> {
+  async function preloadQuery(queryKey: string): Promise<boolean> {
     if (!storeRef) return false;
     if (storeRef.state.queries[queryKey] !== undefined) return true;
 
     if (localStorageAdapter !== null) {
-      const persistedQuery =
-        readRememberedPersistedQueryData(queryKey) ??
-        readHydratedLocalStorageQuery(queryKey, touch);
+      const persistedQuery = readPersistedQueryData(queryKey);
       if (!persistedQuery) return false;
 
       const activeStore = storeRef;
 
       for (const itemKey of persistedQuery.items) {
-        void preloadItem(itemKey, touch);
+        void preloadItem(itemKey);
       }
 
       const filteredItemKeys = persistedQuery.items.filter((itemKey) => {
@@ -2148,19 +2111,11 @@ export function setupListQueryPersistence<
     }
 
     const existingPromise = pendingQueryPreloads.get(queryKey);
-    if (existingPromise) {
-      // A touching load that joins one without touch records the use itself
-      return touch
-        ? existingPromise.then((loaded) => {
-            if (loaded) touchQueriesLoadedWithoutTouch([queryKey]);
-            return loaded;
-          })
-        : existingPromise;
-    }
+    if (existingPromise) return existingPromise;
 
     const currentGeneration = generation;
     const promise = queryNamespace
-      .load(queryKey, { touch: touch ? 'coarse' : 'never' })
+      .load(queryKey, { touch: 'coarse' })
       .then(async (cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;
@@ -2177,14 +2132,9 @@ export function setupListQueryPersistence<
 
         rememberHydratedQuery(queryKey, cached);
 
-        await preloadItems(persistedQuery.items, touch);
+        await preloadItems(persistedQuery.items);
         if (currentGeneration !== generation || activeStore !== storeRef) {
           return false;
-        }
-        if (touch) {
-          queryKeysLoadedWithoutTouch.delete(queryKey);
-        } else {
-          queryKeysLoadedWithoutTouch.add(queryKey);
         }
         if (activeStore.state.queries[queryKey] !== undefined) {
           return true;
@@ -2221,68 +2171,8 @@ export function setupListQueryPersistence<
     return promise;
   }
 
-  async function preloadQueries(
-    queryKeys: string[],
-    touch = true,
-  ): Promise<boolean[]> {
-    return Promise.all(
-      queryKeys.map((queryKey) => preloadQuery(queryKey, touch)),
-    );
-  }
-
-  function touchItemsLoadedWithoutTouch(itemKeys: string[]): void {
-    if (itemKeysLoadedWithoutTouch.size === 0) return;
-
-    const touchedItemKeys = itemKeys.filter((itemKey) =>
-      itemKeysLoadedWithoutTouch.delete(itemKey),
-    );
-    if (touchedItemKeys.length === 0) return;
-
-    if (localStorageAdapter === null) {
-      void itemNamespace
-        .commit({ touches: touchedItemKeys.map((key) => ({ key })) })
-        .catch(() => {});
-      return;
-    }
-
-    const prefix = getItemPrefix();
-    if (prefix === false) return;
-    scheduleIdleCleanup(() => {
-      for (const itemKey of touchedItemKeys) {
-        refreshLocalStorageTimestamp(`${prefix}${itemKey}`, {
-          metadata: 'namespace',
-          namespacePrefix: prefix,
-        });
-      }
-    });
-  }
-
-  function touchQueriesLoadedWithoutTouch(queryKeys: string[]): void {
-    if (queryKeysLoadedWithoutTouch.size === 0) return;
-
-    const touchedQueryKeys = queryKeys.filter((queryKey) =>
-      queryKeysLoadedWithoutTouch.delete(queryKey),
-    );
-    if (touchedQueryKeys.length === 0) return;
-
-    if (localStorageAdapter === null) {
-      void queryNamespace
-        .commit({ touches: touchedQueryKeys.map((key) => ({ key })) })
-        .catch(() => {});
-    } else {
-      scheduleIdleCleanup(() => {
-        for (const queryKey of touchedQueryKeys) {
-          void touchLocalStorageQueryEntry(queryKey);
-        }
-      });
-    }
-
-    // A used query also uses the rows it lists
-    touchItemsLoadedWithoutTouch(
-      touchedQueryKeys.flatMap(
-        (queryKey) => storeRef?.state.queries[queryKey]?.items ?? [],
-      ),
-    );
+  async function preloadQueries(queryKeys: string[]): Promise<boolean[]> {
+    return Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
   }
 
   async function preloadItemsByDerivedQueryGroup(
@@ -2290,25 +2180,6 @@ export function setupListQueryPersistence<
   ): Promise<boolean[]> {
     if (!getItemDerivedGroup) {
       return groupKeys.map(() => false);
-    }
-
-    // The derived lists of these groups show the rows of the group already in
-    // memory, so the ones loaded without touch to match a filter are now used
-    if (itemKeysLoadedWithoutTouch.size > 0 && storeRef) {
-      const activeStore = storeRef;
-      const groupKeySet = new Set(groupKeys);
-      const shownItemKeys = [...itemKeysLoadedWithoutTouch].filter(
-        (itemKey) => {
-          const item = activeStore.state.items[itemKey];
-          const itemQuery = activeStore.state.itemQueries[itemKey];
-          return (
-            !!item &&
-            !!itemQuery &&
-            groupKeySet.has(getItemDerivedGroup(item, itemQuery.payload))
-          );
-        },
-      );
-      touchItemsLoadedWithoutTouch(shownItemKeys);
     }
 
     const resultsByGroupKey = new Map<string, Promise<boolean>>();
@@ -4278,8 +4149,6 @@ export function setupListQueryPersistence<
     generation++;
     pendingItemPreloads.clear();
     pendingQueryPreloads.clear();
-    itemKeysLoadedWithoutTouch.clear();
-    queryKeysLoadedWithoutTouch.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
     incompleteRestoredQueryKeys.clear();
@@ -4323,8 +4192,6 @@ export function setupListQueryPersistence<
     querySizeBytesByKey.clear();
     budgetEvictedItemRecency.clear();
     budgetEvictedQueryRecency.clear();
-    itemKeysLoadedWithoutTouch.clear();
-    queryKeysLoadedWithoutTouch.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
     incompleteRestoredQueryKeys.clear();
@@ -4340,13 +4207,12 @@ export function setupListQueryPersistence<
     maybeHydrateQueries,
     preloadItems,
     preloadQueries,
-    touchQueriesLoadedWithoutTouch,
-    touchItemsLoadedWithoutTouch,
     preloadItemsByDerivedQueryGroup,
     getHydratedItemKeys: () => [...hydratedPersistedItemKeys],
     getHydratedQueryKeys: () => [...hydratedPersistedQueryKeys],
     getPersistedQueryKeys: () =>
       knownPersistedQueryKeys ?? ensureKnownPersistedQueryKeys(),
+    peekPersistedQueries,
     readHydratedItem,
     readHydratedQuery,
     hasAsyncPreload: localStorageAdapter === null,

@@ -5,7 +5,6 @@ import { rc_array, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type {
-  DerivedQueriesConfig,
   ListQueryOfflineOperationDefinition,
   OfflineSessionConfig,
   OfflineTempEntityPendingEntry,
@@ -22,7 +21,6 @@ import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
-  pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
@@ -99,7 +97,6 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   failCreateUser = false,
   storageAdapter = 'local-sync',
   keepPendingData = false,
-  derivedQueries,
 }: {
   sessionKey: string;
   storeName: string;
@@ -117,7 +114,6 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   storageAdapter?: 'local-sync' | typeof opfsPersistentStorage;
   /** The saved row keeps the pending row's data instead of the server's. */
   keepPendingData?: boolean;
-  derivedQueries?: DerivedQueriesConfig<UserRow, ListQueryParams, string>;
 }) {
   const env = createListQueryStoreTestEnv<
     UserRow,
@@ -134,7 +130,6 @@ function createUsersEnv<TPartialResources extends boolean = false>({
     }),
     testScenario,
     partialResources,
-    derivedQueries,
     persistentStorage: {
       adapter: storageAdapter,
       schema: userRowSchema,
@@ -200,7 +195,6 @@ function createUsersEnv<TPartialResources extends boolean = false>({
  */
 async function restartOfflineAndCreateRowForFilteredLists(
   storageAdapter: 'local-sync' | typeof opfsPersistentStorage,
-  derivedQueries?: DerivedQueriesConfig<UserRow, ListQueryParams, string>,
 ) {
   const sessionKey = 'temp-queries-filter-access-session';
   const storeName = 'temp-queries-filter-access-store';
@@ -262,7 +256,6 @@ async function restartOfflineAndCreateRowForFilteredLists(
       appendTo: 'start',
     },
     storageAdapter,
-    derivedQueries,
   } satisfies Parameters<typeof createUsersEnv>[0];
 
   function renderUsersList(
@@ -901,25 +894,30 @@ describe('temp entities declared in list queries', () => {
   );
 
   test.each([
+    { storage: 'local storage', storageAdapter: 'local-sync', read: 'hook' },
+    {
+      storage: 'async storage',
+      storageAdapter: opfsPersistentStorage,
+      read: 'hook',
+    },
     {
       storage: 'local storage',
       storageAdapter: 'local-sync',
-      // Local storage saves a changed row with a new access time
-      graceRowAfterUpdate: '10h',
+      read: 'imperative',
     },
     {
       storage: 'async storage',
       storageAdapter: opfsPersistentStorage,
-      graceRowAfterUpdate: '0h',
+      read: 'imperative',
     },
   ] as const)(
-    'saved lists a filter does not match keep their last access time, so storage expiry and eviction still see them as unused ($storage)',
-    async ({ storageAdapter, graceRowAfterUpdate }) => {
+    'saved lists a filter does not match keep their last access time, so storage expiry and eviction still see them as unused ($storage, $read read)',
+    async ({ storageAdapter, read }) => {
       const { restarted, readSavedAccessTimes, renderUsersList } =
         await restartOfflineAndCreateRowForFilteredLists(storageAdapter);
 
-      // At 7h every saved list was read to match the filter, but only the "A"
-      // list got the row, so only it and its rows count as used. The full
+      // At 7h every saved list was matched against the filter, but only the
+      // "A" list got the row, so only it and its rows count as used. The full
       // list and the row only it has keep their 0h access time.
       expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
         adaRow: '7h'
@@ -928,51 +926,34 @@ describe('temp entities declared in list queries', () => {
         usersStartingWithAList: '7h'
       `);
 
-      // At 10h a realtime update changes Grace's row, which only the full
-      // list contains. Changing a row doesn't open it or the lists that
-      // contain it, so the full list keeps its 0h access time, and Grace's
-      // row only gets the access time its storage saves changed rows with.
-      await advanceTime(3 * HOUR_MS);
-      act(() => {
-        restarted.env.apiStore.updateItemState('users||2', (draft) => {
-          draft.name = 'Grace Hopper';
-        });
-      });
+      // At 14h the app reads the full list, with a screen or an imperative
+      // read. It's a real use, so it and its rows now count as used.
+      await advanceTime(7 * HOUR_MS);
+      if (read === 'hook') {
+        const allUsers = renderUsersList(restarted.env, usersQuery);
+        await flushAllTimers();
+        // The filter left the full list out, so it doesn't have the row
+        expect(allUsers.result.current.items).toMatchInlineSnapshot(
+          `['Ada', 'Grace']`,
+        );
+        allUsers.unmount();
+      } else {
+        const result = await resolveAfterAllTimers(
+          restarted.env.apiStore.getQueryFromStateOrFetch(usersQuery),
+        );
+        expect(
+          result.ok && result.value.items.map(({ data }) => data.name),
+        ).toMatchInlineSnapshot(`['Ada', 'Grace']`);
+      }
       await flushAllTimers();
-      expect(
-        pick(readSavedAccessTimes(), [
-          'allUsersList',
-          'usersStartingWithAList',
-        ]),
-      ).toMatchInlineSnapshot(`
-        allUsersList: '0h'
-        usersStartingWithAList: '7h'
-      `);
-      expect(readSavedAccessTimes().graceRow).toBe(graceRowAfterUpdate);
-
-      // At 14h the user opens the full list, already in memory from the
-      // filter match. Opening it is a real use, so it and its rows now count
-      // as used.
-      await advanceTime(4 * HOUR_MS);
-      const allUsers = renderUsersList(restarted.env, usersQuery);
-      await flushAllTimers();
-      // The filter left the full list out, so it doesn't have the row
-      expect(allUsers.result.current.items).toMatchInlineSnapshot(
-        `['Ada', 'Grace Hopper']`,
-      );
-      expect(
-        pick(readSavedAccessTimes(), [
-          'allUsersList',
-          'usersStartingWithAList',
-          'graceRow',
-        ]),
-      ).toMatchInlineSnapshot(`
+      // Ada was already loaded with the "A" list at 7h, so only the full list
+      // and Grace, read from storage now, get a new access time
+      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+        adaRow: '7h'
         allUsersList: '14h'
         graceRow: '14h'
         usersStartingWithAList: '7h'
       `);
-
-      allUsers.unmount();
     },
   );
 
@@ -1012,58 +993,6 @@ describe('temp entities declared in list queries', () => {
       `);
 
       replayed.env.apiStore.dispose();
-    },
-  );
-
-  test.each([
-    { storage: 'local storage', storageAdapter: 'local-sync' },
-    { storage: 'async storage', storageAdapter: opfsPersistentStorage },
-  ] as const)(
-    'rows loaded only to match a filter count as used once a derived list shows them ($storage)',
-    async ({ storageAdapter }) => {
-      const { restarted, readSavedAccessTimes, renderUsersList } =
-        await restartOfflineAndCreateRowForFilteredLists(storageAdapter, {
-          // Offline, a filtered list that was never saved is derived from the
-          // users of the same table
-          getQueryGroup: (payload) => payload.tableId,
-          getItemGroup: (_item, itemPayload) =>
-            itemPayload.split('||')[0] ?? '',
-          isComplete: () => false,
-          deriveQuery: (payload, items) => {
-            const startsWith = payload.filters?.find(
-              (filter) => filter.op === 'startsWith',
-            )?.value;
-            if (typeof startsWith !== 'string') return false;
-            return items
-              .filter(({ data }) => data.name.startsWith(startsWith))
-              .map(({ key }) => key);
-          },
-        });
-
-      // Grace was read at 7h only because the full list was matched against
-      // the filter, so her row doesn't count as used yet
-      expect(readSavedAccessTimes().graceRow).toBe('0h');
-
-      // At 10h the user opens a "G" list that was never saved. It is derived
-      // from the users already in memory, so Grace is shown and her row
-      // counts as used. The full list was not opened, so it keeps 0h.
-      await advanceTime(3 * HOUR_MS);
-      const usersStartingWithG = renderUsersList(restarted.env, {
-        tableId: 'users',
-        filters: [{ op: 'startsWith', field: 'name', value: 'G' }],
-      });
-      await flushAllTimers();
-      expect(usersStartingWithG.result.current.items).toMatchInlineSnapshot(
-        `['Grace']`,
-      );
-      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
-        adaRow: '7h'
-        allUsersList: '0h'
-        graceRow: '10h'
-        usersStartingWithAList: '7h'
-      `);
-
-      usersStartingWithG.unmount();
     },
   );
 

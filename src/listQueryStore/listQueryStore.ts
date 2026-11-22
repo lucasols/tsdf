@@ -64,6 +64,7 @@ import type {
   OfflineDirectMutationContext,
   OfflineMutationUploadsInput,
 } from '../persistentStorage/offlineUploadTypes';
+import type { ParsedPersistedListQueryData } from '../persistentStorage/parsePersistedData';
 import {
   createProtectedStorageKey,
   isOfflineNetworkModeActiveSync,
@@ -113,7 +114,7 @@ import {
   type ValidPayload,
   type ValidStoreState,
 } from '../utils/storeShared';
-import { createFetchApi } from './createFetchApi';
+import { createFetchApi, type FilterQueryFn } from './createFetchApi';
 import {
   createMutationApi,
   type DroppedFieldInvalidation,
@@ -1824,24 +1825,16 @@ export function createListQueryStore<
         : Promise.resolve(),
   };
 
-  /**
-   * With `inMemoryOnly`, only the in-memory cache order is refreshed, so a
-   * query loaded without touch still doesn't count as used in storage. Used
-   * when a row of the query changes, which is not a use of the list.
-   */
-  function touchQueries(queryKeys: string[], inMemoryOnly = false): void {
+  function touchQueries(queryKeys: string[]): void {
     queryCacheRuntime.touch(queryKeys, (queryKey) => {
       return store.state.queries[queryKey] !== undefined;
     });
-    if (!inMemoryOnly) persistence?.touchQueriesLoadedWithoutTouch(queryKeys);
   }
 
-  /** `inMemoryOnly` works like in `touchQueries`, for changed rows. */
-  function touchItems(itemKeys: string[], inMemoryOnly = false): void {
+  function touchItems(itemKeys: string[]): void {
     itemCacheRuntime.touch(itemKeys, (itemKey) => {
       return store.state.itemQueries[itemKey] !== undefined;
     });
-    if (!inMemoryOnly) persistence?.touchItemsLoadedWithoutTouch(itemKeys);
   }
 
   function registerActiveQueryRefs(queryKeys: string[]): () => void {
@@ -2074,28 +2067,21 @@ export function createListQueryStore<
     }));
   }
 
-  /**
-   * With `touch: false` the queries are loaded for internal work and don't
-   * count as used, in memory or in storage, until the app uses them.
-   */
   async function preloadQueriesFromPersistentStorage(
     queryKeys: string[],
-    touch = true,
   ): Promise<boolean[]> {
     if (!persistence) return queryKeys.map(() => false);
-    const results = await persistence.preloadQueries(queryKeys, touch);
+    const results = await persistence.preloadQueries(queryKeys);
     const preloadedQueryKeys = queryKeys.filter(
       (_key, index) => results[index],
     );
     if (preloadedQueryKeys.length > 0) {
-      if (touch) {
-        touchQueries(preloadedQueryKeys);
-        touchItems(
-          preloadedQueryKeys.flatMap(
-            (queryKey) => store.state.queries[queryKey]?.items ?? [],
-          ),
-        );
-      }
+      touchQueries(preloadedQueryKeys);
+      touchItems(
+        preloadedQueryKeys.flatMap(
+          (queryKey) => store.state.queries[queryKey]?.items ?? [],
+        ),
+      );
       if (shouldScheduleCacheLimitEnforcement()) {
         scheduleCacheLimitEnforcement();
       }
@@ -2414,22 +2400,14 @@ export function createListQueryStore<
           loadedFields,
         }) => {
           if (!pendingEntity || typeof pendingEntity !== 'object') return;
-          // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
-          const tempItemPayload = __LEGIT_CAST__<ItemPayload, ValidPayload>(
-            tempId,
-          );
           addItemToState(
-            tempItemPayload,
+            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
+            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
             // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
             __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
             addToQueries && { addItemToQueries: addToQueries },
             // Loaded fields are only tracked with partial resources
             partialResources ? loadedFields : undefined,
-          );
-          // The lists that got the row are used, also when they were loaded
-          // without touch to match a filter
-          touchQueries(
-            getRelatedQueryKeysForItemEntries([{ payload: tempItemPayload }]),
           );
         },
         rollbackPendingEntity: ({ tempId }) => {
@@ -2752,65 +2730,87 @@ export function createListQueryStore<
       return store.state.items[itemKey] === undefined ? itemKey : false;
     });
     const unloadedQueryKeys = new Set<string>();
-    // Loaded only to be matched against a filter, so they don't count as used
-    // unless they get the item
-    const filterCandidateQueryKeys = new Set<string>();
-    let isDeclaredWithFilter = false;
+    const filters: FilterQueryFn<QueryPayload>[] = [];
     for (const { queries } of addToQueries) {
-      // A filter needs each query's state, so it runs once they are loaded
       if (typeof queries === 'function') {
-        isDeclaredWithFilter = true;
+        filters.push(queries);
         continue;
       }
       for (const { key } of getQueriesKeyArray(queries)) {
         if (store.state.queries[key] === undefined) unloadedQueryKeys.add(key);
       }
     }
-    // A filter can match any saved query, so all the ones that are only in
-    // persistent storage are loaded for it
-    const addFilterCandidateQueryKeys = (
-      persistedQueryKeys: ReadonlySet<string>,
+
+    // A filter can match any saved query. It runs on the saved data of the
+    // ones not loaded yet, and only the matches are loaded, so the others don't
+    // count as used
+    const addMatchingQueryKeys = (
+      queryKeys: string[],
+      savedQueries: (ParsedPersistedListQueryData<QueryPayload> | undefined)[],
     ): void => {
-      for (const queryKey of persistedQueryKeys) {
-        if (
-          store.state.queries[queryKey] === undefined &&
-          !unloadedQueryKeys.has(queryKey)
-        ) {
-          filterCandidateQueryKeys.add(queryKey);
+      for (const [index, queryKey] of queryKeys.entries()) {
+        const savedQuery = savedQueries[index];
+        if (!savedQuery) continue;
+        const query: TSFDListQuery<QueryPayload> = {
+          error: null,
+          hasMore: savedQuery.hasMore,
+          items: savedQuery.items,
+          payload: savedQuery.payload,
+          refetchOnMount: 'lowPriority',
+          status: 'success',
+          wasLoaded: true,
+        };
+        try {
+          if (
+            filters.some((filter) => filter(query.payload, query, queryKey))
+          ) {
+            unloadedQueryKeys.add(queryKey);
+          }
+        } catch {
+          // The filter throws again when the item is added to the queries
         }
       }
     };
-    let persistedQueryKeysLoad: Promise<ReadonlySet<string>> | undefined;
-    if (isDeclaredWithFilter) {
-      const persistedQueryKeys = persistence.getPersistedQueryKeys();
-      if (persistedQueryKeys instanceof Promise) {
-        persistedQueryKeysLoad = persistedQueryKeys;
-      } else {
-        addFilterCandidateQueryKeys(persistedQueryKeys);
+    const matchSavedQueries = (
+      persistedQueryKeys: ReadonlySet<string>,
+    ): Promise<void> | undefined => {
+      const hydratedQueryKeys = new Set(persistence.getHydratedQueryKeys());
+      const candidateQueryKeys = [...persistedQueryKeys].filter(
+        (queryKey) =>
+          store.state.queries[queryKey] === undefined &&
+          !hydratedQueryKeys.has(queryKey) &&
+          !unloadedQueryKeys.has(queryKey),
+      );
+      if (candidateQueryKeys.length === 0) return undefined;
+      const savedQueries = persistence.peekPersistedQueries(candidateQueryKeys);
+      if (!(savedQueries instanceof Promise)) {
+        addMatchingQueryKeys(candidateQueryKeys, savedQueries);
+        return undefined;
       }
+      return savedQueries.then((queries) => {
+        addMatchingQueryKeys(candidateQueryKeys, queries);
+      });
+    };
+    let savedQueriesMatch: Promise<void> | undefined;
+    if (filters.length > 0) {
+      const persistedQueryKeys = persistence.getPersistedQueryKeys();
+      savedQueriesMatch =
+        persistedQueryKeys instanceof Promise
+          ? persistedQueryKeys.then(matchSavedQueries)
+          : matchSavedQueries(persistedQueryKeys);
     }
     if (
       unloadedItemKeys.length === 0 &&
       unloadedQueryKeys.size === 0 &&
-      filterCandidateQueryKeys.size === 0 &&
-      !persistedQueryKeysLoad
+      !savedQueriesMatch
     ) {
       return undefined;
     }
 
     const loadQueries = async (): Promise<void> => {
-      if (persistedQueryKeysLoad) {
-        addFilterCandidateQueryKeys(await persistedQueryKeysLoad);
-      }
-      await Promise.all([
-        unloadedQueryKeys.size > 0 &&
-          preloadQueriesFromPersistentStorage([...unloadedQueryKeys]),
-        filterCandidateQueryKeys.size > 0 &&
-          preloadQueriesFromPersistentStorage(
-            [...filterCandidateQueryKeys],
-            false,
-          ),
-      ]);
+      await savedQueriesMatch;
+      if (unloadedQueryKeys.size === 0) return;
+      await preloadQueriesFromPersistentStorage([...unloadedQueryKeys]);
     };
 
     return Promise.all([
@@ -4061,11 +4061,8 @@ export function createListQueryStore<
   function touchUpdatedItemEntries(
     itemEntries: { itemKey: string; payload: ItemPayload }[],
   ): void {
-    touchItems(
-      itemEntries.map(({ itemKey }) => itemKey),
-      true,
-    );
-    touchQueries(getRelatedQueryKeysForItemEntries(itemEntries), true);
+    touchItems(itemEntries.map(({ itemKey }) => itemKey));
+    touchQueries(getRelatedQueryKeysForItemEntries(itemEntries));
     if (shouldScheduleCacheLimitEnforcement()) {
       scheduleCacheLimitEnforcement();
     }
@@ -4109,7 +4106,7 @@ export function createListQueryStore<
     for (const { itemKey } of itemEntries) {
       cleanupItemStateMetadata(itemKey);
     }
-    touchQueries(relatedQueryKeys, true);
+    touchQueries(relatedQueryKeys);
   }
 
   let isDisposed = false;
