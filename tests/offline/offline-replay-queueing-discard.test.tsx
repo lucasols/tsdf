@@ -1082,17 +1082,17 @@ test('discarding a failed offline creation with a client-generated id removes th
   );
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time   | linus     |
-    0      | -         | -- offline: create Linus
-    .      | -         | offline:createUser queued
-    .      | Linus     | ui-initialized
-    1.01s  | Linus     | -- back online: the server rejects the creation until it needs a resolution
-    .      | Linus     | offline:createUser replay-started
-    6.01s  | Linus     | offline:createUser replay-started
-    11.01s | Linus     | offline:createUser replay-started
-    .      | Linus     | offline:createUser resolution-required
-    16.01s | Linus     | -- discard the creation: Linus is removed
-    .      | - deleted | ui-changed
+    time | linus     |
+    0    | -         | -- offline: create Linus
+    .    | -         | offline:createUser queued
+    .    | Linus     | ui-initialized
+    1s   | Linus     | -- back online: the server rejects the creation until it needs a resolution
+    .    | Linus     | offline:createUser replay-started
+    6s   | Linus     | offline:createUser replay-started
+    11s  | Linus     | offline:createUser replay-started
+    .    | Linus     | offline:createUser resolution-required
+    16s  | Linus     | -- discard the creation: Linus is removed
+    .    | - deleted | ui-changed
     "
   `);
 
