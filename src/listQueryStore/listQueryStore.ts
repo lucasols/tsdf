@@ -64,6 +64,7 @@ import type {
   OfflineDirectMutationContext,
   OfflineMutationUploadsInput,
 } from '../persistentStorage/offlineUploadTypes';
+import type { ParsedPersistedListQueryData } from '../persistentStorage/parsePersistedData';
 import {
   createProtectedStorageKey,
   isOfflineNetworkModeActiveSync,
@@ -114,7 +115,7 @@ import {
   type ValidPayload,
   type ValidStoreState,
 } from '../utils/storeShared';
-import { createFetchApi } from './createFetchApi';
+import { createFetchApi, type FilterQueryFn } from './createFetchApi';
 import {
   createMutationApi,
   type DroppedFieldInvalidation,
@@ -2753,49 +2754,97 @@ export function createListQueryStore<
       return store.state.items[itemKey] === undefined ? itemKey : false;
     });
     const unloadedQueryKeys = new Set<string>();
-    let isDeclaredWithFilter = false;
+    const filters: FilterQueryFn<QueryPayload>[] = [];
     for (const { queries } of addToQueries) {
-      // A filter needs each query's state, so it runs once they are loaded
       if (typeof queries === 'function') {
-        isDeclaredWithFilter = true;
+        filters.push(queries);
         continue;
       }
       for (const { key } of getQueriesKeyArray(queries)) {
         if (store.state.queries[key] === undefined) unloadedQueryKeys.add(key);
       }
     }
-    // A filter can match any saved query, so all the ones that are only in
-    // persistent storage are loaded for it
-    const addUnloadedPersistedQueryKeys = (
-      persistedQueryKeys: ReadonlySet<string>,
+
+    // A filter can match any saved query. It runs on the saved data of the
+    // ones not loaded yet, and only the matches are loaded, so the others don't
+    // count as used
+    const tempItemKeys = new Set(
+      tempPayloads.map((tempPayload) => getItemKey(tempPayload)),
+    );
+    const addMatchingQueryKeys = (
+      queryKeys: string[],
+      savedQueries: (ParsedPersistedListQueryData<QueryPayload> | undefined)[],
     ): void => {
-      for (const queryKey of persistedQueryKeys) {
-        if (store.state.queries[queryKey] === undefined) {
+      for (const [index, queryKey] of queryKeys.entries()) {
+        const savedQuery = savedQueries[index];
+        if (!savedQuery) continue;
+        // At replay only the lists that hold a temp row are reconciled, so
+        // they are loaded whatever the filter returns now, and the filter is
+        // not run on the others
+        if (tempItemKeys.size > 0) {
+          if (savedQuery.items.some((itemKey) => tempItemKeys.has(itemKey))) {
+            unloadedQueryKeys.add(queryKey);
+          }
+          continue;
+        }
+        const query: TSFDListQuery<QueryPayload> = {
+          error: null,
+          hasMore: savedQuery.hasMore,
+          items: savedQuery.items,
+          payload: savedQuery.payload,
+          refetchOnMount: 'lowPriority',
+          status: 'success',
+          wasLoaded: true,
+        };
+        try {
+          if (
+            filters.some((filter) => filter(query.payload, query, queryKey))
+          ) {
+            unloadedQueryKeys.add(queryKey);
+          }
+        } catch {
+          // Loaded so the filter runs again when the item is added to the
+          // queries, and throws there as it does for the lists in memory
           unloadedQueryKeys.add(queryKey);
         }
       }
     };
-    let persistedQueryKeysLoad: Promise<ReadonlySet<string>> | undefined;
-    if (isDeclaredWithFilter) {
-      const persistedQueryKeys = persistence.getPersistedQueryKeys();
-      if (persistedQueryKeys instanceof Promise) {
-        persistedQueryKeysLoad = persistedQueryKeys;
-      } else {
-        addUnloadedPersistedQueryKeys(persistedQueryKeys);
+    const matchSavedQueries = (
+      persistedQueryKeys: ReadonlySet<string>,
+    ): Promise<void> | undefined => {
+      const candidateQueryKeys = [...persistedQueryKeys].filter(
+        (queryKey) =>
+          store.state.queries[queryKey] === undefined &&
+          !unloadedQueryKeys.has(queryKey),
+      );
+      if (candidateQueryKeys.length === 0) return undefined;
+      const savedQueries = persistence.peekPersistedQueries(candidateQueryKeys);
+      if (!(savedQueries instanceof Promise)) {
+        addMatchingQueryKeys(candidateQueryKeys, savedQueries);
+        return undefined;
       }
+      return savedQueries.then((queries) => {
+        addMatchingQueryKeys(candidateQueryKeys, queries);
+      });
+    };
+    let savedQueriesMatch: Promise<void> | undefined;
+    if (filters.length > 0) {
+      const persistedQueryKeys = persistence.getPersistedQueryKeys();
+      savedQueriesMatch =
+        persistedQueryKeys instanceof Promise
+          ? persistedQueryKeys.then(matchSavedQueries)
+          : matchSavedQueries(persistedQueryKeys);
     }
     if (
       unloadedItemKeys.length === 0 &&
       unloadedQueryKeys.size === 0 &&
-      !persistedQueryKeysLoad
+      !savedQueriesMatch
     ) {
       return undefined;
     }
 
     const loadQueries = async (): Promise<void> => {
-      if (persistedQueryKeysLoad) {
-        addUnloadedPersistedQueryKeys(await persistedQueryKeysLoad);
-      }
+      await savedQueriesMatch;
       if (unloadedQueryKeys.size === 0) return;
       await preloadQueriesFromPersistentStorage([...unloadedQueryKeys]);
     };
