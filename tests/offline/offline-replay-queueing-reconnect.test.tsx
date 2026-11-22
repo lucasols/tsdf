@@ -1905,6 +1905,181 @@ test('a row waiting for a decision shows up when the list is refetched with a la
   hook.unmount();
 });
 
+test('rows waiting for a decision keep their local values when a list with partial fields is refetched, and still gain the fields they were missing', async () => {
+  const sessionKey = 'recovery-revalidation-partial-fields-session';
+
+  // `city` is undefined while it isn't loaded
+  type UserRow = { id: number; name: string; city: string | undefined };
+
+  type RenameOperations = {
+    rename: ListQueryOfflineOperationDefinition<
+      UserRow,
+      ListQueryParams,
+      string,
+      { itemId: string; name: string },
+      { reason: string }
+    >;
+  };
+
+  const usersQuery: ListQueryParams = { tableId: 'users' };
+
+  const env = createListQueryStoreTestEnv<
+    UserRow,
+    true,
+    false,
+    RenameOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada', city: 'London' },
+        { id: 2, name: 'Grace', city: 'Arlington' },
+      ],
+    },
+    {
+      id: 'recovery-revalidation-partial-fields-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      partialResources: {
+        mergeItems: (prev, fetched) =>
+          prev ? { ...prev, ...fetched } : fetched,
+        selectFields: (fields, item) => ({
+          id: item.id,
+          name: item.name,
+          city: fields.includes('city') ? item.city : undefined,
+        }),
+        inferFields: (item) =>
+          item.city === undefined ? ['id', 'name'] : ['id', 'name', 'city'],
+      },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: rc_object({
+          id: rc_number,
+          name: rc_string,
+          city: rc_string.optional(),
+        }),
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            rename: {
+              inputSchema: rc_object({ itemId: rc_string, name: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () => ({ reason: 'renamed by someone else' }),
+              },
+              // Never runs: the change always conflicts
+              execute: async () => {},
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // The list only shows names, and a detail panel shows all of Ada's fields
+  const hook = renderHook(
+    ({ showCities }: { showCities: boolean }) => {
+      const users = env.apiStore.useListQuery(usersQuery, {
+        fields: showCities ? ['name', 'city'] : ['name'],
+        itemSelector: (item) =>
+          item.city === undefined ? item.name : `${item.name} (${item.city})`,
+      });
+      const ada = env.apiStore.useItem('users||1', { fields: '*' });
+      env.trackItemUI('users', users.items.join(', '));
+      env.trackItemUI(
+        'ada',
+        ada.data ? `${ada.data.name} (${ada.data.city})` : '-',
+      );
+    },
+    { initialProps: { showCities: false } },
+  );
+  await flushAllTimers();
+
+  // Offline, the user renames Ada and Grace. Meanwhile someone else renames
+  // them too, so both changes conflict and wait for a decision.
+  env.addTimelineComments('beforeNextAction', [
+    'offline: Ada and Grace are renamed',
+  ]);
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(100);
+  for (const [itemId, name] of [
+    ['users||1', 'Ada local'],
+    ['users||2', 'Grace local'],
+  ] as const) {
+    await act(async () => {
+      await env.apiStore.performMutation(itemId, {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState(itemId, (item) => ({ ...item, name }));
+        },
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: { operation: 'rename', input: { itemId, name } },
+      });
+    });
+  }
+  env.serverTable.updateItem('users||1', { name: 'Ada by Bob' });
+  env.serverTable.updateItem('users||2', { name: 'Grace by Bob' });
+
+  // The recovery list refetch brings the server names, but both rows keep
+  // their local names: Ada, fully loaded, stays exactly as she is locally, and
+  // Grace, loaded with only her name, keeps it too.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the renames conflict, the refetched list keeps the local names',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Showing cities loads a field Grace was missing: she gains her city from
+  // the server while keeping her local name.
+  env.addTimelineComments('beforeNextAction', [
+    'the list starts showing cities: Grace gains hers and keeps her local name',
+  ]);
+  hook.rerender({ showCities: true });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ada                | users                                       |
+    0     | -                  |                                             | [users, ada] ui-initialized
+    10ms  | -                  |                                             | 🔴 >list-fetch-started
+    .     | -                  |                                             | 🟠 [users||1] >fetch-started
+    810ms | -                  |                                             | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | -                  | Ada, Grace                                  | [users] ui-changed
+    .     | -                  | Ada, Grace                                  | 🟠 [users||1] <fetch-finished (value: {"id":1,"name":"Ada","city":"London"})
+    .     | Ada (London)       | Ada, Grace                                  | [ada] ui-changed
+    1.91s | Ada (London)       | Ada, Grace                                  | -- offline: Ada and Grace are renamed
+    .     | Ada local (London) | Ada local, Grace                            | [users, ada] ui-changed
+    .     | Ada local (London) | Ada local, Grace                            | offline:rename queued
+    .     | Ada local (London) | Ada local, Grace local                      | [users] ui-changed
+    .     | Ada local (London) | Ada local, Grace local                      | offline:rename queued
+    .     | Ada local (London) | Ada local, Grace local                      | [users||1] server-data-changed (value: {"name":"Ada by Bob"})
+    .     | Ada local (London) | Ada local, Grace local                      | [users||2] server-data-changed (value: {"name":"Grace by Bob"})
+    .     | Ada local (London) | Ada local, Grace local                      | -- back online: the renames conflict, the refetched list keeps the local names
+    .     | Ada local (London) | Ada local, Grace local                      | offline:rename resolution-required
+    .     | Ada local (London) | Ada local, Grace local                      | offline:rename resolution-required
+    1.92s | Ada local (London) | Ada local, Grace local                      | 🟡 >list-fetch-started
+    2.72s | Ada local (London) | Ada local, Grace local                      | 🟡 <list-fetch-finished (value: {"count":2})
+    3.72s | Ada local (London) | Ada local, Grace local                      | -- the list starts showing cities: Grace gains hers and keeps her local name
+    .     | Ada local (London) |                                             | [users] ui-changed
+    3.73s | Ada local (London) |                                             | 🟢 >list-fetch-started
+    4.53s | Ada local (London) |                                             | 🟢 <list-fetch-finished (value: {"count":2})
+    .     | Ada local (London) | Ada local (London), Grace local (Arlington) | [users] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('a collection change waiting for a decision only holds back its own item: the other replayed items are revalidated after recovering', async () => {
   network.setOffline();
   const sessionKey = 'recovery-revalidation-collection-session';

@@ -48,9 +48,11 @@ function applyFetchedItems<
   // when deleted locally, and, in the part of the list loaded before, whether
   // and where they are in it (the change may have moved them between lists,
   // or the server rejected their creation). Positions in the replaced list,
-  // by item key.
-  const keepsLocalMembership =
-    resolutionItemKeys.size > 0 && query.wasLoaded && !appendToExisting;
+  // by item key, which can hold local creations even before its first load.
+  const keepsLocalPositions = resolutionItemKeys.size > 0 && !appendToExisting;
+  // Only a list loaded before decides whether held rows the server returns
+  // are in it
+  const keepsLocalMembership = keepsLocalPositions && query.wasLoaded;
   let keptPositions: Map<string, number> | null = null;
   // A fetch of a list with more rows to load (a load more replacing the list,
   // or a refetch with a larger size) returns the part loaded before first,
@@ -61,7 +63,7 @@ function applyFetchedItems<
   query.wasLoaded = true;
   query.hasMore = hasMore;
 
-  if (keepsLocalMembership) {
+  if (keepsLocalPositions) {
     for (const [index, itemKey] of query.items.entries()) {
       if (resolutionItemKeys.has(itemKey)) {
         keptPositions ??= new Map();

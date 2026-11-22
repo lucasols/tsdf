@@ -1269,6 +1269,118 @@ describe('list-query overlays', () => {
     hook.unmount();
   });
 
+  test('a temp row created offline in a list that never loaded stays in it when the list first loads after its replay needs a decision', async () => {
+    // The app opens offline on a list it has never loaded
+    network.setOffline();
+    const usersQuery = { tableId: 'users' } as const;
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateListQueryUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: 'offline-unloaded-list-resolution-store',
+        getSessionKey: () => 'offline-unloaded-list-resolution-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-unloaded-list-resolution-session',
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+            replayRetry: { maxFailures: 1, intervalMs: 1 },
+          },
+        }),
+        testScenario: 'idle',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  // Shows the creation in the list even before it loaded
+                  addToQueries: { queries: [usersQuery], appendTo: 'end' },
+                  reconcileServerEntity: () => {
+                    throw new Error(
+                      'Should not reconcile after replay failure',
+                    );
+                  },
+                },
+                execute: () => {
+                  throw new Error('Replay failed');
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      const query = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      });
+
+      env.trackItemUI('query-items', query.items.join(', '));
+      return query;
+    });
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: the user creates Linus in the list that never loaded',
+    ]);
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus blocked', {
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: { operation: 'createUser', input: { name: 'Linus blocked' } },
+      });
+    });
+
+    // Back online, the replay of the creation fails and waits for a decision.
+    // The recovery revalidation then loads the list for the first time: the
+    // server doesn't have Linus, but he must stay in the list while the user
+    // still has to decide on his creation.
+    env.addTimelineComments('beforeNextAction', [
+      'back online: the creation waits for a decision, the list loads with Linus kept',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | query-items               |
+      0     |                           | ui-initialized
+      1.01s |                           | -- offline: the user creates Linus in the list that never loaded
+      .     | Linus blocked             | ui-changed
+      .     | Linus blocked             | offline:createUser queued
+      .     | Linus blocked             | -- back online: the creation waits for a decision, the list loads with Linus kept
+      .     | Linus blocked             | offline:createUser replay-started
+      .     | Linus blocked             | offline:createUser resolution-required
+      1.02s | Linus blocked             | 🔴 >list-fetch-started
+      1.82s | Linus blocked             | 🔴 <list-fetch-finished (value: {"count":2})
+      .     | Linus blocked, Ada, Grace | ui-changed
+      "
+    `);
+
+    hook.unmount();
+  });
+
   test('list-query invalidation keeps pending deletes hidden until replay settles', async () => {
     network.setOffline();
     const usersQuery = { tableId: 'users' } as const;
