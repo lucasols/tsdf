@@ -585,7 +585,7 @@ const storeManager = createStoreManager({
 
 While it returns `false` the session behaves as if no offline session existed:
 
-- it never enters offline mode: network detection is ignored and neither `classifyFailure` nor `healthCheck` is called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled. `isNetworkDetectedOffline` still reports the connectivity the network detection sees (see [Connection state](#connection-state)), so the app can show a "no connection" state without reading `navigator.onLine` itself
+- it never enters offline mode: network detection is ignored and neither `classifyFailure` nor `healthCheck` is called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled. `isNetworkDetectedOffline` still reports the connectivity the network detection sees (see [Connection state](#connection-state)), so the app can show a "no connection" state without reading `navigator.onLine` itself. For that, `network.getIsOffline` keeps being called on every fetch, mutation and status read, so a `getIsOffline` that pings a server keeps sending those requests while the gate is closed
 - fetches always go to the network and fail with their normal errors
 - mutations with an `offline` descriptor run as plain online mutations (see [Queuing Mutations](#queuing-mutations))
 
