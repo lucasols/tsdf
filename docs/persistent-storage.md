@@ -10,6 +10,7 @@ See also: [Document Store](./document-store.md) | [Collection Store](./collectio
 - Persists successful fetch results back to local storage.
 - Invalidates and drops cache entries when schema or version checks fail.
 - Uses session scoped keys, so data is isolated per tenant/account.
+- Restored data is served right away and revalidated like other cached data. Hooks that must not use restored data before it is refreshed can pass [`requireFreshData: 'ifFromStorage'`](./hooks.md#iffromstorage).
 
 ## Public API
 

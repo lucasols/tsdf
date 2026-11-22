@@ -1,5 +1,5 @@
 import type { DebounceOptions } from '@ls-stack/utils/debounce';
-import type { PayloadDebounce } from './storeShared';
+import type { PayloadDebounce, RequireFreshData } from './storeShared';
 
 export function shouldDebouncePayload(
   debouncePayload: PayloadDebounce | undefined,
@@ -22,7 +22,7 @@ export function getPayloadDebounceOptions(
 
 export function assertNoRequireFreshDataWithDebouncePayload(
   hookName: string,
-  requireFreshData: boolean | undefined,
+  requireFreshData: RequireFreshData | undefined,
   debouncePayload: PayloadDebounce | undefined,
 ): void {
   if (

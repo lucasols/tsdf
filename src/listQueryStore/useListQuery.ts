@@ -3,6 +3,7 @@ import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { assertNoRequireFreshDataWithDebouncePayload } from '../utils/payloadDebounce';
 import {
+  RequireFreshData,
   ValidPayload,
   ValidStoreState,
   invalidPayloadError,
@@ -22,12 +23,14 @@ export type UseListQueryOptions<
   SelectedItem,
 > = UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem> & {
   /**
-   * Unconditionally schedules a high-priority fetch on mount and reports
-   * `loading` until that refresh succeeds or fails, even when cached data
-   * exists. Use sparingly because each mount can cause an extra request.
-   * Cannot be combined with `debouncePayload`.
+   * Schedules a high-priority fetch on mount and reports `loading` until that
+   * refresh succeeds or fails, even when cached data exists. `true` refreshes
+   * on every mount, so use it sparingly. `'ifFromStorage'` only refreshes
+   * while the cached query was restored from persistent storage and not
+   * refreshed from the server yet in this tab. Cannot be combined with
+   * `debouncePayload`.
    */
-  requireFreshData?: boolean;
+  requireFreshData?: RequireFreshData;
   /**
    * Partial-resource fields to request for each item in this query.
    *
@@ -75,6 +78,7 @@ export function useListQuery<
     queries: ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[],
     options: UseMultipleListQueriesOptions<ItemState, ItemPayload, S>,
   ) => readonly TSFDUseListQueryReturn<S, QueryPayload, undefined>[],
+  isQueryRestoredFromStorage: ((queryKey: string) => boolean) | undefined,
 ): TSFDUseListQueryReturn<SelectedItem, QueryPayload> {
   const isInvalidPayload = payload === '';
   const hasPayload =
@@ -168,7 +172,20 @@ export function useListQuery<
   const [useModifyResult, markRefreshSettled] = useRequireFreshData(
     requireFreshData,
     hasPayload,
+    queryKey,
+    requireFreshData === 'ifFromStorage' &&
+      hasPayload &&
+      !!isQueryRestoredFromStorage?.(queryKey),
     () => {
+      // A refresh already in flight brings server data newer than the
+      // restored one, so it settles this hook without another request
+      if (
+        requireFreshData === 'ifFromStorage' &&
+        store.state.queries[queryKey]?.status === 'refetching'
+      ) {
+        return;
+      }
+
       if (fetchQuery && hasPayload) {
         scheduleListQueryFetch(
           'highPriority',

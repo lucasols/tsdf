@@ -76,6 +76,7 @@ import type {
   ResolvedListQueryPersistentStorageConfig,
 } from '../persistentStorage/types';
 import {
+  BatchRequest,
   FetchType,
   RequestSchedulerEventData,
   RequestSchedulerEvents,
@@ -142,6 +143,7 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type PartialResourcesConfig,
+  type QueryFetchPayload,
   type TSDFItemQuery,
   type TSFDListQuery,
   type TSFDListQueryState,
@@ -2220,6 +2222,7 @@ export function createListQueryStore<
       const successfulQueryKeys = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map(({ requestId }) => requestId);
+      forgetRestoredQueriesLoadedFromServer(requests, results);
       if (successfulQueryKeys.length > 0) {
         const committedItemKeys = successfulQueryKeys.flatMap(
           (queryKey) => store.state.queries[queryKey]?.items ?? [],
@@ -2267,6 +2270,14 @@ export function createListQueryStore<
     },
     ({ requests, results, startedAt, duration }) => {
       pruneItemInvalidationTracking();
+      if (persistence) {
+        for (const { requestId, payload } of requests) {
+          // An item loaded with only some fields keeps the other ones restored
+          if (results.get(requestId) === true && !payload.fields) {
+            persistence.restoredItemKeys.delete(requestId);
+          }
+        }
+      }
       const successfulItems = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map((request) => ({ itemKey: request.requestId }));
@@ -2683,6 +2694,53 @@ export function createListQueryStore<
       itemKey,
       invalidateFields: remainingFields,
     });
+  }
+
+  // Hooks render queries and items not materialized yet straight from storage
+  function isQueryRestoredFromStorage(queryKey: string): boolean {
+    if (!persistence) return false;
+    if (store.state.queries[queryKey] !== undefined) {
+      return persistence.restoredQueryKeys.has(queryKey);
+    }
+
+    return persistence.readHydratedQuery(queryKey) !== undefined;
+  }
+
+  function isItemRestoredFromStorage(itemKey: string): boolean {
+    if (!persistence) return false;
+    if (store.state.itemQueries[itemKey] !== undefined) {
+      return persistence.restoredItemKeys.has(itemKey);
+    }
+
+    return persistence.readHydratedItem(itemKey) !== undefined;
+  }
+
+  function forgetRestoredQueriesLoadedFromServer(
+    requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
+    results: Map<string, boolean>,
+  ): void {
+    if (!persistence) return;
+
+    for (const { requestId: queryKey, payload } of requests) {
+      if (results.get(queryKey) !== true) continue;
+      // An offset `loadMore` only appends a page to the rows already loaded
+      if (
+        offsetPagination &&
+        payload.type === 'loadMore' &&
+        payload.offset > 0
+      ) {
+        continue;
+      }
+
+      persistence.restoredQueryKeys.delete(queryKey);
+
+      // Rows loaded with only some fields keep the other ones restored
+      if (payload.fields) continue;
+
+      for (const itemKey of store.state.queries[queryKey]?.items ?? []) {
+        persistence.restoredItemKeys.delete(itemKey);
+      }
+    }
   }
 
   function pruneItemInvalidationTracking(): void {
@@ -3594,6 +3652,7 @@ export function createListQueryStore<
       getQueryKey,
       scheduleListQueryFetch,
       useMultipleListQueries,
+      persistence ? isQueryRestoredFromStorage : undefined,
     );
   };
 
@@ -3678,6 +3737,7 @@ export function createListQueryStore<
       store,
       scheduleItemFetch,
       useMultipleItems,
+      persistence ? isItemRestoredFromStorage : undefined,
     );
   };
 

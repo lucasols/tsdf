@@ -285,6 +285,13 @@ type ListQueryPersistenceSetup<
     queryKey: string,
   ): TSFDListQuery<QueryPayload> | undefined;
   hasAsyncPreload: boolean;
+  /**
+   * Keys of the items in state restored from storage that were not
+   * refreshed with server data since. The store removes the keys it fetches.
+   */
+  restoredItemKeys: Set<string>;
+  /** Same as `restoredItemKeys`, for the queries in state. */
+  restoredQueryKeys: Set<string>;
   dispose(): void;
   clear(): Promise<void>;
 };
@@ -633,6 +640,8 @@ export function setupListQueryPersistence<
   const querySizeBytesByKey = new Map<string, number>();
   const hydratedPersistedItemKeys = new Set<string>();
   const hydratedPersistedQueryKeys = new Set<string>();
+  const storageRestoredItemKeys = new Set<string>();
+  const storageRestoredQueryKeys = new Set<string>();
   // Persisted queries restored without some of the rows they list (see
   // `createRestoredQueryState`). Their stored entry is the only record that
   // rows are missing, so flushes keep it as is until the query is loaded again.
@@ -1464,6 +1473,7 @@ export function setupListQueryPersistence<
   ): void {
     if (!storeRef) return;
 
+    storageRestoredItemKeys.add(itemKey);
     suppressedPersistedStateFlushes++;
     storeRef.produceState((draft) => {
       draft.items[itemKey] = itemState.item;
@@ -1480,6 +1490,7 @@ export function setupListQueryPersistence<
   ): void {
     if (!storeRef) return;
 
+    storageRestoredQueryKeys.add(queryKey);
     suppressedPersistedStateFlushes++;
     storeRef.produceState((draft) => {
       draft.queries[queryKey] = query;
@@ -2173,6 +2184,7 @@ export function setupListQueryPersistence<
             activeStore.state.itemQueries[itemKey] !== undefined
           );
         });
+        storageRestoredQueryKeys.add(queryKey);
         suppressedPersistedStateFlushes++;
         activeStore.setState({
           ...activeStore.state,
@@ -4178,6 +4190,8 @@ export function setupListQueryPersistence<
     pendingQueryPreloads.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    storageRestoredItemKeys.clear();
+    storageRestoredQueryKeys.clear();
     incompleteRestoredQueryKeys.clear();
     syncHydrationItemMissCache.clearAll();
     syncHydrationQueryMissCache.clearAll();
@@ -4243,6 +4257,8 @@ export function setupListQueryPersistence<
     readHydratedItem,
     readHydratedQuery,
     hasAsyncPreload: localStorageAdapter === null,
+    restoredItemKeys: storageRestoredItemKeys,
+    restoredQueryKeys: storageRestoredQueryKeys,
     dispose,
     clear,
   };

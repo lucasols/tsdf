@@ -69,7 +69,7 @@ Every store ships React hooks with consistent behavior:
 - Auto-fetch on mount; refetch on invalidation; deep equality to skip re-renders.
 - Falsy payload (`null` / `undefined` / `false`) disables the hook — no fetch, status `idle`. Use this instead of a separate `enabled` flag.
 - Common options: `disabled`, `disableRefetches`, `disableRefetchOnMount`, `returnIdleStatus`, `returnRefetchingStatus`, `requireFreshData`, `selector`, `debouncePayload`.
-- Use `requireFreshData` sparingly: every enabled mount schedules a high-priority fetch even with cached data and reports `loading` until it settles, so broad use multiplies requests. Prefer normal cache behavior or targeted invalidation. See `docs/hooks.md#requirefreshdata`.
+- Use `requireFreshData: true` sparingly: every enabled mount schedules a high-priority fetch even with cached data and reports `loading` until it settles, so broad use multiplies requests. Prefer normal cache behavior or targeted invalidation. `requireFreshData: 'ifFromStorage'` does it only while the data was restored from persistent storage and not refreshed from the server yet in this tab. See `docs/hooks.md#requirefreshdata`.
 
 | Store             | Hooks                                                                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |

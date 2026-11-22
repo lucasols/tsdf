@@ -141,6 +141,11 @@ type CollectionPersistenceSetup<
     itemKey: string,
   ): TSFDCollectionItem<ItemState, ItemPayload> | undefined;
   hasAsyncPreload: boolean;
+  /**
+   * Keys of the items in state restored from storage that were not
+   * refreshed with server data since. The store removes the keys it fetches.
+   */
+  restoredItemKeys: Set<string>;
   dispose(): void;
   clear(): Promise<void>;
 };
@@ -313,6 +318,7 @@ export function setupCollectionPersistence<
   const persistedSnapshotByKey = new Map<string, string>();
   const persistedSizeBytesByKey = new Map<string, number>();
   const hydratedPersistedKeys = new Set<string>();
+  const restoredItemKeys = new Set<string>();
   const syncHydrationMissCache = createTimedKeySet();
   let knownPersistedKeys: Set<string> | null = null;
   let maintenanceManifestKey: string | null = null;
@@ -555,6 +561,7 @@ export function setupCollectionPersistence<
   ): void {
     if (!storeRef) return;
 
+    restoredItemKeys.add(itemKey);
     suppressedPersistedStateFlushes++;
     storeRef.produceState((draft) => {
       draft[itemKey] = item;
@@ -1511,6 +1518,7 @@ export function setupCollectionPersistence<
     generation++;
     pendingPreloads.clear();
     hydratedPersistedKeys.clear();
+    restoredItemKeys.clear();
     syncHydrationMissCache.clearAll();
     knownPersistedKeys = null;
     persistedSizeBytesByKey.clear();
@@ -1555,6 +1563,7 @@ export function setupCollectionPersistence<
     getHydratedItemKeys: () => [...hydratedPersistedKeys],
     readHydratedItem,
     hasAsyncPreload: localStorageAdapter === null,
+    restoredItemKeys,
     dispose,
     clear,
   };
