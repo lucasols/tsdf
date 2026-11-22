@@ -718,18 +718,17 @@ type ListQueryPerformMutationApi<
     >
   >;
   /**
-   * Runs a list-query mutation whose `offline` descriptor may be `undefined`
+   * Runs a list-query mutation for existing item payloads or an item filter,
+   * whose `offline` descriptor may be `undefined`
    * (`offline: descriptor | undefined`), so one call covers mutations that
-   * only queue offline in some cases. Pass `null` when there is no current
-   * item target; `optimisticUpdate` is not supported then, as with the other
-   * `null` overloads.
+   * only queue offline in some cases.
    *
    * The success value is the direct server result when `offline` is
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
    * `{ kind: 'queued' }`) otherwise.
    */
   <T>(
-    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args:
       | ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>
       | ListQueryOptionalOfflineMutationArgs<
@@ -738,6 +737,39 @@ type ListQueryPerformMutationApi<
           QueryPayload,
           ItemPayload,
           TOfflineOperations
+        >,
+  ): Promise<
+    ResultType<
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
+  /**
+   * Runs a list-query mutation whose target may be `null` (no current item
+   * target) and whose `offline` descriptor may be `undefined`. Optimistic
+   * updates are not available, since the target may have no payload.
+   *
+   * The success value is the direct server result when `offline` is
+   * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
+   * `{ kind: 'queued' }`) otherwise.
+   */
+  <T>(
+    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    args:
+      | Omit<
+          ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
+          'optimisticUpdate'
+        >
+      | Omit<
+          ListQueryOptionalOfflineMutationArgs<
+            T,
+            ItemState,
+            QueryPayload,
+            ItemPayload,
+            TOfflineOperations
+          >,
+          'optimisticUpdate'
         >,
   ): Promise<
     ResultType<

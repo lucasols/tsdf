@@ -169,6 +169,9 @@ function optionalOfflineDescriptorTypes(
   collectionOffline: OfflineMutationInput<TodoOperations> | undefined,
   listQueryOffline: OfflineMutationInput<PatchUserOperations> | undefined,
   upload: OfflineMutationUploadsInput | undefined,
+  // Item targets the app only has for some saves (`null` for a create)
+  maybeCollectionTarget: string | null,
+  maybeListQueryTarget: string | null,
 ) {
   const mutation = () => Promise.resolve(1);
 
@@ -221,6 +224,54 @@ function optionalOfflineDescriptorTypes(
   typingTest.expectTypesAreEqual<
     Awaited<typeof listQueryCreateResult>,
     MutationResult<number | OfflineMutationResult<number>>
+  >();
+
+  // A target that may be missing (`target | null`) is accepted too, with the
+  // same union result
+  const collectionMaybeTargetResult = collectionStore.performMutation(
+    maybeCollectionTarget,
+    { mutation, offline: collectionOffline, upload },
+  );
+  typingTest.expectTypesAreEqual<
+    Awaited<typeof collectionMaybeTargetResult>,
+    MutationResult<number | OfflineMutationResult<number>>
+  >();
+  const listQueryMaybeTargetResult = listQueryStore.performMutation(
+    maybeListQueryTarget,
+    { mutation, offline: listQueryOffline, upload },
+  );
+  typingTest.expectTypesAreEqual<
+    Awaited<typeof listQueryMaybeTargetResult>,
+    MutationResult<number | OfflineMutationResult<number>>
+  >();
+
+  // ... but never with `optimisticUpdate`: with `null` there are no items to
+  // snapshot, so a failed mutation could not roll the optimistic changes back.
+  // The overload for a `target | null` payload (the last one, which
+  // `Parameters` resolves) has no `optimisticUpdate` option.
+  type CollectionMaybeTargetArgs = Parameters<
+    typeof collectionStore.performMutation
+  >;
+  type ListQueryMaybeTargetArgs = Parameters<
+    typeof listQueryStore.performMutation
+  >;
+  typingTest.expectTypesAreEqual<
+    CollectionMaybeTargetArgs[0],
+    string | string[] | null
+  >();
+  typingTest.expectTypesAreEqual<
+    'optimisticUpdate' extends keyof CollectionMaybeTargetArgs[1]
+      ? true
+      : false,
+    false
+  >();
+  typingTest.expectTypesAreEqual<
+    null extends ListQueryMaybeTargetArgs[0] ? true : false,
+    true
+  >();
+  typingTest.expectTypesAreEqual<
+    'optimisticUpdate' extends keyof ListQueryMaybeTargetArgs[1] ? true : false,
+    false
   >();
 
   // The other overloads keep their narrower results: no descriptor gives the

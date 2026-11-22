@@ -603,11 +603,35 @@ type CollectionPerformMutation<
     >
   >;
   /**
-   * Runs a collection mutation whose `offline` descriptor may be `undefined`
-   * (`offline: descriptor | undefined`), so one call covers mutations that
-   * only queue offline in some cases. Pass `null` when there is no current
-   * item target; `optimisticUpdate` is not supported then, as with the other
-   * `null` overloads.
+   * Runs a collection mutation for one or more existing item payloads, whose
+   * `offline` descriptor may be `undefined` (`offline: descriptor | undefined`),
+   * so one call covers mutations that only queue offline in some cases.
+   *
+   * The success value is the direct server result when `offline` is
+   * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
+   * `{ kind: 'queued' }`) otherwise.
+   */
+  <T>(
+    payload: CollectionMutationTarget<ItemPayload>,
+    args:
+      | CollectionOnlineMutationArgs<T, ItemPayload>
+      | CollectionOptionalOfflineMutationArgs<
+          T,
+          ItemState,
+          ItemPayload,
+          TOfflineOperations
+        >,
+  ): Promise<
+    ResultType<
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
+  /**
+   * Runs a collection mutation whose target may be `null` (no current item
+   * target) and whose `offline` descriptor may be `undefined`. Optimistic
+   * updates are not available, since the target may have no payload.
    *
    * The success value is the direct server result when `offline` is
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
@@ -616,12 +640,15 @@ type CollectionPerformMutation<
   <T>(
     payload: CollectionMutationPayload<ItemPayload>,
     args:
-      | CollectionOnlineMutationArgs<T, ItemPayload>
-      | CollectionOptionalOfflineMutationArgs<
-          T,
-          ItemState,
-          ItemPayload,
-          TOfflineOperations
+      | Omit<CollectionOnlineMutationArgs<T, ItemPayload>, 'optimisticUpdate'>
+      | Omit<
+          CollectionOptionalOfflineMutationArgs<
+            T,
+            ItemState,
+            ItemPayload,
+            TOfflineOperations
+          >,
+          'optimisticUpdate'
         >,
   ): Promise<
     ResultType<
