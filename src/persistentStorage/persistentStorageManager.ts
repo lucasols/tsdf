@@ -1482,6 +1482,25 @@ export function createPersistentStorageNamespaceHandle<
           recordLocalStorageTouch(key, touch.lastAccessAt ?? now);
         }
       });
+      // A write dropped without throwing (writes disabled by another one while
+      // this commit waited for the lock, or a deferred manifest write that hit
+      // the quota) leaves the upserts unstored, or unreachable on reload
+      if (
+        (args.upserts?.length ?? 0) > 0 &&
+        isLocalStorageQuotaWritesDisabled()
+      ) {
+        deliverPendingQuotaWritesDisabledError(onPersistentStorageError);
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'commit',
+            'skipped',
+            startTime,
+            { ...operationDetails, reason: 'quota-writes-disabled' },
+          );
+        }
+        return false;
+      }
       if (import.meta.env.DEV) {
         logPersistentStorageOperation(
           debugContext,

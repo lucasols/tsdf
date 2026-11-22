@@ -59,6 +59,8 @@ let openDatabase: MockInstance<IDBFactory['open']>;
 /** `indexedDB.open` recording the connections the adapter opens. */
 let openTrackedDatabase: IDBFactory['open'];
 let persistentStorageErrors: string[] = [];
+/** The device says it is online, but requests to the server fail. */
+let isServerUnreachable = false;
 /** Window-close blocks held through the store manager's `blockWindowClose`. */
 let heldWindowCloseBlocks = 0;
 
@@ -194,7 +196,11 @@ function createOfflineDocumentApp(
   const storeManager = createStoreManager({
     errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
-    offlineSession: { network: network.config },
+    offlineSession: {
+      network: network.config,
+      classifyFailure: (error) =>
+        error instanceof TypeError ? 'network' : 'unknown',
+    },
     onPersistentStorageError,
     blockWindowClose,
   });
@@ -212,6 +218,7 @@ function createOfflineDocumentApp(
             inputSchema: docMutationInputSchema,
             kind: 'update',
             execute: async ({ input }) => {
+              if (isServerUnreachable) throw new TypeError('Failed to fetch');
               await envRef.current?.serverMock.delayedSetData(input.value);
               return input;
             },
@@ -351,6 +358,7 @@ beforeEach(() => {
   adapterConnections = [];
   persistentStorageErrors = [];
   heldWindowCloseBlocks = 0;
+  isServerUnreachable = false;
 
   // Observe the connections the adapter opens, at the IndexedDB boundary.
   const open = indexedDB.open.bind(indexedDB);
@@ -1136,5 +1144,55 @@ describe('queued offline mutations', () => {
     });
     await flushAllTimers();
     expect(reloaded.env.serverMock.history).toMatchInlineSnapshot(`[1, 2, 3]`);
+  });
+
+  test('a change already stored on the device is not flagged when storage is lost and sending it fails', async () => {
+    network.setOffline();
+
+    const app = createOfflineDocumentApp(
+      'doc-offline-stored-send-fails',
+      'loaded',
+    );
+    const { env } = app;
+    await flushAllTimers();
+
+    // The change is queued and stored while storage still works.
+    await resolveAfterAllTimers(queueOfflineUpdate(env, 2));
+    await flushAllTimers();
+    expect(getInMemoryOnlyWork(app).inMemoryOnlyMutations).toBe(0);
+
+    // Storage is lost, and the device comes back online, but the server can't
+    // be reached: sending the change fails, and so do the writes that record
+    // the attempt.
+    loseStorage();
+    isServerUnreachable = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(getPendingOfflineEntities(env)).toMatchInlineSnapshot(
+      `- { entityKey: 'document', pendingMutations: 1, syncState: 'pending' }`,
+    );
+
+    // The stored change still holds the same work, so the app doesn't warn
+    // about it and closing the tab is not blocked.
+    expect(getInMemoryOnlyWork(app)).toMatchInlineSnapshot(`
+      inMemoryOnlyEntities: []
+      inMemoryOnlyMutations: 0
+      windowCloseBlocked: '❌'
+    `);
+
+    // Indeed, a reload still has it queued.
+    recoverStorage();
+    closeApps();
+    const reloaded = createOfflineDocumentApp(
+      'doc-offline-stored-send-fails',
+      'idle',
+    );
+    renderHook(() => reloaded.env.apiStore.useDocument());
+    await flushAllTimers();
+    expect(getPendingOfflineEntities(reloaded.env)).toMatchInlineSnapshot(
+      `- { entityKey: 'document', pendingMutations: 1, syncState: 'pending' }`,
+    );
   });
 });

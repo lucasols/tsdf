@@ -592,6 +592,7 @@ When writing a queued mutation to persistent storage fails (see [Queuing Mutatio
 - The affected entities of `useOfflineEntities()` have `isInMemoryOnly: true`.
 - The result of the `performMutation(...)` call that hit the failure is `{ kind: 'queued', inMemoryOnly: true }`.
 - While `inMemoryOnlyMutations` is not `0`, the store manager's [`blockWindowClose`](./mutations.md#window-close-blocking) stays held (once per store holding such changes), so the browser asks before closing or reloading the tab.
+- A change already stored is not counted when only the write recording a send attempt fails (sending it, or back to pending after a failed send): the stored version still holds it. A failed write that moves it to `needs-confirmation` or to a manual resolution does count: after a reload, the stored version would be sent again without that step.
 
 ```tsx
 const { inMemoryOnlyMutations } = storeManager.useOfflineStatus();

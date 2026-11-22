@@ -1383,8 +1383,12 @@ export function createOfflineStoreController<
             resolutions.set(resolutionId, parsedResolution);
           } else {
             resolutions.delete(resolutionId);
-            // See the queue entries above
-            if (forgetInMemoryOnlyRecord(`r:${resolutionId}`)) {
+            // See the queue entries above. A record this deploy can't parse
+            // or run was just written by another tab, and stays stored.
+            if (
+              forgetInMemoryOnlyRecord(`r:${resolutionId}`) &&
+              resolution === null
+            ) {
               void resolutionNamespace.remove(resolutionId);
             }
           }
@@ -2662,16 +2666,7 @@ export function createOfflineStoreController<
       if (!rewrite) continue;
 
       const rewrittenResolution = { ...resolution, ...rewrite };
-      resolutions.set(rewrittenResolution.id, rewrittenResolution);
-      await args.current.resolutionNamespace.save(
-        rewrittenResolution.id,
-        rewrittenResolution,
-      );
-      args.current.session.publishResolutionChange(
-        storeName,
-        rewrittenResolution.id,
-        rewrittenResolution,
-      );
+      await persistResolution(rewrittenResolution, args.current, true);
       entityRefRewrites.push({
         previousEntityRefs: resolution.entityRefs,
         nextEntityRefs: rewrittenResolution.entityRefs,
@@ -2886,16 +2881,19 @@ export function createOfflineStoreController<
    * Records whether the last write of a queue entry (`q:` key) or resolution
    * record (`r:` key) reached storage. One whose write failed is only held in
    * memory, and keeps the window close blocked, until a later write of it
-   * succeeds or it leaves this tab's records.
+   * succeeds or it leaves this tab's records. A failed write whose stored
+   * version is as good for a reload (`storedVersionIsEquivalent`) leaves the
+   * record as it was.
    */
   function setRecordPersisted(
     recordKey: string,
     persisted: boolean,
     isStillHeld: boolean,
+    storedVersionIsEquivalent = false,
   ): void {
     if (persisted || !isStillHeld) {
       inMemoryOnlyRecordKeys.delete(recordKey);
-    } else {
+    } else if (!storedVersionIsEquivalent) {
       inMemoryOnlyRecordKeys.add(recordKey);
     }
     syncInMemoryOnlyWindowCloseBlock();
@@ -2962,10 +2960,17 @@ export function createOfflineStoreController<
     });
   }
 
+  /**
+   * `isReplayStateUpdate`: the write only updates the replay state of a queued
+   * entry (being sent, or back to `pending` after a failed send or a session
+   * switch), so if it fails, the version stored before still holds the same
+   * work for a reload.
+   */
   async function persistEntry(
     entry: OfflineQueueEntry,
     current?: ActiveSessionState,
     skipRefresh?: boolean,
+    isReplayStateUpdate?: boolean,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
@@ -2975,7 +2980,12 @@ export function createOfflineStoreController<
     const persisted = await session.queueNamespace.save(entry.id, entry);
     session.session.publishQueueEntryChange(storeName, entry.id, entry);
     if (!isActiveSessionState(session)) return;
-    setRecordPersisted(`q:${entry.id}`, persisted, queueEntries.has(entry.id));
+    setRecordPersisted(
+      `q:${entry.id}`,
+      persisted,
+      queueEntries.has(entry.id),
+      isReplayStateUpdate,
+    );
     if (persisted) persistInMemoryOnlyRecords(session);
     if (!skipRefresh) refreshDerivedState(session);
   }
@@ -5205,7 +5215,7 @@ export function createOfflineStoreController<
         updatedAt: Date.now(),
         lastAttemptAt: Date.now(),
       };
-      await persistEntry(entryToUse, current);
+      await persistEntry(entryToUse, current, false, true);
       // Set when the replay failed while resolving a dependency upload, which
       // means `execute` was never called for this attempt.
       let failedUploadId: string | undefined;
@@ -5365,7 +5375,7 @@ export function createOfflineStoreController<
         // about the entry, so it stays queued for its session as it was, to
         // be replayed once that session is active again.
         if (!executeStarted && !isSessionStillActive(current)) {
-          await persistEntry(nextEntry, current, true);
+          await persistEntry(nextEntry, current, true, true);
           return;
         }
 
@@ -5407,7 +5417,7 @@ export function createOfflineStoreController<
             lastError,
             allowReplayRetry: undefined,
           };
-          await persistEntry(entryToUse, current);
+          await persistEntry(entryToUse, current, false, true);
           return;
         }
 
