@@ -189,8 +189,8 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
       const binaryHandle = await uploadDir.getFileHandle(BINARY_FILE_NAME, {
         create: true,
       });
-      // The binary no longer holds the previous file once the write starts
-      this.#storedFiles.delete(uploadPath);
+      // Writes are committed when the writable closes, so the previous files
+      // still match the binary until the write succeeds
       await writeFile(binaryHandle, file);
       this.#storedFiles.set(uploadPath, new WeakSet([file]));
     }
@@ -204,11 +204,11 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
         serializeStoredUploadMetadataRecord(metadataRecord),
       );
     } catch (error) {
-      // The previous metadata doesn't describe the new binary, so it is
-      // removed instead of being restored with it
-      if (!isFileStored) {
-        await uploadDir.removeEntry(METADATA_FILE_NAME).catch(() => {});
-      }
+      // The previous metadata doesn't describe the new binary, so the upload
+      // is removed instead of being restored with it. Removing the binary too
+      // frees the space a write over the quota needs, and the session's next
+      // save of the record writes both again.
+      if (!isFileStored) await this.remove(sessionKey, id);
       throw error;
     }
   }

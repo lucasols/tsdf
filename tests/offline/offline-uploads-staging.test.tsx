@@ -1299,6 +1299,14 @@ test('a replacement whose metadata write fails is never restored as the new file
   // The failure is reported to the app
   expect(replaceResult.ok).toBe(false);
 
+  // The edited photo's bytes don't stay behind without metadata, where
+  // nothing could list or remove them, holding the space storage ran out of
+  expect(
+    mockBrowserOpfs.fileExists(
+      getOfflineUploadOpfsPath(sessionKey, 'photo', 'binary.blob'),
+    ),
+  ).toBe(false);
+
   // --- Reload: the previous metadata isn't paired with the edited photo's
   // bytes, which would restore a record whose name, type, size and upload
   // state don't match its file. The upload is not restored at all ---
@@ -1309,6 +1317,73 @@ test('a replacement whose metadata write fails is never restored as the new file
   ).unwrap();
 
   expect(restoredFile).toBeNull();
+});
+
+test('undoing a failed replacement of a restored upload sends its original file', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-restored-replace-failure-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  // --- Setup: the user took a photo offline in a previous app run ---
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    photo: textFile('original photo', 'original.jpg', 1),
+  });
+
+  // --- Reload: the editor loads the stored photo, backed by its stored bytes,
+  // and keeps it to undo an edit ---
+  const session = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file }) => {
+          transportCalls.push({ id, fileText: await file.text() });
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+  const restoredPhoto = (
+    await resolveAfterAllTimers(session.loadOfflineUpload('photo'))
+  ).unwrap();
+  if (!restoredPhoto) throw new Error('Expected the restored photo');
+
+  // --- Action: they edit it, but storage is full, so the edited photo's bytes
+  // can't be written and the stored photo stays as it was ---
+  mockBrowserOpfs.failWrite(
+    getOfflineUploadOpfsPath(sessionKey, 'photo', 'binary.blob'),
+  );
+  const replaceResult = await resolveAfterAllTimers(
+    session.replaceOfflineUpload({
+      id: 'photo',
+      file: textFile('edited photo', 'edited.jpg', 2),
+    }),
+  );
+  expect(replaceResult.ok).toBe(false);
+
+  // ...so they undo the edit, staging the photo they loaded again. Its stored
+  // bytes still hold it, so they must not be written over with the photo
+  // itself, which would leave it unreadable
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({ id: 'photo', file: restoredPhoto }),
+    )
+  ).unwrap();
+
+  // --- Back online, the original photo is sent ---
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (await resolveAfterAllTimers(session.resolveOfflineUpload('photo'))).unwrap();
+
+  expect(transportCalls).toMatchInlineSnapshot(
+    `- { fileText: 'original photo', id: 'photo' }`,
+  );
 });
 
 test('replacing an upload right after a restart keeps the metadata saved before the restart', async () => {
