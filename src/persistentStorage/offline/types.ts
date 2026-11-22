@@ -917,6 +917,9 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   /**
    * React hook reading the file of a staged upload while it is staged, and its
    * server ref (`resolvedRef` on `missing`) once it was sent and released.
+   * With an adapter that holds the stored file after writing it (as
+   * `opfsOfflineUploadAdapter` does), a file staged in the current page gives
+   * a new `file` and `url` once its write finishes.
    */
   useOfflineUploadFile: (
     id: string | false | null | undefined,

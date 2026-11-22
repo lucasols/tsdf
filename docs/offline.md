@@ -912,6 +912,7 @@ Caching and URL lifetime:
 - A staged file the session already holds is returned on the first render, with no `loading` state. `loading` only shows while the session is still restoring its uploads (right after a reload) or reading an upload it does not hold yet.
 - The URL exists while at least one component uses the id. It is revoked about one second after the last one stops using it (unmount or falsy id), so remounts and React StrictMode keep the same URL.
 - `replaceOfflineUpload` gives every consumer in the tab a new `url` / `file` and revokes the previous URL. Staging or replacing the id from another tab does not update a file this tab already read until the tab reloads; deletions from another tab apply right away.
+- With an adapter that holds the stored file after writing it (as `opfsOfflineUploadAdapter` does), a file staged in the current page changes once more when its write finishes: consumers get the stored `file` and a new `url`. A `<video>` or `<iframe>` preview reloads once, and effects keyed on `file` run again.
 - When the upload leaves the session (`deleteOfflineUpload`, retention expiry, or a mutation-attached file being consumed) the status becomes `missing` and the URL is revoked. Staging the same id again makes it available again.
 - Use `url` directly in render (`<img src>`, `<a href>`). Do not revoke it, do not keep it outside of render, and do not create extra object URLs from `file`.
 

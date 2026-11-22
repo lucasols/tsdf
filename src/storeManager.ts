@@ -275,6 +275,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * `idle`), e.g. once the entity holds the uploaded server ref instead of the
    * staged upload id.
    *
+   * With an adapter that holds the stored file after writing it (as
+   * `opfsOfflineUploadAdapter` does), a file staged in the current page gives
+   * a new `file` and `url` once its write finishes, so a `<video>` or
+   * `<iframe>` preview reloads once and effects keyed on `file` run again.
+   *
    * Once an upload that was sent is deleted because the queued work that used
    * it left the queue, the hook reports `missing` with the upload's server ref
    * in `resolvedRef` (the ref `resolveOfflineUpload(id)` returns), so data
