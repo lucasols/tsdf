@@ -4087,6 +4087,11 @@ export function setupListQueryPersistence<
       });
     }
 
+    // Persistence can be disabled while the metadata reads above are pending:
+    // the commits would then be skipped, so what is persisted must not be
+    // updated as if they were written
+    if (config.getSessionKey() === false) return;
+
     const commitTasks: Promise<void>[] = [];
     if (removedQueryKeys.length > 0 || queryUpserts.size > 0) {
       commitTasks.push(

@@ -1415,6 +1415,11 @@ export function setupCollectionPersistence<
         }
       }
 
+      // Persistence can be disabled while the metadata reads above are
+      // pending: the commit would then be skipped, so what is persisted must
+      // not be updated as if it was written
+      if (config.getSessionKey() === false) return;
+
       await namespace.commit({
         removes: [...pendingRemoves],
         staticPolicy: persistedStaticPolicy,
