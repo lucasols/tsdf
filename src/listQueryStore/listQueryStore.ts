@@ -2378,6 +2378,7 @@ export function createListQueryStore<
       revalidateAfterIgnoredConfirmedSnapshots();
     },
     unsentCreationItemKeys,
+    persistence?.restoredItemKeys,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {

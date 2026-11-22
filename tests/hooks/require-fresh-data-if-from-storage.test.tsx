@@ -1,5 +1,5 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
-import { cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
@@ -470,6 +470,42 @@ describe('collection store', () => {
     `);
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
+
+  test('a restored item brought back by a failed delete is still refreshed', async () => {
+    seedNote('notes-failed-delete', 'a', 'stale a');
+    const env = createCollectionEnv('notes-failed-delete');
+
+    // The restored note is read into state and optimistically deleted, but the
+    // server rejects the delete, so the rollback brings the restored data back
+    expect(env.apiStore.getItemState('a')?.data?.value.text).toBe('stale a');
+    await act(async () => {
+      await env.apiStore.performMutation('a', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('a');
+        },
+        mutation: () => Promise.reject(new Error('delete failed')),
+      });
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { status, data } = env.apiStore.useItem('a', {
+        requireFreshData: 'ifFromStorage',
+      });
+      renders.add({ status, text: data?.value.text ?? null });
+    });
+    await flushAllTimers();
+
+    // The rolled back data is still the restored one, so the editor waits for
+    // the refresh instead of opening it
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ text: stale a
+      -> status: success ⋅ text: server a
+      "
+    `);
+  });
 });
 
 describe('list query store', () => {
@@ -623,5 +659,48 @@ describe('list query store', () => {
     expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(
       `[]`,
     );
+  });
+
+  test('a restored item brought back by a failed delete is still refreshed', async () => {
+    seedListItem('lq-failed-delete', 'session1', 'users', 2, {
+      id: 2,
+      name: 'Stale 2',
+    });
+    const env = createListQueryEnv({
+      storeName: 'lq-failed-delete',
+      serverData,
+    });
+    const itemPayload = rawItemPayload('users', 2);
+
+    // The restored row is read into state and optimistically deleted, but the
+    // server rejects the delete, so the rollback brings the restored data back
+    expect(env.apiStore.getItemState(itemPayload)?.name).toBe('Stale 2');
+    await act(async () => {
+      await env.apiStore.performMutation(itemPayload, {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState(itemPayload);
+        },
+        mutation: () => Promise.reject(new Error('delete failed')),
+      });
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { status, data } = env.apiStore.useItem(itemPayload, {
+        requireFreshData: 'ifFromStorage',
+      });
+      renders.add({ status, name: data?.name ?? null });
+    });
+    await flushAllTimers();
+
+    // The rolled back data is still the restored one, so the editor waits for
+    // the refresh instead of opening it
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ name: Stale 2
+      -> status: success ⋅ name: Fresh 2
+      "
+    `);
   });
 });

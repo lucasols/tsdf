@@ -2555,6 +2555,7 @@ export function createCollectionStore<
     after: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
     mutationId: number;
     hadPendingFetch: boolean;
+    wasRestoredFromStorage: boolean;
   };
 
   const pendingDebounces = new Map<
@@ -2758,15 +2759,27 @@ export function createCollectionStore<
         // delayed refetch), so restoring it must resume that work, even
         // when no hook is mounted to react to an invalidation
         const interruptedFetchPayloads: ItemPayload[] = [];
+        // Deleting an item also drops its restored from storage mark, which
+        // the restored data brings back
+        const itemsBackFromStorage = new Set<string>();
 
         for (const rollbackGroup of rollbacks) {
           for (const rollback of rollbackGroup) {
             const { itemKey } = rollback;
             if (
-              rollback.before &&
+              !rollback.before ||
+              store.state[itemKey] ||
+              !revertedItems.get(itemKey)?.item
+            ) {
+              continue;
+            }
+
+            if (rollback.wasRestoredFromStorage) {
+              itemsBackFromStorage.add(itemKey);
+            }
+
+            if (
               rollback.hadPendingFetch &&
-              !store.state[itemKey] &&
-              revertedItems.get(itemKey)?.item &&
               !interruptedFetchPayloads.includes(rollback.payload)
             ) {
               interruptedFetchPayloads.push(rollback.payload);
@@ -2795,6 +2808,9 @@ export function createCollectionStore<
           ] of revertedItems) {
             if (item) {
               restoredItemKeys.push(itemKey);
+              if (itemsBackFromStorage.has(itemKey)) {
+                persistence?.restoredItemKeys.add(itemKey);
+              }
             } else {
               cleanupItemResources(itemKey, itemPayload);
             }
@@ -2867,6 +2883,8 @@ export function createCollectionStore<
                     itemKey,
                     itemPayload,
                   ).hasPendingRequest(itemKey),
+                  wasRestoredFromStorage:
+                    !!persistence?.restoredItemKeys.has(itemKey),
                 };
               },
             );
@@ -2884,6 +2902,8 @@ export function createCollectionStore<
                     after: store.state[itemKey],
                     mutationId,
                     hadPendingFetch: before[index]?.hadPendingFetch ?? false,
+                    wasRestoredFromStorage:
+                      before[index]?.wasRestoredFromStorage ?? false,
                   }),
                 ),
               );
