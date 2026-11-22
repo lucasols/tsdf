@@ -26,7 +26,10 @@ import type {
   TestSessionKeyChangedEvent,
 } from '../internal/testTimelineTypes';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
-import type { OfflineMutationResult } from '../persistentStorage/offline/mutationRuntime';
+import {
+  createDirectMutationContext,
+  type OfflineMutationResult,
+} from '../persistentStorage/offline/mutationRuntime';
 import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/offlineResolution.typeGuards';
 import {
   captureOfflineOverlayEntries,
@@ -52,11 +55,15 @@ import {
   type GlobalOfflineEntity,
   type ItemOfflineState,
   type OfflineMutationInput,
+  type OfflineOperationsUploadRef,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecord,
   type ParsedOfflineResolutionConflictResultForStore,
 } from '../persistentStorage/offline/types';
-import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
+import type {
+  OfflineDirectMutationContext,
+  OfflineMutationUploadsInput,
+} from '../persistentStorage/offlineUploadTypes';
 import {
   createProtectedStorageKey,
   isOfflineNetworkModeActiveSync,
@@ -528,6 +535,7 @@ type ListQueryMutationArgsBase<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
+  TMutationExtraArgs extends unknown[] = [],
 > = {
   /**
    * Applies optimistic updates for the affected item payloads before the
@@ -540,6 +548,7 @@ type ListQueryMutationArgsBase<
   /** Performs the server mutation for the affected item payloads. */
   mutation: (
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
+    ...args: TMutationExtraArgs
   ) => Promise<T>;
   /**
    * Controls query and item invalidation after a successful online mutation.
@@ -587,10 +596,25 @@ type ListQueryOfflineMutationArgs<
     QueryPayload,
     ItemPayload
   >,
-> = ListQueryMutationArgsBase<T, ItemState, QueryPayload, ItemPayload> & {
+> = ListQueryMutationArgsBase<
+  T,
+  ItemState,
+  QueryPayload,
+  ItemPayload,
+  [
+    ctx: OfflineDirectMutationContext<
+      OfflineOperationsUploadRef<TOfflineOperations>
+    >,
+  ]
+> & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
+   *
+   * When it runs directly, the uploads the operation declares with
+   * `dependsOnUploads` are uploaded first and passed to `mutation` as
+   * `ctx.uploads.resolvedRefsById`. They are deleted once `mutation`
+   * succeeds, and kept for the replay when the mutation is queued instead.
    */
   offline: TOfflineOperations extends null
     ? never
@@ -1764,6 +1788,20 @@ export function createListQueryStore<
             unknown
           >(offlineController).prepareForMutation(args)
         : Promise.reject(new Error('Offline mutation controller unavailable')),
+    runUnqueuedMutation: <
+      T,
+      TName extends keyof Exclude<TOfflineOperations, null> & string,
+    >(
+      offline: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>,
+      directMutation: (ctx: OfflineDirectMutationContext) => Promise<T>,
+    ) =>
+      offlineController
+        ? // WORKAROUND: The shared controller also supports session-only offline configs with no operation map, so list-query mutation calls re-narrow it only when typed offline mutation input is present.
+          __LEGIT_CAST__<
+            OfflineStoreController<Exclude<TOfflineOperations, null>>,
+            unknown
+          >(offlineController).runUnqueuedMutation(offline, directMutation)
+        : directMutation(createDirectMutationContext({})),
     queueMutation: <
       TName extends keyof Exclude<TOfflineOperations, null> & string,
     >(args: {

@@ -677,6 +677,43 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 
 Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
+### Direct runs
+
+A mutation with an `offline` descriptor that runs online right away gets the same uploads: TSDF uploads the ids the operation's `dependsOnUploads` returns for its input before calling `mutation`, and passes the refs in `uploads`, like `execute` gets them on replay. Document stores add it to the `mutation` context, collection and list query stores pass it as the second argument:
+
+```ts
+// Shared by the direct run and the replay
+function sendAvatar(
+  input: { id: number; uploadId: string },
+  uploads: { resolvedRefsById: Record<string, UploadRef> },
+) {
+  const avatar = uploads.resolvedRefsById[input.uploadId];
+  if (!avatar) throw new Error('Missing avatar upload');
+
+  return api.setUserAvatar(input.id, avatar.fileId);
+}
+
+// In the operation definition:
+execute: ({ input, uploads }) => sendAvatar(input, uploads),
+
+// The mutation:
+const input = { id: 1, uploadId: attachmentId };
+await userStore.performMutation(
+  { id: 1 },
+  {
+    mutation: (_payload, { uploads }) => sendAvatar(input, uploads),
+    offline: { operation: 'setAvatar', input },
+  },
+);
+```
+
+- Once `mutation` succeeds, the uploads are released as after a replay: deleted unless queued work still declares them, and their ids keep resolving to the same refs for the rest of the app session.
+- When the direct request fails and the mutation is queued instead, the queued mutation declares the uploads, so they are kept. They are already uploaded, so the replay sends the same refs without uploading again.
+- When the request fails with its own error, the uploads are kept as they are, for the next attempt.
+- With the [session gate](#session-gate) closed the uploads are resolved and released the same way. Nothing is queued then.
+- A failed upload is handled as described in [Dependency uploads of a direct run](#dependency-uploads-of-a-direct-run). `mutation` is not called.
+- Don't resolve or delete these uploads yourself with `resolveOfflineUpload(s)` / `deleteOfflineUpload`: an upload deleted before the request is sent is gone when the mutation falls back to the queue, and its replay fails.
+
 ### Upload refs
 
 The value the `upload` transport resolves to is the upload ref: whatever the server needs to reference the uploaded file (a string, or an object such as `{ fileId, url }`). `createStoreManager` infers its type from the transport, so it does not have to be narrowed by hand:
@@ -796,8 +833,9 @@ A staged upload follows the queued work that depends on it:
   - its resolution was discarded, together with the queued work discarded with it (the edits of an entity whose create was discarded);
   - a later operation pruned it with `supersedes`, or cancelled it with its temp entity (`dropSelfIfTempLifecycleCancelled`);
   - its conflict was resolved with `commit`, or with a `requeue` whose replacement input no longer declares the upload. Uploads the replacement input still declares are kept.
+- A mutation that declares the upload and [runs directly](#direct-runs) releases it the same way once its request succeeds.
 - References are session-wide. An upload declared by queued mutations of several stores is deleted only after the last of them is gone. Only stores created in the tab count: an upload staged with `saveOfflineUpload` and shared with a store that is not created in the tab yet (a code-split screen, or the app restarted on another screen) can be deleted when the stores already created release it, and that store's queued mutation then fails to replay. If an upload id is shared across lazily created stores, create those stores before their queued work replays, or stage a separate upload for each store. Files attached directly to a mutation don't have this limit: they record the store that queued them (see `storeName` above).
-- An upload that no queued work declared yet is never deleted for being unreferenced: the app stages the file first and queues the mutation afterwards. It stays until a mutation that declares it is queued and leaves the queue, until the app calls `deleteOfflineUpload(id)`, or until it expires. Unreferenced uploads expire after the session has been online for one week without interruption (going offline restarts the window). This also applies to uploads the app resolves itself with `resolveOfflineUpload(s)` for an online mutation, because they never enter the queue.
+- An upload that no queued work declared yet is never deleted for being unreferenced: the app stages the file first and queues the mutation afterwards. It stays until a mutation that declares it is queued and leaves the queue or runs directly, until the app calls `deleteOfflineUpload(id)`, or until it expires. Unreferenced uploads expire after the session has been online for one week without interruption (going offline restarts the window). This also applies to uploads the app resolves itself with `resolveOfflineUpload(s)`, e.g. for a mutation without `offline` descriptor, because they never enter the queue.
 
 After an upload that was already sent is deleted, its id keeps resolving to the same server ref for the rest of the app session, in every tab open when it was deleted: a mutation queued later that still declares it (for example from optimistic or draft data that was not updated with the server ref yet) replays with that ref without uploading again, and `resolveOfflineUpload(id)` returns it. This ref is kept in memory only: after a reload, in a tab opened later, or after `deleteOfflineUpload(id)`, the id is unknown again, so stage the file again with `saveOfflineUpload` before reusing it. Uploads deleted before they were sent (discarded, superseded or cancelled work) are not kept.
 
@@ -847,6 +885,7 @@ The file follows the upload record, not its upload state: it stays available whi
 
 - Uploads staged with `saveOfflineUpload` are deleted once the last queued work that declares them leaves the queue (see [Upload lifecycle](#upload-lifecycle)). Files attached with `performMutation({ upload })` are removed once their mutation replayed. Uploads no queued work declared stay until `deleteOfflineUpload` or retention removes them.
 - A replayed mutation releases its uploads after its `onSuccessExecute` ran (and, for a temp entity create, after the result replaced the temp entity). When `onSuccessExecute` writes the server ref into the entity, the local file stays renderable until that render, and from then on the component passes a falsy id and renders the server file.
+- A [direct run](#direct-runs) releases its uploads once `mutation` resolves. Write the server ref into the entity inside `mutation` to get the same handoff.
 - Otherwise the entity keeps the local ref until it is revalidated after replay, so the hook can report `missing` for a moment in between. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
 
 Outside of these windows, a local ref paired with `missing` and no `resolvedRef` means the staged file was deleted or expired, not that it is about to appear.
@@ -921,6 +960,15 @@ const storeManager = createStoreManager({
 
 Check `ctx.uploadId !== undefined` when a classifier needs to treat upload failures differently from `execute` failures that throw the same error type.
 
+#### Dependency uploads of a direct run
+
+A transport failure while a [direct run](#direct-runs) resolves its uploads is classified like a failed direct request, by `classifyFailure(error, ctx)` with `phase: 'mutation'` and `uploadId` set. The request is never sent.
+
+- When the failure puts the session in offline mode and queueing is allowed for it, the mutation is queued: the upload goes back to `pending` (with `lastError` set) and is sent again by the replay.
+- Otherwise the mutation fails with the upload error, like a failed request (`onMutationError` is called and the optimistic update is rolled back), and the upload becomes `failed`. Running the mutation again uploads it again.
+
+With the session gate closed, the failure is not classified: the mutation fails with it.
+
 #### `resolveOfflineUpload(s)`
 
 When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again.
@@ -930,6 +978,6 @@ When the app uploads a staged file itself, a transport failure is returned to th
 - `pending` - staged and waiting to be uploaded, including uploads waiting for an automatic retry (those have `lastError` set).
 - `uploading` - the transport is running.
 - `uploaded` - the transport returned the final ref (`resolvedRef`).
-- `failed` - the last attempt failed and TSDF will not retry on its own. A `failed` upload is never blocked: it is uploaded again the next time an operation that depends on it is replayed or `resolveOfflineUpload(s)` is called for it.
+- `failed` - the last attempt failed and TSDF will not retry on its own. A `failed` upload is never blocked: it is uploaded again the next time an operation that depends on it is replayed or runs directly, or `resolveOfflineUpload(s)` is called for it.
 
 Queued mutations and staged uploads live in browser storage (localStorage, IndexedDB, OPFS), which the browser may evict under storage pressure unless the origin was granted persistent storage. TSDF does not request it: `navigator.storage.persist()` is an origin-wide permission and some browsers prompt for it, so the app should call it at a moment of its choosing (for example when the first change is queued).

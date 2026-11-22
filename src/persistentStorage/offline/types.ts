@@ -1083,6 +1083,31 @@ export type OfflineMutationInput<
 > = OfflineMutationDescriptor<TOperations, TName>;
 
 /**
+ * Upload ref type the operations of a store read in `execute`, from the ref
+ * type argument of their definitions. Falls back to `ValidPayload` for stores
+ * without operations.
+ */
+export type OfflineOperationsUploadRef<TOperations> = [
+  {
+    [K in keyof TOperations]: TOperations[K] extends {
+      execute: (ctx: infer TCtx) => unknown;
+    }
+      ? TCtx extends {
+          uploads: {
+            resolvedRefsById: Record<string, infer TRef extends ValidPayload>;
+          };
+        }
+        ? TRef
+        : never
+      : never;
+  }[keyof TOperations],
+] extends [infer TRef extends ValidPayload]
+  ? [TRef] extends [never]
+    ? ValidPayload
+    : TRef
+  : ValidPayload;
+
+/**
  * Extracts operation result type from a registered operation map.
  *
  * @typeParam TOperations - Operation registry to inspect.

@@ -29,6 +29,7 @@ import type {
 } from '../internal/testTimelineTypes';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
 import {
+  createDirectMutationContext,
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
   type OfflineMutationResult,
@@ -55,11 +56,15 @@ import {
   type GlobalOfflineEntity,
   type ItemOfflineState,
   type OfflineMutationInput,
+  type OfflineOperationsUploadRef,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecord,
   type ParsedOfflineResolutionConflictResultForStore,
 } from '../persistentStorage/offline/types';
-import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
+import type {
+  OfflineDirectMutationContext,
+  OfflineMutationUploadsInput,
+} from '../persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionOfflineOperationsConfig,
@@ -430,7 +435,11 @@ type CollectionMutationTarget<ItemPayload extends ValidPayload> =
 type CollectionMutationPayloadToUse<ItemPayload extends ValidPayload> =
   CollectionMutationTarget<ItemPayload>;
 
-type CollectionMutationArgsBase<T, ItemPayload extends ValidPayload> = {
+type CollectionMutationArgsBase<
+  T,
+  ItemPayload extends ValidPayload,
+  TMutationExtraArgs extends unknown[] = [],
+> = {
   /**
    * Applies optimistic updates for the affected item payloads before the
    * mutation runs. Return `false` to cancel the mutation before the async
@@ -442,6 +451,7 @@ type CollectionMutationArgsBase<T, ItemPayload extends ValidPayload> = {
   /** Performs the server mutation for the affected item payloads. */
   mutation: (
     payload: CollectionMutationPayloadToUse<ItemPayload>,
+    ...args: TMutationExtraArgs
   ) => Promise<T>;
   /** Called after a successful online mutation. */
   onSuccess?: (
@@ -477,10 +487,23 @@ type CollectionOfflineMutationArgs<
     ItemState,
     ItemPayload
   >,
-> = CollectionMutationArgsBase<T, ItemPayload> & {
+> = CollectionMutationArgsBase<
+  T,
+  ItemPayload,
+  [
+    ctx: OfflineDirectMutationContext<
+      OfflineOperationsUploadRef<TOfflineOperations>
+    >,
+  ]
+> & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
+   *
+   * When it runs directly, the uploads the operation declares with
+   * `dependsOnUploads` are uploaded first and passed to `mutation` as
+   * `ctx.uploads.resolvedRefsById`. They are deleted once `mutation`
+   * succeeds, and kept for the replay when the mutation is queued instead.
    */
   offline: TOfflineOperations extends null
     ? never
@@ -2574,11 +2597,27 @@ export function createCollectionStore<
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    const directMutation = async () =>
-      unwrapTSDFResult(await mutation(payloadToUse));
+    // WORKAROUND: The uploads are resolved at runtime with the untyped ref
+    // shape, and the offline variant of `mutation` reads them with the upload
+    // ref type of the store operations, as `execute` does on replay.
+    const mutationFn = __LEGIT_CAST__<
+      (
+        payload: CollectionMutationPayloadToUse<ItemPayload>,
+        ctx?: OfflineDirectMutationContext,
+      ) => Promise<T>,
+      unknown
+    >(mutation);
+    // A plain online mutation is called with the payload only
+    const directMutation = async (ctx?: OfflineDirectMutationContext) =>
+      unwrapTSDFResult(
+        await (ctx ? mutationFn(payloadToUse, ctx) : mutationFn(payloadToUse)),
+      );
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
-      data: await directMutation(),
+      // An offline-enabled mutation always gets its uploads context
+      data: await directMutation(
+        offline ? createDirectMutationContext({}) : undefined,
+      ),
     });
 
     // Whether the server accepted the mutation, even if `onSuccess` threw
@@ -2587,15 +2626,13 @@ export function createCollectionStore<
       () => startMutation(payloadToUse),
       offline
         ? () =>
-            // Without an active offline session (no session key, or the
-            // session gate is closed) it runs as a plain online mutation
-            offlineController?.canQueueMutation()
+            offlineController
               ? runHybridOfflineMutation(
                   // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
                   __LEGIT_CAST__<
                     OfflineAwareMutationController<
                       Exclude<TOfflineOperations, null>
-                    > | null,
+                    >,
                     unknown
                   >(offlineController),
                   offline,

@@ -7,12 +7,19 @@ import { Store } from 't-state';
 import type { TestOfflineTimelineEvent } from '../internal/testTimelineTypes';
 import { GET_ALL } from '../invalidationUtils';
 import {
+  createDirectMutationContext,
   type OfflineMutationResult,
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
 } from '../persistentStorage/offline/mutationRuntime';
-import type { OfflineMutationInput } from '../persistentStorage/offline/types';
-import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
+import type {
+  OfflineMutationInput,
+  OfflineOperationsUploadRef,
+} from '../persistentStorage/offline/types';
+import type {
+  OfflineDirectMutationContext,
+  OfflineMutationUploadsInput,
+} from '../persistentStorage/offlineUploadTypes';
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
@@ -1703,7 +1710,7 @@ export function createMutationApi<
     itemDroppedFieldInvalidations.clear();
   }
 
-  type ListQueryMutationArgs<T> = {
+  type ListQueryMutationArgs<T, TMutationExtraArgs extends unknown[] = []> = {
     /**
      * Applies optimistic updates for the affected item payloads before the
      * mutation runs. Return `false` to cancel the mutation before the async
@@ -1711,7 +1718,10 @@ export function createMutationApi<
      */
     optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
     /** Performs the server mutation for the affected item payloads. */
-    mutation: (payload: MutationPayloadToUse) => Promise<T>;
+    mutation: (
+      payload: MutationPayloadToUse,
+      ...args: TMutationExtraArgs
+    ) => Promise<T>;
     /** Controls query/item invalidation after a successful online mutation. */
     revalidateOnSuccess?: RevalidateOnSuccessOption;
     /** Called after a successful online mutation. */
@@ -1737,7 +1747,14 @@ export function createMutationApi<
     upload?: undefined;
   };
 
-  type ListQueryOfflineMutationArgs<T> = ListQueryMutationArgs<T> & {
+  type ListQueryOfflineMutationArgs<T> = ListQueryMutationArgs<
+    T,
+    [
+      ctx: OfflineDirectMutationContext<
+        OfflineOperationsUploadRef<TOfflineOperations>
+      >,
+    ]
+  > & {
     /**
      * When provided, the mutation tries the direct request while the session is
      * online, but degrades into durable offline queueing when the session is
@@ -1847,11 +1864,27 @@ export function createMutationApi<
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    const directMutation = async () =>
-      unwrapTSDFResult(await mutation(payloadToUse));
+    // WORKAROUND: The uploads are resolved at runtime with the untyped ref
+    // shape, and the offline variant of `mutation` reads them with the upload
+    // ref type of the store operations, as `execute` does on replay.
+    const mutationFn = __LEGIT_CAST__<
+      (
+        payload: MutationPayloadToUse,
+        ctx?: OfflineDirectMutationContext,
+      ) => Promise<T>,
+      unknown
+    >(mutation);
+    // A plain online mutation is called with the payload only
+    const directMutation = async (ctx?: OfflineDirectMutationContext) =>
+      unwrapTSDFResult(
+        await (ctx ? mutationFn(payloadToUse, ctx) : mutationFn(payloadToUse)),
+      );
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
-      data: await directMutation(),
+      // An offline-enabled mutation always gets its uploads context
+      data: await directMutation(
+        offline ? createDirectMutationContext({}) : undefined,
+      ),
     });
 
     // Whether the server accepted the mutation, even if `onSuccess` threw
@@ -1870,9 +1903,7 @@ export function createMutationApi<
       },
       offline
         ? () =>
-            // Without an active offline session (no session key, or the
-            // session gate is closed) it runs as a plain online mutation
-            offlineController?.canQueueMutation()
+            offlineController
               ? runHybridOfflineMutation(
                   offlineController,
                   offline,

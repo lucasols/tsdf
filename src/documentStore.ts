@@ -38,6 +38,7 @@ import {
   runOfflineAwareFetch,
 } from './persistentStorage/offline/fetchRuntime';
 import {
+  createDirectMutationContext,
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
   type OfflineMutationResult,
@@ -57,11 +58,15 @@ import {
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
   type OfflineMutationInput,
+  type OfflineOperationsUploadRef,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecord,
   type ParsedOfflineResolutionConflictResultForStore,
 } from './persistentStorage/offline/types';
-import type { OfflineMutationUploadsInput } from './persistentStorage/offlineUploadTypes';
+import type {
+  OfflineDirectMutationContext,
+  OfflineMutationUploadsInput,
+} from './persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type {
   DocumentPersistentStorageConfig,
@@ -320,7 +325,11 @@ type DocumentMutationContext<State extends ValidStoreState> = {
   currentState: State | null;
 };
 
-type DocumentMutationArgsBase<State extends ValidStoreState, T> = {
+type DocumentMutationArgsBase<
+  State extends ValidStoreState,
+  T,
+  TMutationContext = DocumentMutationContext<State>,
+> = {
   /**
    * Applies an optimistic document update before the mutation runs.
    *
@@ -329,7 +338,7 @@ type DocumentMutationArgsBase<State extends ValidStoreState, T> = {
    */
   optimisticUpdate?: (currentState: State | null) => void | boolean;
   /** Performs the server mutation. */
-  mutation: (ctx: DocumentMutationContext<State>) => Promise<T>;
+  mutation: (ctx: TMutationContext) => Promise<T>;
   /** Debounces mutations with the same context and payload. Superseded calls are skipped. */
   debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
   /**
@@ -355,10 +364,20 @@ type DocumentOfflineMutationArgs<
   State extends ValidStoreState,
   T,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
-> = DocumentMutationArgsBase<State, T> & {
+> = DocumentMutationArgsBase<
+  State,
+  T,
+  DocumentMutationContext<State> &
+    OfflineDirectMutationContext<OfflineOperationsUploadRef<TOfflineOperations>>
+> & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
+   *
+   * When it runs directly, the uploads the operation declares with
+   * `dependsOnUploads` are uploaded first and passed to `mutation` as
+   * `uploads.resolvedRefsById`. They are deleted once `mutation` succeeds, and
+   * kept for the replay when the mutation is queued instead.
    */
   offline: TOfflineOperations extends null
     ? never
@@ -1463,13 +1482,30 @@ export function createDocumentStore<
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
 
-    const directMutation = async () =>
+    // WORKAROUND: The uploads are resolved at runtime with the untyped ref
+    // shape, and the offline variant of `mutation` reads them with the upload
+    // ref type of the store operations, as `execute` does on replay.
+    const mutationFn = __LEGIT_CAST__<
+      (
+        ctx: DocumentMutationContext<State> &
+          Partial<OfflineDirectMutationContext>,
+      ) => Promise<T>,
+      unknown
+    >(mutation);
+    const directMutation = async (ctx?: OfflineDirectMutationContext) =>
       unwrapTSDFResult(
-        await mutation({ updateState, currentState: store.state.data }),
+        await mutationFn({
+          updateState,
+          currentState: store.state.data,
+          ...ctx,
+        }),
       );
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
-      data: await directMutation(),
+      // An offline-enabled mutation always gets its uploads context
+      data: await directMutation(
+        offline ? createDirectMutationContext({}) : undefined,
+      ),
     });
 
     // Whether the server accepted the mutation, even if `onSuccess` threw
@@ -1478,15 +1514,13 @@ export function createDocumentStore<
       startMutation,
       offline
         ? () =>
-            // Without an active offline session (no session key, or the
-            // session gate is closed) it runs as a plain online mutation
-            offlineController?.canQueueMutation()
+            offlineController
               ? runHybridOfflineMutation(
                   // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
                   __LEGIT_CAST__<
                     OfflineAwareMutationController<
                       Exclude<TOfflineOperations, null>
-                    > | null,
+                    >,
                     unknown
                   >(offlineController),
                   offline,

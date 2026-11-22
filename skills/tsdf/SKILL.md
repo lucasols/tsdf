@@ -26,14 +26,14 @@ Check more on docs: `docs/document-store.md`, `docs/collection-store.md`, `docs/
 Every store attaches to a single `storeManager`:
 
 ```ts
-import { createStoreManager, createDocumentStore } from 'tsdf';
+import { createStoreManager, createDocumentStore } from "tsdf";
 
 const storeManager = createStoreManager({
   getSessionKey: () => (auth.userId ? `tenant:${auth.tenantId}` : false),
   getAppVersion: () => BUILD_VERSION, // optional; isolates tab sync across deployments
   errorNormalizer: (err) => ({
     code: 500,
-    id: 'fetch-error',
+    id: "fetch-error",
     message: err.message,
   }),
   lowPriorityThrottleMs: 40 * 60 * 1_000, // optional; defaults to 40 minutes
@@ -48,7 +48,7 @@ const storeManager = createStoreManager({
 });
 
 const userStore = createDocumentStore<User>({
-  id: 'document-user', // stable id; also used for browser tab sync
+  id: "document-user", // stable id; also used for browser tab sync
   storeManager,
   fetchFn: (signal) => api.getUser(signal),
   lowPriorityThrottleMs: 2000, // optional store override
@@ -137,7 +137,7 @@ const result = await store.performMutation(payload, {
 
 if (result.ok) {
   /* result.value */
-} else if (result.error.kind === 'skipped') {
+} else if (result.error.kind === "skipped") {
   /* cancelled or superseded */
 } else {
   /* StoreMutationError */
@@ -241,7 +241,7 @@ Health check: `offlineSession.healthCheck: { check: ({ sessionKey, signal }) => 
 
 Session gate: `offlineSession.enabled: () => boolean` turns the whole offline layer on/off at runtime (feature flag, per-workspace setting). While it returns `false` — or `getSessionKey()` returns `false` — the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations (`{ kind: 'online', data }`, normal errors); `status.isNetworkDetectedOffline` still reports the detected connectivity (`docs/offline.md#connection-state`). Already-queued work is kept and replayed after the gate reopens. See `docs/offline.md#session-gate`.
 
-Uploads: configure `offlineSession.uploads` (`adapter`, e.g. the shipped `opfsOfflineUploadAdapter`, and an `upload` transport). Manager helpers: `saveOfflineUpload({ id, file, metadata? })`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects), `useOfflineUploads()`, and `useOfflineUploadFile(id)` to render a staged file (`resolvedRef` on `missing` once it was sent and deleted). Operations declare their files with `dependsOnUploads({ input })` and read refs from `execute({ uploads })`. A staged upload is deleted automatically once the last queued mutation or resolution that declares it leaves the queue; uploads no queued mutation used stay until `deleteOfflineUpload` or expiry. Details: `docs/offline.md#upload-refs` (typing with `StoreManagerUploadRef`, `resolvedRefSchema`), `docs/offline.md#upload-metadata`, `docs/offline.md#rendering-staged-files`, `docs/offline.md#upload-failure-handling`.
+Uploads: configure `offlineSession.uploads` (`adapter`, e.g. the shipped `opfsOfflineUploadAdapter`, and an `upload` transport). Manager helpers: `saveOfflineUpload({ id, file, metadata? })`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects), `useOfflineUploads()`, and `useOfflineUploadFile(id)` to render a staged file (`resolvedRef` on `missing` once it was sent and deleted). Operations declare their files with `dependsOnUploads({ input })` and read refs from `execute({ uploads })`; a `performMutation` with `offline` that runs online gets the same `uploads` in its `mutation` context (see `docs/offline.md#direct-runs`). A staged upload is deleted automatically once the last queued mutation or resolution that declares it leaves the queue; uploads no queued mutation used stay until `deleteOfflineUpload` or expiry. Details: `docs/offline.md#upload-refs` (typing with `StoreManagerUploadRef`, `resolvedRefSchema`), `docs/offline.md#upload-metadata`, `docs/offline.md#rendering-staged-files`, `docs/offline.md#upload-failure-handling`.
 
 Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them. See `docs/offline.md#multiple-tabs`.
 
@@ -263,7 +263,7 @@ createDocumentStore({
 // store-level callbacks override the manager default. The built-in manager
 // default is 100ms focused and 1000ms in the background.
 
-socket.on('user-updated', (data) =>
+socket.on("user-updated", (data) =>
   store.updateState((d) => Object.assign(d, data)),
 );
 storeManager.onTransportReconnect(); // notify attached realtime stores after reconnect
