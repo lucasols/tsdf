@@ -787,6 +787,12 @@ test('offline manager api returns empty defaults when offline is not configured'
   (await storeManager.deleteOfflineUpload('avatar')).unwrap();
   expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
 
+  // Without an offline session a failure the app reports never takes the
+  // session offline: it stays a failure of its request
+  expect(
+    await storeManager.reportOfflineFailure(new TypeError('Failed to fetch')),
+  ).toBe('ignore');
+
   // There is nothing to resolve without an offline session, so a resolution
   // action resolves to an explicit error result instead of throwing or
   // pretending the action was applied.

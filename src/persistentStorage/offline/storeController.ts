@@ -52,13 +52,12 @@ import {
   getOrCreateSessionOfflineCoordinator,
 } from './sessionCoordinator';
 import {
-  isModeEffectivelyActive,
   OfflineResolutionConflictParseError,
   offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
-  type OfflineFailureContext,
+  type OfflineStoreFailureContext,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
   type ItemOfflineState,
@@ -737,22 +736,10 @@ export function createOfflineStoreController<
     return sessionConfig.enabled?.() !== false;
   }
 
-  function getActiveMutationQueueingCause(
-    current: ActiveSessionState,
-  ): OfflineMutationQueueingCause | null {
-    const status = current.session.getStatus();
-
-    if (isModeEffectivelyActive(status.network)) return 'network';
-
-    if (isModeEffectivelyActive(status.outage)) return 'outage';
-
-    return null;
-  }
-
   function shouldTreatFutureOperationsAsOffline(
     current: ActiveSessionState,
   ): boolean {
-    return getActiveMutationQueueingCause(current) !== null;
+    return current.session.getActiveOfflineCause() !== null;
   }
 
   function isMutationQueueingAllowed(
@@ -915,7 +902,7 @@ export function createOfflineStoreController<
       return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
     }
 
-    const cause = getActiveMutationQueueingCause(current);
+    const cause = current.session.getActiveOfflineCause();
     if (cause === null) return 'run';
 
     if (isMutationQueueingAllowed(cause)) return 'queue';
@@ -5094,7 +5081,7 @@ export function createOfflineStoreController<
         void deleteOrphanedDependencyUploads(current, [entryToUse]);
       } catch (error) {
         const lastError = { message: unknownToError(error).message };
-        const failureCtx: OfflineFailureContext = {
+        const failureCtx: OfflineStoreFailureContext = {
           phase: 'sync',
           storeType,
           operationName: entryToUse.operation,
@@ -5275,28 +5262,20 @@ export function createOfflineStoreController<
           throw new OfflineSessionUnavailableError();
         }
 
-        await preparedCurrent.session.refreshNetworkState();
-        const activeCauseAfterRefresh =
-          getActiveMutationQueueingCause(preparedCurrent);
-        if (activeCauseAfterRefresh) {
-          return isMutationQueueingAllowed(activeCauseAfterRefresh);
-        }
-
-        const failureCtx: OfflineFailureContext = {
+        const failureCtx: OfflineStoreFailureContext = {
           phase: 'mutation',
           storeType,
           operationName: prepared.operationName,
           sessionKey: preparedCurrent.sessionKey,
         };
         if (uploadId !== undefined) failureCtx.uploadId = uploadId;
-        await preparedCurrent.session.classifyFailure(error, failureCtx);
+        const activeCause =
+          await preparedCurrent.session.classifyRequestFailure(
+            error,
+            failureCtx,
+          );
 
-        const activeCauseAfterClassification =
-          getActiveMutationQueueingCause(preparedCurrent);
-
-        return activeCauseAfterClassification
-          ? isMutationQueueingAllowed(activeCauseAfterClassification)
-          : false;
+        return activeCause ? isMutationQueueingAllowed(activeCause) : false;
       },
     };
   }

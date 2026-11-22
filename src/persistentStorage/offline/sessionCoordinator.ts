@@ -63,6 +63,7 @@ import type {
   OfflineFailureContext,
   OfflineHealthCheckConfig,
   OfflineHealthCheckResult,
+  OfflineMutationQueueingCause,
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineOutageModeConfig,
@@ -73,12 +74,14 @@ import type {
   OfflineRuntimeConfigUpdate,
   OfflineSession,
   OfflineSessionConfig,
+  OfflineStoreFailureContext,
   PersistedOfflineResolutionRecord,
 } from './types';
 import {
   COMPACT_OFFLINE_STATUS_FLAG,
   compactOfflineStatusSnapshotSchema,
   getIsOfflineModeFromStatus,
+  isModeEffectivelyActive,
 } from './types';
 
 function stripInternalEntityPayload(
@@ -2474,6 +2477,38 @@ class SessionOfflineCoordinator {
     this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
   }
 
+  /**
+   * Classifies the failure of a request sent while the session was online, as
+   * a failed direct mutation does before deciding whether to queue it: the
+   * network detection is read again first, and the failure is only classified
+   * when that did not put the session in an offline mode. Resolves with the
+   * mode the session's operations follow afterwards, `null` while online.
+   */
+  async classifyRequestFailure(
+    error: unknown,
+    ctx: OfflineFailureContext,
+  ): Promise<OfflineMutationQueueingCause | null> {
+    await this.refreshNetworkState();
+
+    if (this.getActiveOfflineCause() === null) {
+      await this.classifyFailure(error, ctx);
+    }
+
+    return this.getActiveOfflineCause();
+  }
+
+  /**
+   * The offline mode the session's operations follow: `network` first, then
+   * `outage`, each only while enabled and active; `null` while online.
+   */
+  getActiveOfflineCause(): OfflineMutationQueueingCause | null {
+    const { network, outage } = this.store.state.status;
+
+    if (isModeEffectivelyActive(network)) return 'network';
+    if (isModeEffectivelyActive(outage)) return 'outage';
+    return null;
+  }
+
   async classifyFailure(
     error: unknown,
     ctx: OfflineFailureContext,
@@ -2620,7 +2655,7 @@ class SessionOfflineCoordinator {
 
   async classifyRetriableFailure(
     error: unknown,
-    ctx: OfflineFailureContext,
+    ctx: OfflineStoreFailureContext,
   ): Promise<boolean> {
     if (!this.#canonicalConfig.classifyRetriableFailure) return false;
 
@@ -4290,6 +4325,20 @@ export function createOfflineSession<
         getActiveCoordinator()?.getStatus() ??
         getGlobalOfflineStatus(sessionKey)
       );
+    },
+    reportOfflineFailure: async (error, options) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) return 'ignore';
+
+      const ctx: OfflineFailureContext = {
+        phase: 'app',
+        sessionKey: coordinator.sessionKey,
+      };
+      if (options?.operationName !== undefined) {
+        ctx.operationName = options.operationName;
+      }
+
+      return (await coordinator.classifyRequestFailure(error, ctx)) ?? 'ignore';
     },
     getOfflineEntities: () => {
       const sessionKey = getSessionKey();

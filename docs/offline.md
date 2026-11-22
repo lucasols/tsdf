@@ -148,7 +148,7 @@ const storeManager = createStoreManager({
 
 The session uses the same function in both places:
 
-- **Failure classification.** When a fetch, a mutation or the replay of a queued mutation fails, the session runs the check and applies the answer.
+- **Failure classification.** When a fetch, a mutation or the replay of a queued mutation fails, or the app [reports the failure of its own request](#failures-of-the-apps-own-requests), the session runs the check and applies the answer.
 - **Recovery checks.** While a mode is active because of a failure, its recovery probe runs the check on that mode's `recoveryProbe` cadence (network: 5s growing to 60s, outage: 30s growing to 5min by default). `'up'` ends the offline mode — both causes at once when both are active. `'outage'` during network mode means the device reaches the backend again but the backend is down: outage mode takes over, or, when outage mode is disabled, network mode just ends and requests (including the replay of queued mutations) fail with their own errors. `'unreachable'` during outage mode activates network mode and keeps the outage, since nothing can be said about it until the backend is reachable. With a health check, `outage.recoveryCheck` is optional.
 
 In both places an answer only activates a mode that is enabled (`network.enabled` / `outage.enabled`, including runtime overrides). An answer for a disabled mode is ignored: a failed request is left to its own error.
@@ -204,6 +204,38 @@ The health check is the fallback; the more specific hooks win:
 A check that throws, rejects, or takes longer than `healthCheck.timeoutMs` (default 10s) gives no answer and changes nothing: a failure being classified is left to its request, and a recovery check counts as "not recovered yet" and is retried on the normal cadence. `ctx.signal` is aborted on timeout so the health request can be cancelled. No answer is never read as `'unreachable'`: a broken or slow health endpoint is not evidence about connectivity, and the browser going offline is already detected by network mode. Return `'unreachable'` from `check` when the request itself fails, as in the example above.
 
 The check is not called while the [session gate](#session-gate) is closed, or while both modes are disabled and neither is still active.
+
+### Failures of the app's own requests
+
+Requests the app sends outside the stores, such as a file upload made with its own API client, fail without the session seeing it. A lost connection only that request noticed then leaves the session online. `storeManager.reportOfflineFailure(error, { operationName? })` hands such a failure to the session, which handles it like the failure of an offline-enabled mutation:
+
+1. It reads the network detection again. If that puts the session in an offline mode, no hook is called.
+2. Otherwise `classifyFailure(error, ctx)` runs with `ctx.phase: 'app'`, `ctx.operationName` and no `ctx.storeType`. When it answers `'unknown'` (or is not configured), the health check runs. The health check follows the same rules as for store failures: a check in flight is shared, `reuseUpForFailuresMs` applies, and a failure while the session is already offline does not run it.
+
+It resolves to the mode the session is in afterwards: `'network'` or `'outage'` when it is offline, or `'ignore'` when it stays online and the failure belongs to the request. The app can then keep the work for later instead of failing:
+
+```ts
+async function attachFile(id: string, file: File) {
+  try {
+    return { kind: 'uploaded', ref: await api.uploadFile(file) } as const;
+  } catch (error) {
+    const mode = await storeManager.reportOfflineFailure(error, {
+      operationName: 'uploadFile',
+    });
+    const { mutationQueueing } = storeManager.getOfflineRuntimeConfig();
+    if (mode === 'ignore' || mutationQueueing[mode] === 'disallow') {
+      throw error;
+    }
+
+    // The session is offline now: stage the file for a queued mutation that
+    // depends on it (see Uploads), it is uploaded once the session recovers
+    (await storeManager.saveOfflineUpload({ id, file })).unwrap();
+    return { kind: 'staged', id } as const;
+  }
+}
+```
+
+The answer is the session's mode, whatever `mutationQueueing` says: when that mode's policy is `'disallow'`, the mutation that would use the staged file runs online and fails, so check it before staging, as above. A mode that is disabled is never entered. It rejects only when `classifyFailure` or `network.getIsOffline` throws (or returns a promise that rejects). While the session gate is closed, when there is no active session key or when no `offlineSession` is configured, it resolves to `'ignore'` without calling `classifyFailure` or `healthCheck`. There is nothing to report on success: the session leaves offline mode through its usual recovery checks. Those checks run while an offline-enabled store is in use in the tab, so a mode entered from a screen that uses none stays on until one is used.
 
 ## Reading While Offline
 
@@ -972,7 +1004,7 @@ With the session gate closed, the failure is not classified: the mutation fails 
 
 #### `resolveOfflineUpload(s)`
 
-When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again.
+When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again. To let the session classify the failure (and possibly enter offline mode), pass the error to `storeManager.reportOfflineFailure(error)`; see [Failures of the app's own requests](#failures-of-the-apps-own-requests).
 
 #### Upload states
 
