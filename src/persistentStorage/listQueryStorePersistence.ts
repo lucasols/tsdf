@@ -1741,17 +1741,43 @@ export function setupListQueryPersistence<
       parsePersistedListQueryData(value, config.queryPayloadSchema) ??
       undefined;
 
+    // A query loaded before (e.g. dropped from memory since, or still
+    // loading) is read from its snapshot, which is newer than storage until
+    // the next flush
+    const savedQueries: (
+      | ParsedPersistedListQueryData<QueryPayload>
+      | undefined
+    )[] = [];
+    const unread: { index: number; queryKey: string }[] = [];
+    for (const [index, queryKey] of queryKeys.entries()) {
+      const snapshot = querySnapshotByKey.get(queryKey);
+      if (snapshot === undefined) {
+        savedQueries.push(undefined);
+        unread.push({ index, queryKey });
+      } else {
+        savedQueries.push(parseHydratedQuerySnapshot(snapshot));
+      }
+    }
+    if (unread.length === 0) return savedQueries;
+
     if (localStorageAdapter === null) {
       return queryNamespace
-        .loadMany(queryKeys, { touch: 'never' })
-        .then((entries) =>
-          entries.map((entry) => (entry ? parse(entry) : undefined)),
+        .loadMany(
+          unread.map(({ queryKey }) => queryKey),
+          { touch: 'never' },
         )
-        .catch(() => []);
+        .then((entries) => {
+          for (const [position, { index }] of unread.entries()) {
+            const entry = entries[position];
+            if (entry) savedQueries[index] = parse(entry);
+          }
+          return savedQueries;
+        })
+        .catch(() => savedQueries);
     }
 
     const adapter = localStorageAdapter;
-    return queryKeys.map((queryKey) => {
+    for (const { index, queryKey } of unread) {
       const storageKey = getLocalStorageQueryStorageKey(queryKey);
       const rawEntry =
         storageKey === false ? null : adapter.readRaw(storageKey);
@@ -1759,14 +1785,15 @@ export function setupListQueryPersistence<
         rawEntry === null
           ? null
           : parseCompactListQueryLocalStorageEntry(rawEntry);
-      if (entry === null || entry.version !== version) return undefined;
-      return parse({
+      if (entry === null || entry.version !== version) continue;
+      savedQueries[index] = parse({
         payload: entry.payload,
         items: entry.items,
         hasMore: entry.hasMore,
         missingItems: entry.missingItems,
       });
-    });
+    }
+    return savedQueries;
   }
 
   function readHydratedLocalStorageQuery(

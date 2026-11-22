@@ -97,6 +97,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   failCreateUser = false,
   storageAdapter = 'local-sync',
   keepPendingData = false,
+  maxQueries,
 }: {
   sessionKey: string;
   storeName: string;
@@ -114,6 +115,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   storageAdapter?: 'local-sync' | typeof opfsPersistentStorage;
   /** The saved row keeps the pending row's data instead of the server's. */
   keepPendingData?: boolean;
+  maxQueries?: number;
 }) {
   const env = createListQueryStoreTestEnv<
     UserRow,
@@ -130,6 +132,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
     }),
     testScenario,
     partialResources,
+    maxQueries,
     persistentStorage: {
       adapter: storageAdapter,
       schema: userRowSchema,
@@ -735,6 +738,32 @@ describe('temp entities declared in list queries', () => {
         appendTo: 'start',
       },
     },
+    // A filter can also read the list, e.g. only lists that aren't full yet:
+    // the list then stops matching once it has the row
+    {
+      storage: 'local storage',
+      storageAdapter: 'local-sync',
+      declaration: 'filter on the list rows',
+      addToQueries: {
+        queries: (payload, query) =>
+          payload.tableId === 'users' &&
+          !payload.filters &&
+          query.items.length < 3,
+        appendTo: 'start',
+      },
+    },
+    {
+      storage: 'async storage',
+      storageAdapter: opfsPersistentStorage,
+      declaration: 'filter on the list rows',
+      addToQueries: {
+        queries: (payload, query) =>
+          payload.tableId === 'users' &&
+          !payload.filters &&
+          query.items.length < 3,
+        appendTo: 'start',
+      },
+    },
   ] satisfies {
     storage: string;
     storageAdapter: 'local-sync' | typeof opfsPersistentStorage;
@@ -890,6 +919,76 @@ describe('temp entities declared in list queries', () => {
       `);
 
       hook.unmount();
+    },
+  );
+
+  test.each([
+    { storage: 'local storage', storageAdapter: 'local-sync' },
+    { storage: 'async storage', storageAdapter: opfsPersistentStorage },
+  ] as const)(
+    'a row created offline shows up in a list a filter declares after the list was dropped from memory ($storage)',
+    async ({ storageAdapter }) => {
+      if (storageAdapter !== 'local-sync') {
+        createOpfsPersistentStorageTestStore();
+      }
+      // Only one list is kept in memory
+      const { env } = createUsersEnv({
+        sessionKey: 'temp-queries-evicted-list-session',
+        storeName: 'temp-queries-evicted-list-store',
+        testScenario: 'idle',
+        addToQueries: {
+          queries: (payload) => payload.tableId === 'users' && !payload.filters,
+          appendTo: 'start',
+        },
+        storageAdapter,
+        maxQueries: 1,
+      });
+
+      function renderUsersList(query: ListQueryParams) {
+        return renderHook(() =>
+          env.apiStore.useListQuery(query, {
+            itemSelector: (item) => item.name,
+          }),
+        );
+      }
+
+      // Online, the user opens the full list and then the "A" list, so the
+      // full list is saved and then dropped from memory
+      const allUsers = renderUsersList(usersQuery);
+      await flushAllTimers();
+      allUsers.unmount();
+      const usersStartingWithA = renderUsersList(usersStartingWithAQuery);
+      await flushAllTimers();
+      usersStartingWithA.unmount();
+      await flushAllTimers();
+      // Only the "A" list is still in memory
+      expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(
+        `['{filters:[{field:"name",op:"startsWith",value:"A"}],tableId:"users"}']`,
+      );
+
+      // Offline, the user creates a row declared into the full list
+      act(() => {
+        network.setOffline();
+      });
+      await act(async () => {
+        await resolveAfterAllTimers(
+          env.apiStore.performMutation('temp:Alan', {
+            mutation: () => Promise.resolve({ id: 3, name: 'Alan' }),
+            offline: { operation: 'createUser', input: { name: 'Alan' } },
+          }),
+        );
+      });
+      await flushAllTimers();
+
+      // Opening the full list again shows the row, instead of the saved rows
+      // without it until the next online fetch
+      const reopened = renderUsersList(usersQuery);
+      await flushAllTimers();
+      expect(reopened.result.current.items).toMatchInlineSnapshot(
+        `['Alan', 'Ada', 'Grace']`,
+      );
+
+      reopened.unmount();
     },
   );
 

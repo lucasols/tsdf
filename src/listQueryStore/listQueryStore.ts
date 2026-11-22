@@ -2744,6 +2744,9 @@ export function createListQueryStore<
     // A filter can match any saved query. It runs on the saved data of the
     // ones not loaded yet, and only the matches are loaded, so the others don't
     // count as used
+    const tempItemKeys = new Set(
+      tempPayloads.map((tempPayload) => getItemKey(tempPayload)),
+    );
     const addMatchingQueryKeys = (
       queryKeys: string[],
       savedQueries: (ParsedPersistedListQueryData<QueryPayload> | undefined)[],
@@ -2751,6 +2754,12 @@ export function createListQueryStore<
       for (const [index, queryKey] of queryKeys.entries()) {
         const savedQuery = savedQueries[index];
         if (!savedQuery) continue;
+        // A list that already holds a replayed temp row is loaded so the row
+        // is reconciled, even if the filter no longer matches it
+        if (savedQuery.items.some((itemKey) => tempItemKeys.has(itemKey))) {
+          unloadedQueryKeys.add(queryKey);
+          continue;
+        }
         const query: TSFDListQuery<QueryPayload> = {
           error: null,
           hasMore: savedQuery.hasMore,
@@ -2767,18 +2776,18 @@ export function createListQueryStore<
             unloadedQueryKeys.add(queryKey);
           }
         } catch {
-          // The filter throws again when the item is added to the queries
+          // Loaded so the filter runs again when the item is added to the
+          // queries, and throws there as it does for the lists in memory
+          unloadedQueryKeys.add(queryKey);
         }
       }
     };
     const matchSavedQueries = (
       persistedQueryKeys: ReadonlySet<string>,
     ): Promise<void> | undefined => {
-      const hydratedQueryKeys = new Set(persistence.getHydratedQueryKeys());
       const candidateQueryKeys = [...persistedQueryKeys].filter(
         (queryKey) =>
           store.state.queries[queryKey] === undefined &&
-          !hydratedQueryKeys.has(queryKey) &&
           !unloadedQueryKeys.has(queryKey),
       );
       if (candidateQueryKeys.length === 0) return undefined;
