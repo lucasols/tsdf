@@ -806,6 +806,17 @@ export function createMutationApi<
       });
     }
 
+    lockOptimisticMutationQuery(context, queryKey);
+  }
+
+  /**
+   * Makes the fetches of the query wait for the mutation to settle, so they
+   * can't return data that predates it.
+   */
+  function lockOptimisticMutationQuery(
+    context: OptimisticMutationQueryContext,
+    queryKey: string,
+  ): void {
     if (context.lockedQueryKeys.has(queryKey)) return;
 
     context.lockedQueryKeys.add(queryKey);
@@ -1406,8 +1417,15 @@ export function createMutationApi<
                 // A query only in persistent storage (not loaded yet, being
                 // loaded, or evicted from memory) would be replaced by a list
                 // with only this item. It is left as is: a query restored from
-                // storage is refetched when it is used.
-                if (!queryState && hasPersistentStorage) continue;
+                // storage is refetched when it is used. That refetch waits for
+                // the mutation, or it could return the query without the item.
+                // There is no rollback snapshot, so a rollback doesn't delete
+                // the query restored meanwhile.
+                if (!queryState && hasPersistentStorage) {
+                  const context = getCurrentOptimisticMutationQueryContext();
+                  if (context) lockOptimisticMutationQuery(context, queryKey);
+                  continue;
+                }
 
                 captureAndLockOptimisticMutationQuery(queryKey);
 

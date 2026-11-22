@@ -1144,13 +1144,10 @@ describe('queries only in persistent storage', () => {
 
   /**
    * The user sees the board once, so both columns are saved to storage, then
-   * restarts the app on the todo column and moves a card to done: the done
-   * column is not read from storage yet. Returns the timeline of opening the
-   * done column afterwards.
+   * restarts the app on the todo column: the done column is not read from
+   * storage yet.
    */
-  async function moveCardToColumnOnlyInStorageAfterRestart(
-    adapter: StorageAdapter,
-  ) {
+  async function restartOnTodoColumn(adapter: StorageAdapter) {
     if (adapter !== 'local-sync') createOpfsPersistentStorageTestStore();
 
     const first = createBoardEnv({ adapter, rule: 'payloads' });
@@ -1165,6 +1162,18 @@ describe('queries only in persistent storage', () => {
     const env = createBoardEnv({ adapter, rule: 'payloads' });
     const todo = renderColumn(env, todoColumn);
     await flushAllTimers();
+
+    return { env, todo };
+  }
+
+  /**
+   * Moves a card to the done column after a restart on the todo column.
+   * Returns the timeline of opening the done column afterwards.
+   */
+  async function moveCardToColumnOnlyInStorageAfterRestart(
+    adapter: StorageAdapter,
+  ) {
+    const { env, todo } = await restartOnTodoColumn(adapter);
     await moveToDone(env, 'tasks||1');
     await flushAllTimers();
     // The card left the todo column
@@ -1215,6 +1224,59 @@ describe('queries only in persistent storage', () => {
       .       | Write report, Pay invoice, Book flight | ui-changed
       "
     `);
+  });
+
+  test('a column only in storage opened while a card is being moved to it shows the card once the move is saved', async () => {
+    const { env, todo } = await restartOnTodoColumn('local-sync');
+
+    // Move a card to done with a slow save, and open the done column right
+    // after, while the save is still running
+    env.clearTimeline();
+    let movePromise: Promise<unknown> = Promise.resolve();
+    act(() => {
+      movePromise = env.apiStore.performMutation('tasks||1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('tasks||1', (task) => ({
+            ...task,
+            status: 'done',
+          }));
+        },
+        mutation: () =>
+          env.serverTable.delayedUpdateItem(
+            'tasks||1',
+            { status: 'done' },
+            { durationMs: 2000 },
+          ),
+      });
+    });
+    await advanceTime(5);
+    env.addTimelineComments('beforeNextAction', ['open the done column']);
+    const done = renderColumn(env, doneColumn, 'done-column');
+    await flushAllTimers();
+    await movePromise;
+
+    // The column shows its saved cards right away, but its refetch waits for
+    // the save: a fetch that ran before it would return the column without the
+    // moved card, which already left the todo column, so the card would be
+    // missing from both columns.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time    | done-column                            |
+      12s     | -                                      | -- timeline-cleared
+      12.005s | -                                      | -- open the done column
+      .       | Pay invoice, Book flight               | [done-column] ui-initialized
+      14s     | Pay invoice, Book flight               | [tasks||1] server-data-changed (value: {"status":"done"})
+      14.01s  | Pay invoice, Book flight               | 🟠 >list-fetch-started
+      14.81s  | Pay invoice, Book flight               | 🟠 <list-fetch-finished (value: {"count":3})
+      .       | Write report, Pay invoice, Book flight | [done-column] ui-changed
+      "
+    `);
+    expect(done.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Pay invoice', 'Book flight']`,
+    );
+
+    todo.unmount();
+    done.unmount();
   });
 
   test('a card moved to a column evicted from memory keeps the saved cards of the column', async () => {

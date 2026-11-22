@@ -75,7 +75,7 @@ filterItem: (item) => {
 - When `filterItem` returns `true` and the item is not in the query, it's added at the position specified by `appendNewTo`
 - When `filterItem` returns `false` and the item is in the query, it's removed
 - When `filterItem` returns `null`, the rule is skipped for that item in that query
-- When `filterItem` returns `true` for a query that is not in memory, the query is created with only the item, and refetched when it is used. With [persistent storage](./persistent-storage.md) the query is left as is instead: its saved copy (not read yet, being read, or evicted from memory) would be replaced by a list with only the item. A query restored from storage is refetched when it is used, which adds the item
+- When `filterItem` returns `true` for a query that is not in memory, the query is created with only the item, and refetched when it is used. With [persistent storage](./persistent-storage.md) the query is left as is instead: its saved copy (not read yet, being read, or evicted from memory) would be replaced by a list with only the item. A query restored from storage is refetched when it is used (after the mutation settles), which adds the item. Offline, the restored query only shows the item once the queued change is sent and the store revalidates
 
 `filterItem` is called once for each matching query and receives a context object as second argument:
 
