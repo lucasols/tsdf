@@ -620,3 +620,190 @@ test('debounced list-query calls keep the list revalidations of the calls they s
         returned_items: 1
     `);
 });
+
+// The user edits the name twice within the debounce window, then something
+// makes the pending save pointless (e.g. the user deletes the entity or
+// discards the edit): the app cancels it before it runs.
+describe('cancelling a debounced mutation drops the waiting call and reverts the edits of its group', () => {
+  const renameDebounce = { context: 'rename', payload: 'name', ms: 300 };
+
+  test('documentStore', async () => {
+    const env = createDocumentStoreTestEnv(
+      { name: 'Ada' },
+      { testScenario: 'loaded' },
+    );
+    const mutationCalls: string[] = [];
+
+    function rename(name: string) {
+      return env.apiStore.performMutation({
+        debounce: renameDebounce,
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value.name = name;
+          });
+        },
+        mutation: () => {
+          mutationCalls.push(name);
+          return env.serverMock.delayedSetData({ name });
+        },
+      });
+    }
+
+    const first = rename('Ada L');
+    await advanceTime(100);
+    const second = rename('Ada Lovelace');
+
+    // The waiting call is cancelled, and both edits are reverted right away
+    expect(env.apiStore.cancelDebouncedMutation(renameDebounce)).toBe(true);
+    expect(env.apiStore.store.state.data?.value).toMatchInlineSnapshot(
+      `name: 'Ada'`,
+    );
+
+    await flushAllTimers();
+
+    // Neither call sends its mutation
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
+    expect((await first).error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
+    expect((await second).error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
+    expect(env.serverMock.current).toMatchInlineSnapshot(`name: 'Ada'`);
+
+    // Nothing is left to cancel
+    expect(env.apiStore.cancelDebouncedMutation(renameDebounce)).toBe(false);
+  });
+
+  test('collectionStore', async () => {
+    const env = createCollectionStoreTestEnv(
+      { 'item-1': { name: 'Ada' } },
+      { testScenario: 'loaded' },
+    );
+    const mutationCalls: string[] = [];
+
+    function rename(name: string) {
+      return env.apiStore.performMutation('item-1', {
+        debounce: renameDebounce,
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('item-1', (draft) => {
+            draft.value.name = name;
+          });
+        },
+        mutation: () => {
+          mutationCalls.push(name);
+          return env.serverTable.delayedUpdateItem('item-1', { name });
+        },
+      });
+    }
+
+    const first = rename('Ada L');
+    await advanceTime(100);
+    const second = rename('Ada Lovelace');
+
+    // The waiting call is cancelled, and both edits are reverted right away
+    expect(env.apiStore.cancelDebouncedMutation(renameDebounce)).toBe(true);
+    expect(
+      env.apiStore.getItemState('item-1')?.data?.value,
+    ).toMatchInlineSnapshot(`name: 'Ada'`);
+
+    await flushAllTimers();
+
+    // Neither call sends its mutation
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
+    expect((await first).error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
+    expect((await second).error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
+    expect(env.serverTable.get('item-1')).toMatchInlineSnapshot(`name: 'Ada'`);
+
+    // Nothing is left to cancel
+    expect(env.apiStore.cancelDebouncedMutation(renameDebounce)).toBe(false);
+  });
+
+  test('listQueryStore', async () => {
+    const env = createListQueryStoreTestEnv(
+      { users: [{ id: 1, name: 'Ada' }] },
+      { testScenario: { loaded: { items: ['users||1'] } } },
+    );
+    const mutationCalls: string[] = [];
+
+    function rename(name: string) {
+      return env.apiStore.performMutation('users||1', {
+        debounce: renameDebounce,
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('users||1', (draft) => {
+            draft.name = name;
+          });
+        },
+        mutation: () => {
+          mutationCalls.push(name);
+          return env.serverTable.delayedUpdateItem('users||1', { name });
+        },
+      });
+    }
+
+    const first = rename('Ada L');
+    await advanceTime(100);
+    const second = rename('Ada Lovelace');
+
+    // The waiting call is cancelled, and both edits are reverted right away
+    expect(env.apiStore.cancelDebouncedMutation(renameDebounce)).toBe(true);
+    expect(
+      pick(env.apiStore.getItemState('users||1'), ['name']),
+    ).toMatchInlineSnapshot(`name: 'Ada'`);
+
+    await flushAllTimers();
+
+    // Neither call sends its mutation
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
+    expect((await first).error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
+    expect((await second).error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
+    expect(
+      pick(env.serverTable.get('users||1'), ['name']),
+    ).toMatchInlineSnapshot(`name: 'Ada'`);
+
+    // Nothing is left to cancel
+    expect(env.apiStore.cancelDebouncedMutation(renameDebounce)).toBe(false);
+  });
+});
+
+test('cancelling a debounced mutation whose request already started does nothing', async () => {
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    { testScenario: { loaded: { items: ['users||1'] } } },
+  );
+  const renameDebounce = { context: 'rename', payload: 'users||1', ms: 300 };
+
+  const rename = env.apiStore.performMutation('users||1', {
+    debounce: renameDebounce,
+    optimisticUpdate: () => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.name = 'Ada Lovelace';
+      });
+    },
+    mutation: () =>
+      env.serverTable.delayedUpdateItem('users||1', { name: 'Ada Lovelace' }),
+  });
+
+  // The debounce window ended and the request is in flight
+  await advanceTime(300);
+  expect(env.apiStore.cancelDebouncedMutation(renameDebounce)).toBe(false);
+
+  await flushAllTimers();
+
+  // The save completes and its edit is kept
+  expect((await rename).ok).toBe(true);
+  expect(pick(env.serverTable.get('users||1'), ['name'])).toMatchInlineSnapshot(
+    `name: 'Ada Lovelace'`,
+  );
+  expect(
+    pick(env.apiStore.getItemState('users||1'), ['name']),
+  ).toMatchInlineSnapshot(`name: 'Ada Lovelace'`);
+});

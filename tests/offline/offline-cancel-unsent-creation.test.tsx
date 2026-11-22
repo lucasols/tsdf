@@ -198,6 +198,84 @@ describe('list-query rows', () => {
     list.unmount();
   });
 
+  test('deleting a task created offline while its debounced edit waits sends nothing once the app cancels the edit', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'cancel-debounced-edit-session',
+      'cancel-debounced-edit-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    await env.createTaskWithId(50, 'Plan trip');
+
+    // The task editor saves the name 5s after the last change
+    const editDebounce = {
+      context: 'edit-task',
+      payload: 'tasks||50',
+      ms: 5_000,
+    };
+    act(() => {
+      void env.apiStore.performMutation('tasks||50', {
+        debounce: editDebounce,
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('tasks||50', (item) => ({
+            ...item,
+            name: 'Plan trip to Rome',
+          }));
+        },
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('tasks||50', {
+            name: 'Plan trip to Rome',
+          });
+        },
+        offline: {
+          operation: 'editTask',
+          input: { itemId: 'tasks||50', name: 'Plan trip to Rome' },
+        },
+      });
+    });
+    await advanceTime(1_000);
+
+    // The edit is applied right away, and waits for the debounce window
+    expect(pick(env.apiStore.getItemState('tasks||50'), ['name']))
+      .toMatchInlineSnapshot(`
+      name: 'Plan trip to Rome'
+    `);
+
+    // Within the debounce window the user deletes the task: the app cancels
+    // the edit that is still waiting, so it is never queued, then deletes it
+    act(() => {
+      expect(env.apiStore.cancelDebouncedMutation(editDebounce)).toBe(true);
+    });
+    // The cancelled edit is reverted
+    expect(pick(env.apiStore.getItemState('tasks||50'), ['name']))
+      .toMatchInlineSnapshot(`
+      name: 'Plan trip'
+    `);
+
+    await env.deleteTask('tasks||50');
+    await flushAllTimers();
+
+    // The delete cancelled the unsent creation, and the edit was never queued
+    // for the task the server never got
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is sent, and nothing is left for the user to resolve
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
   test('deleting a subtask with a client-generated id whose direct creation request failed still deletes it on the server', async () => {
     const env = createTasksEnv(
       'delete-client-id-after-direct-attempt-session',

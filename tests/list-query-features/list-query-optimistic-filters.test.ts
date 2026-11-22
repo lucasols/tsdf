@@ -398,6 +398,139 @@ test('a rule keeps the membership as is when the query has filters the client ca
   `);
 });
 
+test('an item moved between lists keeps the filters the client cannot evaluate of the list it left', () => {
+  // Stands in for a server-side search, which the client rule cannot evaluate
+  const searchFilter: FilterOperator = {
+    op: 'startsWith',
+    field: 'name',
+    value: 'User 1',
+  };
+
+  const queries = {
+    admins: { tableId: 'users', filters: byTypeFilter('admin') },
+    adminsSearch: {
+      tableId: 'users',
+      filters: [...byTypeFilter('admin'), searchFilter],
+    },
+    regularUsers: { tableId: 'users', filters: byTypeFilter('user') },
+    regularUsersSearch: {
+      tableId: 'users',
+      filters: [...byTypeFilter('user'), searchFilter],
+    },
+  } satisfies Record<string, ListQueryParams>;
+
+  function getSearch(query: ListQueryParams): string | undefined {
+    for (const filter of query.filters ?? []) {
+      if (filter.op === 'startsWith') return filter.value;
+    }
+
+    return undefined;
+  }
+
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: { loaded: { queries: Object.values(queries) } },
+    optimisticListUpdates: [
+      {
+        queries: () => true,
+        filterItem: (
+          user,
+          { queryPayload, isInQuery, previousItem, previousQueries },
+        ) => {
+          const matchesTypeFilter = (queryPayload.filters ?? []).every(
+            (filter) => userMatchesFilter(user, filter) !== false,
+          );
+          const search = getSearch(queryPayload);
+
+          // Without a search, or for a user already known to match it, the
+          // known filters decide the membership
+          if (search === undefined || isInQuery) return matchesTypeFilter;
+
+          // Only a type change moves the user between the lists
+          if (!matchesTypeFilter || previousItem?.type === user.type) {
+            return null;
+          }
+
+          // A user that was in a list with the same search matches it, so it
+          // can be added to the list of its new type
+          const wasInSameSearch = previousQueries.some(
+            (previousQuery) => getSearch(previousQuery) === search,
+          );
+
+          return wasInSameSearch ? true : null;
+        },
+      },
+    ],
+  });
+
+  const membership = createLoggerStore();
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('an admin inside the search results becomes a user');
+  env.apiStore.updateItemState('users||1', (user) => {
+    user.type = 'user';
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('an admin outside the search results becomes a user');
+  env.apiStore.updateItemState('users||3', (user) => {
+    user.type = 'user';
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('a new admin is added');
+  env.apiStore.addItemToState('users||11', {
+    id: 11,
+    name: 'User 11',
+    age: 40,
+    type: 'admin',
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  // - users||1 moves from `adminsSearch` to `regularUsersSearch`: it was in a
+  //   list with the same search before the change.
+  // - users||3 moves from `admins` to `regularUsers` only: it was in no search
+  //   list, so there is no way to know if it matches the search.
+  // - the new users||11 has no previous state or lists, so it only enters the
+  //   list without search.
+  expect(membership.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9
+    ⋅ adminsSearch: users||1
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10
+    ⋅ regularUsersSearch: users||10
+    └─
+
+    >>> an admin inside the search results becomes a user
+
+    ┌─
+    ⋅ admins: users||3, users||5, users||7, users||9
+    ⋅ adminsSearch: ''
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10, users||1
+    ⋅ regularUsersSearch: users||10, users||1
+    └─
+
+    >>> an admin outside the search results becomes a user
+
+    ┌─
+    ⋅ admins: users||5, users||7, users||9
+    ⋅ adminsSearch: ''
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10, users||1, users||3
+    ⋅ regularUsersSearch: users||10, users||1
+    └─
+
+    >>> a new admin is added
+
+    ┌─
+    ⋅ admins: users||5, users||7, users||9, users||11
+    ⋅ adminsSearch: ''
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10, users||1, users||3
+    ⋅ regularUsersSearch: users||10, users||1
+    └─
+    "
+  `);
+});
+
 test('optimistically create a query if it does not exist', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
     testScenario: {

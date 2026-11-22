@@ -78,11 +78,13 @@ filterItem: (item) => {
 
 `filterItem` is called once for each matching query and receives a context object as second argument:
 
-| Field          | Description                                                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `queryPayload` | Payload of the query being evaluated                                                                                             |
-| `itemPayload`  | Payload of the item being evaluated                                                                                              |
-| `isInQuery`    | Whether the item is in the query right before the rule is applied. Computed on first read; read it while `filterItem` is running |
+| Field             | Description                                                                                                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queryPayload`    | Payload of the query being evaluated                                                                                                                                    |
+| `itemPayload`     | Payload of the item being evaluated                                                                                                                                     |
+| `isInQuery`       | Whether the item is in the query right before the rule is applied. Computed on first read; read it while `filterItem` is running                                        |
+| `previousItem`    | Item state before the `updateItemState` / `addItemToState` call, or `null` when the item was not in the store                                                           |
+| `previousQueries` | Payloads of the cached queries that listed the item before the `updateItemState` / `addItemToState` call. Computed on first read; read it while `filterItem` is running |
 
 With the query payload, one rule can decide membership for every query, instead of one rule per filter combination:
 
@@ -109,6 +111,30 @@ filterItem: (task, { queryPayload, isInQuery }) => {
   return isInQuery ? matchesLocalFilters : null;
 };
 ```
+
+`previousItem` and `previousQueries` tell what changed and where the item was before the update. An item that moved out of a query with the same server-side filters is known to pass them, so it can be added to the query of its new status:
+
+```ts
+filterItem: (
+  task,
+  { queryPayload, isInQuery, previousItem, previousQueries },
+) => {
+  const matchesLocalFilters = taskMatchesLocalFilters(task, queryPayload);
+
+  if (!queryPayload.search || isInQuery) return matchesLocalFilters;
+
+  // Only a status change moves the task between the lists
+  if (!matchesLocalFilters || previousItem?.status === task.status) return null;
+
+  const wasInSameSearch = previousQueries.some(
+    (previousQuery) => previousQuery.search === queryPayload.search,
+  );
+
+  return wasInSameSearch ? true : null;
+};
+```
+
+`previousQueries` only has the queries cached in memory, not the ones only in persistent storage.
 
 ### appendNewTo
 

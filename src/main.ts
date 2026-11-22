@@ -85,6 +85,7 @@ export type {
 export type {
   BlockWindowCloseHandler,
   MutationDebounce,
+  MutationDebounceKey,
 } from './utils/performMutation';
 
 // Persistent Storage types
