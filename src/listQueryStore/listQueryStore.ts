@@ -4124,6 +4124,7 @@ export function createListQueryStore<
     // for a screen mounted at startup
     if (offlineController && !offlineController.isHydrated()) {
       const schedule = () => {
+        if (isDisposed) return;
         scheduleAutomaticFetchOfKnownItem(
           fetchType,
           itemPayload,

@@ -2067,6 +2067,7 @@ export function createCollectionStore<
     // for a screen mounted at startup
     if (offlineController && !offlineController.isHydrated()) {
       const schedule = () => {
+        if (isDisposed) return;
         scheduleAutomaticFetchOfKnownItem(fetchType, payload, onSkipped);
       };
       void offlineController.hydrateIfNeeded().then(schedule, schedule);

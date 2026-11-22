@@ -1279,6 +1279,57 @@ describe('queries only in persistent storage', () => {
     done.unmount();
   });
 
+  test('a card created in a column evicted from memory shows in the column right away with local storage', async () => {
+    // Only two lists fit in memory: opening the projects screen after leaving
+    // the done column evicts the done column, which stays saved in local
+    // storage
+    const env = createBoardEnv({
+      adapter: 'local-sync',
+      rule: 'payloads',
+      maxQueries: 2,
+    });
+    const todo = renderColumn(env, todoColumn);
+    const leftDone = renderColumn(env, doneColumn);
+    await flushAllTimers();
+    leftDone.unmount();
+    const projects = renderHook(() => env.apiStore.useListQuery(projectsQuery));
+    await flushAllTimers();
+    // The done column is no longer in memory
+    expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(`
+      - '{filters:[{field:"status",op:"eq",value:"todo"}],tableId:"tasks"}'
+      - '{tableId:"projects"}'
+    `);
+
+    // The app creates a done card and adds it to the lists a filter picks: the
+    // filter reads the saved done column back from local storage
+    act(() => {
+      env.apiStore.addItemToState(
+        'tasks||4',
+        { id: 4, name: 'Call bank', status: 'done' },
+        {
+          addItemToQueries: {
+            queries: (query) =>
+              query.filters?.[0]?.op === 'eq' &&
+              query.filters[0].value === 'done',
+            appendTo: 'start',
+          },
+        },
+      );
+    });
+
+    // The done column got the new card and kept its saved cards, so opening
+    // it shows the card before any refetch
+    const done = renderColumn(env, doneColumn);
+    expect(done.result.current.items).toMatchInlineSnapshot(
+      `['Call bank', 'Pay invoice', 'Book flight']`,
+    );
+
+    await flushAllTimers();
+    todo.unmount();
+    projects.unmount();
+    done.unmount();
+  });
+
   test('a card moved to a column evicted from memory keeps the saved cards of the column', async () => {
     createOpfsPersistentStorageTestStore();
 

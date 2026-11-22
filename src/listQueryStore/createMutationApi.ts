@@ -1680,6 +1680,12 @@ export function createMutationApi<
   ) {
     const itemKey = getItemKey(itemPayload);
     const previousState = store.state;
+    // Resolved before the draft is created: a filter reads the saved queries
+    // that are not in memory, and with sync storage that loads them into the
+    // state, so the draft must already include them
+    const queriesToAddTo =
+      options.addItemToQueries &&
+      getQueriesKeyArray(options.addItemToQueries.queries);
 
     store.batch(() => {
       store.produceState(
@@ -1696,12 +1702,8 @@ export function createMutationApi<
             payload: klona(itemPayload),
           };
 
-          if (options.addItemToQueries) {
-            const queries = getQueriesKeyArray(
-              options.addItemToQueries.queries,
-            );
-
-            for (const { key } of queries) {
+          if (options.addItemToQueries && queriesToAddTo) {
+            for (const { key } of queriesToAddTo) {
               const queryState = draftState.queries[key];
               if (!queryState) continue;
 

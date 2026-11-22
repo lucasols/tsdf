@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
+  createTasksAndCommentsEnv,
   createTasksEnv,
   network,
   setupCancelUnsentCreationTests,
@@ -837,6 +838,37 @@ describe('tasks whose creation waits for a manual decision', () => {
     taskScreen.unmount();
     freshTaskScreen.unmount();
     restoredTaskScreen.unmount();
+  });
+
+  test('stores closed while they still read their queued work send no fetch for the screens opened meanwhile', async () => {
+    // The app starts on the screens of a task and of a comment. Their fetches
+    // wait until each store has read the offline work queued in this session
+    const { tasks, comments } = createTasksAndCommentsEnv(
+      'dispose-before-read',
+    );
+    const taskScreen = renderHook(() =>
+      tasks.apiStore.useItem('tasks||1', { requireFreshData: true }),
+    );
+    const commentScreen = renderHook(() =>
+      comments.apiStore.useItem('comments||1', { requireFreshData: true }),
+    );
+
+    // The stores are closed before that read ends, e.g. the user logs out
+    tasks.apiStore.dispose();
+    comments.apiStore.dispose();
+    await flushAllTimers();
+
+    // A closed store sends nothing more: the screens' waiting fetches are
+    // dropped
+    expect(
+      tasks.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(
+      comments.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+
+    taskScreen.unmount();
+    commentScreen.unmount();
   });
 });
 
