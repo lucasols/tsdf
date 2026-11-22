@@ -10,6 +10,7 @@ import {
   pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   createStoreManagerForSession,
   createTasksAndCommentsEnv,
@@ -134,7 +135,7 @@ describe('list-query rows', () => {
       .      | Write final report, Review budget, Plan summer trip, Book cheap flights | [tasks] ui-changed
       .      | Write final report, Review budget, Plan summer trip, Book cheap flights | offline:renameTask queued
       .      | Write final report, Review budget, Plan summer trip, Book cheap flights | -- offline: delete the task that was never sent
-      .      | Write final report, Review budget                                       | [tasks] ui-changed
+      .      | Write final report, Review budget                                       | [tasks, tasks] ui-changed
       .      | Write final report, Review budget                                       | offline:deleteTask queued
       .      | Write final report, Review budget                                       | -- back online: only the rename of the existing task is sent
       .      | Write final report, Review budget                                       | offline:renameTask replay-started
@@ -1170,6 +1171,75 @@ describe('collection items', () => {
     `);
 
     note.unmount();
+  });
+
+  test('after a restart, opening the screen of a note created offline shows it without fetching it from the server', async () => {
+    const sessionKey = 'open-unsent-note-after-restart-session';
+    const storeName = 'open-unsent-note-after-restart-store';
+    network.setOffline();
+    const first = createNotesEnv(sessionKey, storeName);
+    await first.createNote('Ideas');
+    await flushAllTimers();
+    first.apiStore.dispose();
+
+    // The app restarts online on the screen of the note: the note is restored
+    // from storage as stale data, which a screen normally refetches when it
+    // mounts
+    resetSessionForTests();
+    network.setOnline();
+    const env = createNotesEnv(sessionKey, storeName);
+    const noteScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Ideas', {
+        selector: (item) => item?.value.name ?? null,
+      }),
+    );
+    // A screen that requires fresh data always fetches the item when it mounts
+    const freshNoteScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Ideas', {
+        selector: (item) => item?.value.name ?? null,
+        requireFreshData: true,
+      }),
+    );
+    // A screen that requires fresh data only for data restored from storage
+    // fetches the note too, since it was restored from storage
+    const restoredNoteScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Ideas', {
+        selector: (item) => item?.value.name ?? null,
+        requireFreshData: 'ifFromStorage',
+      }),
+    );
+    await flushAllTimers();
+
+    // The server doesn't know the note until its creation is confirmed, so it
+    // is not fetched, not even by the screens that require fresh data: all
+    // screens show the local note instead of a not-found error, and the ones
+    // that require fresh data don't keep loading
+    expect(
+      env.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(pick(noteScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Ideas'
+      error: null
+      status: 'success'
+    `);
+    expect(pick(freshNoteScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Ideas'
+      error: null
+      status: 'success'
+    `);
+
+    expect(pick(restoredNoteScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Ideas'
+      error: null
+      status: 'success'
+    `);
+
+    noteScreen.unmount();
+    freshNoteScreen.unmount();
+    restoredNoteScreen.unmount();
   });
 });
 

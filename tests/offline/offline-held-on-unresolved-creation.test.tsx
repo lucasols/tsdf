@@ -1,7 +1,10 @@
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
+  createTasksAndCommentsEnv,
   createTasksEnv,
   network,
   setupCancelUnsentCreationTests,
@@ -766,6 +769,107 @@ describe('tasks whose creation waits for a manual decision', () => {
 
     list.unmount();
   });
+
+  test('after a restart, opening the screen of the waiting task shows it without fetching it from the server', async () => {
+    const sessionKey = 'open-unresolved-task-after-restart-session';
+    const storeName = 'open-unresolved-task-after-restart-store';
+    const { env: first, list } = await createTaskWhoseCreationKeepsFailing(
+      sessionKey,
+      storeName,
+    );
+    list.unmount();
+    first.apiStore.dispose();
+
+    // The app restarts online on the screen of the task: the task is restored
+    // from storage as stale data, which a screen normally refetches when it
+    // mounts
+    resetSessionForTests();
+    const env = createTasksEnv(sessionKey, storeName);
+    const taskScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Plan trip', {
+        selector: (task) => task?.name ?? null,
+      }),
+    );
+    // A screen that requires fresh data always fetches the task when it
+    // mounts
+    const freshTaskScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Plan trip', {
+        selector: (task) => task?.name ?? null,
+        requireFreshData: true,
+      }),
+    );
+    // A screen that requires fresh data only for data restored from storage
+    // fetches the task too, since it was restored from storage
+    const restoredTaskScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Plan trip', {
+        selector: (task) => task?.name ?? null,
+        requireFreshData: 'ifFromStorage',
+      }),
+    );
+    await flushAllTimers();
+
+    // The server doesn't know the task until its creation is sent again, so
+    // it is not fetched, not even by the screens that require fresh data:
+    // all screens show the local task instead of a not-found error, and the
+    // ones that require fresh data don't keep loading
+    expect(
+      env.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(pick(taskScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Plan trip'
+      error: null
+      status: 'success'
+    `);
+    expect(pick(freshTaskScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Plan trip'
+      error: null
+      status: 'success'
+    `);
+
+    expect(pick(restoredTaskScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Plan trip'
+      error: null
+      status: 'success'
+    `);
+
+    taskScreen.unmount();
+    freshTaskScreen.unmount();
+    restoredTaskScreen.unmount();
+  });
+
+  test('stores closed while they still read their queued work send no fetch for the screens opened meanwhile', async () => {
+    // The app starts on the screens of a task and of a comment. Their fetches
+    // wait until each store has read the offline work queued in this session
+    const { tasks, comments } = createTasksAndCommentsEnv(
+      'dispose-before-read',
+    );
+    const taskScreen = renderHook(() =>
+      tasks.apiStore.useItem('tasks||1', { requireFreshData: true }),
+    );
+    const commentScreen = renderHook(() =>
+      comments.apiStore.useItem('comments||1', { requireFreshData: true }),
+    );
+
+    // The stores are closed before that read ends, e.g. the user logs out
+    tasks.apiStore.dispose();
+    comments.apiStore.dispose();
+    await flushAllTimers();
+
+    // A closed store sends nothing more: the screens' waiting fetches are
+    // dropped
+    expect(
+      tasks.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(
+      comments.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+
+    taskScreen.unmount();
+    commentScreen.unmount();
+  });
 });
 
 describe('tasks created with a client-generated id whose creation waits for a manual decision', () => {
@@ -909,8 +1013,8 @@ describe('tasks created with a client-generated id whose creation waits for a ma
       .      | Write report, Review budget, Plan summer trip | offline:createTaskWithId resolution-required
       .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan summer trip | -- online: rename the task whose creation waits for a decision
-      .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan winter trip | [tasks] ui-changed
+      .      | Write report, Review budget, Plan winter trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan winter trip | offline:renameTask queued
       15.01s | Write report, Review budget, Plan winter trip | -- the user asks to send the creation again
       .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-started

@@ -48,6 +48,9 @@ This option changes both fetching and the returned status:
   the request fails.
 - It takes precedence over `disableRefetches` and `disableRefetchOnMount`.
   Disabled hooks do not fetch.
+- Items that only exist locally (offline creations the server has not
+  confirmed yet) are not fetched: the hook reports their local status right
+  away.
 - Scheduler coalescing can merge simultaneous work, but repeated mounts can
   still produce repeated network requests.
 

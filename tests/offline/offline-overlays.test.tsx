@@ -17,7 +17,9 @@ import {
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
+  type CreateAndPatchListQueryUserOperations,
   type CreateListQueryUserOperations,
+  type CreateUserOperations,
   type PatchUserOperations,
   type UpdateValueExecuteContext,
   type UpdateValueOperations,
@@ -575,7 +577,7 @@ describe('collection overlays', () => {
       .     | null | yes     | deleted | [name, status, pending] ui-changed
       .     | null | yes     | deleted | offline:deleteItem queued
       .     | null | yes     | deleted | -- reconnect — stale refetch must not resurrect the deleted item
-      .     | null | yes     | deleted | [users||1] scheduled-fetch-triggered
+      .     | null | yes     | deleted | [users||1] scheduled-fetch-coalesced
       .     | null | yes     | deleted | offline:deleteItem replay-started
       10ms  | null | yes     | deleted | 🔴 [users||1] >fetch-started
       810ms | null | yes     | deleted | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
@@ -1397,6 +1399,373 @@ describe('list-query overlays', () => {
       .     |             | success      | offline:deleteUser replay-finished
       5.02s |             | success      | 🟠 >list-fetch-started
       5.82s |             | success      | 🟠 <list-fetch-finished (value: {"count":0})
+      "
+    `);
+
+    hook.unmount();
+  });
+});
+
+describe('optimistic changes of entities with queued work', () => {
+  // The edit screens save 5s after the last change
+  const editDebounceMs = 5_000;
+
+  test('a debounced rename of a row created offline shows in its list and on its screen before it is queued, and a cancelled one is reverted', async () => {
+    network.setOffline();
+    const usersQuery = { tableId: 'users' } as const;
+    const sessionKey = 'offline-overlay-debounced-row-session';
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateAndPatchListQueryUserOperations
+    >(
+      { users: [{ id: 1, name: 'Ada' }] },
+      {
+        id: 'offline-overlay-debounced-row-store',
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: async ({ input }) => {
+                  const data = { id: 2, name: input.name };
+                  await env.serverTable.delayedSetItem('users||2', data);
+                  return data;
+                },
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                kind: 'update',
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedUpdateItem(input.itemId, {
+                    name: input.name,
+                  });
+                  return { name: input.name };
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (user) => ({
+                    ...user,
+                    name: input.name,
+                  }));
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    // The user creates a row offline: its creation is queued
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus', {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Linus',
+            { id: -1, name: 'Linus' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () => Promise.resolve({ id: 2, name: 'Linus' }),
+        offline: { operation: 'createUser', input: { name: 'Linus' } },
+      });
+    });
+
+    // The list and the screen of the new row are open
+    const hook = renderHook(() => {
+      const list = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (user) => user.name,
+      });
+      const row = env.apiStore.useItem('temp:Linus', {
+        selector: (user) => user?.name ?? null,
+      });
+
+      env.trackItemUI('list', list.items.join(', '));
+      env.trackItemUI('row-screen', row.data ?? 'null');
+    });
+    await advanceTime(10);
+
+    function renameNewRow(name: string) {
+      act(() => {
+        void env.apiStore.performMutation('temp:Linus', {
+          debounce: {
+            context: 'rename-user',
+            payload: 'temp:Linus',
+            ms: editDebounceMs,
+          },
+          optimisticUpdate: () => {
+            env.apiStore.updateItemState('temp:Linus', (user) => ({
+              ...user,
+              name,
+            }));
+          },
+          mutation: () => Promise.resolve({ name }),
+          offline: {
+            operation: 'patchUserName',
+            input: { itemId: 'temp:Linus', name },
+          },
+        });
+      });
+    }
+
+    // The rename shows right away, not only once it is queued after the
+    // debounce
+    env.addTimelineComments('beforeNextAction', [
+      'rename the new row — shown before the rename is queued',
+    ]);
+    renameNewRow('Linus Torvalds');
+    await advanceTime(editDebounceMs);
+
+    // A rename cancelled while it waits for the debounce is reverted to the
+    // queued one
+    env.addTimelineComments('beforeNextAction', [
+      'rename it again, then cancel the rename — back to the queued name',
+    ]);
+    renameNewRow('Linus T.');
+    await advanceTime(1_000);
+    act(() => {
+      env.apiStore.cancelDebouncedMutation({
+        context: 'rename-user',
+        payload: 'temp:Linus',
+      });
+    });
+    await flushAllTimers();
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | list                | row-screen     |
+      0     | -                   | -              | offline:createUser queued
+      .     | Ada, Linus          | Linus          | [list, row-screen] ui-initialized
+      10ms  | Ada, Linus          | Linus          | -- rename the new row — shown before the rename is queued
+      .     | Ada, Linus Torvalds | Linus Torvalds | [list, row-screen] ui-changed
+      5.01s | Ada, Linus Torvalds | Linus Torvalds | offline:patchUserName queued
+      .     | Ada, Linus Torvalds | Linus Torvalds | -- rename it again, then cancel the rename — back to the queued name
+      .     | Ada, Linus T.       | Linus T.       | [list, row-screen] ui-changed
+      6.01s | Ada, Linus Torvalds | Linus Torvalds | [list, row-screen] ui-changed
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('a debounced rename of an item created offline shows on its screen before it is queued', async () => {
+    network.setOffline();
+    const sessionKey = 'offline-overlay-debounced-item-session';
+
+    const env = createCollectionStoreTestEnv<
+      { name: string },
+      CreateUserOperations & RenameCollectionItemOperations
+    >(
+      { 'users||1': { name: 'Ada' } },
+      {
+        id: 'offline-overlay-debounced-item-store',
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offline: {
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({
+                    value: { name: input.name },
+                  }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: result.id,
+                    finalData: { value: { name: result.name } },
+                  }),
+                },
+                execute: async ({ input }) => {
+                  const result = { id: 'users||2', name: input.name };
+                  await env.serverTable.delayedSetItem(result.id, {
+                    name: result.name,
+                  });
+                  return result;
+                },
+              },
+              renameItem: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'update',
+                getEntityRefs: () => ['temp:Linus'],
+                execute: ({ input }) =>
+                  Promise.resolve({ value: { name: input.name } }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState('temp:Linus', (draft) => {
+                    draft.value.name = input.name;
+                  });
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    // The user creates an item offline: its creation is queued
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus', {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState('temp:Linus', {
+            value: { name: 'Linus' },
+          });
+        },
+        mutation: () => Promise.resolve({ id: 'users||2', name: 'Linus' }),
+        offline: { operation: 'createUser', input: { name: 'Linus' } },
+      });
+    });
+
+    const hook = renderHook(() => {
+      const item = env.apiStore.useItem('temp:Linus', {
+        selector: (user) => user?.value.name ?? null,
+      });
+      env.trackItemUI('item-screen', item.data ?? 'null');
+    });
+    await advanceTime(10);
+
+    // The rename shows right away, not only once it is queued after the
+    // debounce
+    env.addTimelineComments('beforeNextAction', [
+      'rename the new item — shown before the rename is queued',
+    ]);
+    act(() => {
+      void env.apiStore.performMutation('temp:Linus', {
+        debounce: {
+          context: 'rename-user',
+          payload: 'temp:Linus',
+          ms: editDebounceMs,
+        },
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('temp:Linus', (draft) => {
+            draft.value.name = 'Linus Torvalds';
+          });
+        },
+        mutation: () => Promise.resolve({ value: { name: 'Linus Torvalds' } }),
+        offline: { operation: 'renameItem', input: { name: 'Linus Torvalds' } },
+      });
+    });
+    await flushAllTimers();
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | item-screen    |
+      0     | -              | offline:createUser queued
+      .     | Linus          | ui-initialized
+      10ms  | Linus          | -- rename the new item — shown before the rename is queued
+      .     | Linus Torvalds | ui-changed
+      5.01s | Linus Torvalds | offline:renameItem queued
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('a debounced edit of a document with a queued edit shows before it is queued', async () => {
+    network.setOffline();
+    const sessionKey = 'offline-overlay-debounced-doc-session';
+
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: 'offline-overlay-debounced-doc-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              kind: 'update',
+              execute: ({ input }: UpdateValueExecuteContext) =>
+                Promise.resolve(input),
+            },
+          },
+        },
+      },
+    });
+
+    function editValue(value: number, debounceMs?: number) {
+      return env.apiStore.performMutation({
+        debounce:
+          debounceMs === undefined
+            ? undefined
+            : { context: 'edit-value', payload: null, ms: debounceMs },
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value = value;
+          });
+        },
+        mutation: () => Promise.resolve(value),
+        offline: { operation: 'updateValue', input: { value } },
+      });
+    }
+
+    const hook = renderHook(() => {
+      const doc = env.apiStore.useDocument();
+      env.trackUIChanges(`value:${doc.data?.value ?? 'null'}`);
+    });
+    await advanceTime(10);
+
+    // A first edit is queued offline
+    await act(async () => {
+      await editValue(2);
+    });
+
+    // The next edit shows right away, not only once it is queued after the
+    // debounce
+    env.addTimelineComments('beforeNextAction', [
+      'edit again — shown before the edit is queued',
+    ]);
+    act(() => {
+      void editValue(3, editDebounceMs);
+    });
+    await flushAllTimers();
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | ui        |
+      0     | "value:1" | ui-initialized
+      10ms  | "value:2" | ui-changed
+      .     | "value:2" | offline:updateValue queued
+      .     | "value:2" | -- edit again — shown before the edit is queued
+      .     | "value:3" | ui-changed
+      5.01s | "value:3" | offline:updateValue queued
       "
     `);
 

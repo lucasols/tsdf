@@ -540,6 +540,12 @@ export type OfflineStoreController<
 > = {
   dispose: () => void;
   hydrateIfNeeded: () => Promise<void>;
+  /**
+   * Whether the queued work of the current session was read from storage, so
+   * the store knows its offline entities (e.g. its unsent creations). Always
+   * true without a session, since there is no queued work.
+   */
+  isHydrated: () => boolean;
   canQueueMutation: () => boolean;
   prepareForMutation: <TName extends keyof TOperations & string>(args: {
     offline: OfflineMutationInput<TOperations, TName>;
@@ -5992,6 +5998,10 @@ export function createOfflineStoreController<
   return {
     dispose,
     hydrateIfNeeded,
+    isHydrated: () => {
+      const sessionKey = offlineSession.getSessionKey();
+      return sessionKey === false || hydratedSessionKey === sessionKey;
+    },
     canQueueMutation,
     prepareForMutation,
     runUnqueuedMutation,

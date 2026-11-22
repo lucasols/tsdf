@@ -1,7 +1,17 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { afterEach, beforeAll, expect, test, vi } from 'vitest';
+import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -10,7 +20,15 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import type { FilterOperator } from '../mocks/serverTableMock';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
+import { listQueryQueryPayloadSchema } from '../offline/offlineTestShared';
+import {
+  advanceTime,
+  flushAllTimers,
+  range,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 
 type UserRow = Row & { age: number; type: 'admin' | 'user' };
 
@@ -993,4 +1011,373 @@ test('destination query fetch waits for optimistic filter mutation to settle', a
     910ms | 🔴 <list-fetch-finished (value: {"count":5})
     "
   `);
+});
+
+describe('queries only in persistent storage', () => {
+  type TaskRow = { id: number; name: string; status: 'todo' | 'done' };
+
+  const taskRowSchema = rc_object({
+    id: rc_number,
+    name: rc_string,
+    status: rc_literals('todo', 'done'),
+  });
+
+  function statusQuery(status: TaskRow['status']): ListQueryParams {
+    return {
+      tableId: 'tasks',
+      filters: [{ op: 'eq', field: 'status', value: status }],
+    };
+  }
+
+  const todoColumn = statusQuery('todo');
+  const doneColumn = statusQuery('done');
+  const projectsQuery: ListQueryParams = { tableId: 'projects' };
+
+  const storages = [
+    { storage: 'local storage', adapter: 'local-sync' },
+    { storage: 'async storage', adapter: opfsPersistentStorage },
+  ] as const;
+
+  type StorageAdapter = (typeof storages)[number]['adapter'];
+
+  /**
+   * Task board with one column per status. The board decides the column of a
+   * card from the column's status filter, declared either by the column
+   * payloads or by a filter that matches every column.
+   */
+  function createBoardEnv({
+    adapter,
+    rule,
+    maxQueries,
+  }: {
+    adapter: StorageAdapter;
+    rule: 'payloads' | 'filter';
+    maxQueries?: number;
+  }) {
+    const taskIsInColumn = (task: TaskRow, column: ListQueryParams) => {
+      const filter = column.filters?.[0];
+      return filter?.op === 'eq' && filter.field === 'status'
+        ? task.status === filter.value
+        : null;
+    };
+
+    return createListQueryStoreTestEnv<TaskRow>(
+      {
+        tasks: [
+          { id: 1, name: 'Write report', status: 'todo' },
+          { id: 2, name: 'Pay invoice', status: 'done' },
+          { id: 3, name: 'Book flight', status: 'done' },
+        ],
+        projects: [{ id: 1, name: 'Website', status: 'todo' }],
+      },
+      {
+        id: 'task-board',
+        getSessionKey: () => 'task-board-session',
+        maxQueries,
+        persistentStorage: {
+          adapter,
+          schema: taskRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+        },
+        optimisticListUpdates:
+          rule === 'payloads'
+            ? [
+                {
+                  queries: todoColumn,
+                  filterItem: (task) => task.status === 'todo',
+                },
+                {
+                  queries: doneColumn,
+                  filterItem: (task) => task.status === 'done',
+                },
+              ]
+            : [
+                {
+                  queries: (query) => query.tableId === 'tasks',
+                  filterItem: (task, { queryPayload }) =>
+                    taskIsInColumn(task, queryPayload),
+                },
+              ],
+      },
+    );
+  }
+
+  type BoardEnv = ReturnType<typeof createBoardEnv>;
+
+  function renderColumn(env: BoardEnv, column: ListQueryParams, label = '') {
+    return renderHook(() => {
+      const query = env.apiStore.useListQuery(column, {
+        itemSelector: (task) => task.name,
+      });
+      if (label) env.trackItemUI(label, query.items.join(', '));
+      return query;
+    });
+  }
+
+  async function moveToDone(env: BoardEnv, itemId: string) {
+    await act(async () => {
+      await resolveAfterAllTimers(
+        env.apiStore.performMutation(itemId, {
+          optimisticUpdate: () => {
+            env.apiStore.updateItemState(itemId, (task) => ({
+              ...task,
+              status: 'done',
+            }));
+          },
+          mutation: () =>
+            env.serverTable.delayedUpdateItem(itemId, { status: 'done' }),
+        }),
+      );
+    });
+  }
+
+  beforeEach(() => {
+    vi.setSystemTime(TEST_INITIAL_TIME);
+    resetSessionForTests({ clearStorage: true });
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    resetSessionForTests({ clearStorage: true });
+  });
+
+  /**
+   * The user sees the board once, so both columns are saved to storage, then
+   * restarts the app on the todo column: the done column is not read from
+   * storage yet.
+   */
+  async function restartOnTodoColumn(adapter: StorageAdapter) {
+    if (adapter !== 'local-sync') createOpfsPersistentStorageTestStore();
+
+    const first = createBoardEnv({ adapter, rule: 'payloads' });
+    const firstTodo = renderColumn(first, todoColumn);
+    const firstDone = renderColumn(first, doneColumn);
+    await flushAllTimers();
+    firstTodo.unmount();
+    firstDone.unmount();
+    first.apiStore.dispose();
+
+    resetSessionForTests();
+    const env = createBoardEnv({ adapter, rule: 'payloads' });
+    const todo = renderColumn(env, todoColumn);
+    await flushAllTimers();
+
+    return { env, todo };
+  }
+
+  /**
+   * Moves a card to the done column after a restart on the todo column.
+   * Returns the timeline of opening the done column afterwards.
+   */
+  async function moveCardToColumnOnlyInStorageAfterRestart(
+    adapter: StorageAdapter,
+  ) {
+    const { env, todo } = await restartOnTodoColumn(adapter);
+    await moveToDone(env, 'tasks||1');
+    await flushAllTimers();
+    // The card left the todo column
+    expect(todo.result.current.items).toMatchInlineSnapshot(`[]`);
+
+    env.clearTimeline();
+    env.addTimelineComments('beforeNextAction', ['open the done column']);
+    const done = renderColumn(env, doneColumn, 'done-column');
+    await flushAllTimers();
+
+    todo.unmount();
+    done.unmount();
+
+    return env.timelineString;
+  }
+
+  test('a card moved to a column that is only in local storage after a restart keeps the saved cards of the column', async () => {
+    // The column shows its saved cards right away, instead of only the moved
+    // card, then the refetch adds the moved card.
+    expect(await moveCardToColumnOnlyInStorageAfterRestart('local-sync'))
+      .toMatchInlineSnapshot(`
+        "
+        time   | done-column                            |
+        13.2s  | -                                      | -- timeline-cleared
+        .      | -                                      | -- open the done column
+        .      | Pay invoice, Book flight               | ui-initialized
+        13.21s | Pay invoice, Book flight               | 🟠 >list-fetch-started
+        14.01s | Pay invoice, Book flight               | 🟠 <list-fetch-finished (value: {"count":3})
+        .      | Write report, Pay invoice, Book flight | ui-changed
+        "
+      `);
+  });
+
+  test('a card moved to a column that is only in async storage after a restart keeps the saved cards of the column', async () => {
+    // The column shows its saved cards once they are read, instead of only the
+    // moved card, then the refetch adds the moved card.
+    expect(
+      await moveCardToColumnOnlyInStorageAfterRestart(opfsPersistentStorage),
+    ).toMatchInlineSnapshot(`
+      "
+      time    | done-column                            |
+      13.2s   | -                                      | -- timeline-cleared
+      .       | -                                      | -- open the done column
+      .       |                                        | ui-initialized
+      13.208s | Pay invoice, Book flight               | ui-changed
+      13.218s | Pay invoice, Book flight               | 🟠 >list-fetch-started
+      14.018s | Pay invoice, Book flight               | 🟠 <list-fetch-finished (value: {"count":3})
+      .       | Write report, Pay invoice, Book flight | ui-changed
+      "
+    `);
+  });
+
+  test('a column only in storage opened while a card is being moved to it shows the card once the move is saved', async () => {
+    const { env, todo } = await restartOnTodoColumn('local-sync');
+
+    // Move a card to done with a slow save, and open the done column right
+    // after, while the save is still running
+    env.clearTimeline();
+    let movePromise: Promise<unknown> = Promise.resolve();
+    act(() => {
+      movePromise = env.apiStore.performMutation('tasks||1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('tasks||1', (task) => ({
+            ...task,
+            status: 'done',
+          }));
+        },
+        mutation: () =>
+          env.serverTable.delayedUpdateItem(
+            'tasks||1',
+            { status: 'done' },
+            { durationMs: 2000 },
+          ),
+      });
+    });
+    await advanceTime(5);
+    env.addTimelineComments('beforeNextAction', ['open the done column']);
+    const done = renderColumn(env, doneColumn, 'done-column');
+    await flushAllTimers();
+    await movePromise;
+
+    // The column shows its saved cards right away, but its refetch waits for
+    // the save: a fetch that ran before it would return the column without the
+    // moved card, which already left the todo column, so the card would be
+    // missing from both columns.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time    | done-column                            |
+      12s     | -                                      | -- timeline-cleared
+      12.005s | -                                      | -- open the done column
+      .       | Pay invoice, Book flight               | [done-column] ui-initialized
+      14s     | Pay invoice, Book flight               | [tasks||1] server-data-changed (value: {"status":"done"})
+      14.01s  | Pay invoice, Book flight               | 🟠 >list-fetch-started
+      14.81s  | Pay invoice, Book flight               | 🟠 <list-fetch-finished (value: {"count":3})
+      .       | Write report, Pay invoice, Book flight | [done-column] ui-changed
+      "
+    `);
+    expect(done.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Pay invoice', 'Book flight']`,
+    );
+
+    todo.unmount();
+    done.unmount();
+  });
+
+  test('a card created in a column evicted from memory shows in the column right away with local storage', async () => {
+    // Only two lists fit in memory: opening the projects screen after leaving
+    // the done column evicts the done column, which stays saved in local
+    // storage
+    const env = createBoardEnv({
+      adapter: 'local-sync',
+      rule: 'payloads',
+      maxQueries: 2,
+    });
+    const todo = renderColumn(env, todoColumn);
+    const leftDone = renderColumn(env, doneColumn);
+    await flushAllTimers();
+    leftDone.unmount();
+    const projects = renderHook(() => env.apiStore.useListQuery(projectsQuery));
+    await flushAllTimers();
+    // The done column is no longer in memory
+    expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(`
+      - '{filters:[{field:"status",op:"eq",value:"todo"}],tableId:"tasks"}'
+      - '{tableId:"projects"}'
+    `);
+
+    // The app creates a done card and adds it to the lists a filter picks: the
+    // filter reads the saved done column back from local storage
+    act(() => {
+      env.apiStore.addItemToState(
+        'tasks||4',
+        { id: 4, name: 'Call bank', status: 'done' },
+        {
+          addItemToQueries: {
+            queries: (query) =>
+              query.filters?.[0]?.op === 'eq' &&
+              query.filters[0].value === 'done',
+            appendTo: 'start',
+          },
+        },
+      );
+    });
+
+    // The done column got the new card and kept its saved cards, so opening
+    // it shows the card before any refetch
+    const done = renderColumn(env, doneColumn);
+    expect(done.result.current.items).toMatchInlineSnapshot(
+      `['Call bank', 'Pay invoice', 'Book flight']`,
+    );
+
+    await flushAllTimers();
+    todo.unmount();
+    projects.unmount();
+    done.unmount();
+  });
+
+  test('a card moved to a column evicted from memory keeps the saved cards of the column', async () => {
+    createOpfsPersistentStorageTestStore();
+
+    // Only two lists fit in memory: opening the projects screen after leaving
+    // the done column evicts the done column, which stays saved. With local
+    // storage the column rule reads it back synchronously, so this case is
+    // only reachable with async storage.
+    const env = createBoardEnv({
+      adapter: opfsPersistentStorage,
+      rule: 'filter',
+      maxQueries: 2,
+    });
+    const todo = renderColumn(env, todoColumn);
+    const leftDone = renderColumn(env, doneColumn);
+    await flushAllTimers();
+    leftDone.unmount();
+    const projects = renderHook(() => env.apiStore.useListQuery(projectsQuery));
+    await flushAllTimers();
+    // The done column is no longer in memory
+    expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(`
+      - '{filters:[{field:"status",op:"eq",value:"todo"}],tableId:"tasks"}'
+      - '{tableId:"projects"}'
+    `);
+
+    await moveToDone(env, 'tasks||1');
+    await flushAllTimers();
+
+    // Opening the done column again shows its saved cards, instead of only
+    // the moved card, then the refetch adds the moved card.
+    env.clearTimeline();
+    env.addTimelineComments('beforeNextAction', ['open the done column']);
+    const done = renderColumn(env, doneColumn, 'done-column');
+    await flushAllTimers();
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time    | done-column                            |
+      17.019s | -                                      | -- timeline-cleared
+      .       | -                                      | -- open the done column
+      .       | Pay invoice, Book flight               | ui-initialized
+      17.029s | Pay invoice, Book flight               | 🟢 >list-fetch-started
+      17.829s | Pay invoice, Book flight               | 🟢 <list-fetch-finished (value: {"count":3})
+      .       | Write report, Pay invoice, Book flight | ui-changed
+      "
+    `);
+
+    todo.unmount();
+    projects.unmount();
+    done.unmount();
+  });
 });

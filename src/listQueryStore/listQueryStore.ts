@@ -33,6 +33,7 @@ import {
 import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/offlineResolution.typeGuards';
 import {
   captureOfflineOverlayEntries,
+  getRecapturableOfflineOverlayKeys,
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
@@ -2382,6 +2383,12 @@ export function createListQueryStore<
       revalidateAfterIgnoredConfirmedSnapshots();
     },
     unsentCreationItemKeys,
+    persistence !== null,
+    (itemKeys) => {
+      captureOfflineOverlays(
+        getRecapturableOfflineOverlayKeys(offlineOverlayStore.state, itemKeys),
+      );
+    },
     persistence?.restoredItemKeys,
   );
 
@@ -3750,7 +3757,7 @@ export function createListQueryStore<
       itemPayload,
       options,
       store,
-      scheduleItemFetch,
+      scheduleAutomaticItemFetch,
       useMultipleItems,
       persistence ? isItemRestoredFromStorage : undefined,
     );
@@ -4104,12 +4111,54 @@ export function createListQueryStore<
     TPartialResources
   > = scheduleItemFetchApiImpl;
 
+  /**
+   * Schedules an item fetch hooks start on their own, skipping unsent
+   * creations; `onSkipped` is called when the fetch is skipped.
+   */
   function scheduleAutomaticItemFetch(
     fetchType: FetchType,
     itemPayload: ItemPayload,
     options?: { fields?: FieldsInput },
+    onSkipped?: () => void,
+  ): ScheduleFetchResults {
+    // The unsent creations are only known once the queued work is read, e.g.
+    // for a screen mounted at startup
+    if (offlineController && !offlineController.isHydrated()) {
+      const schedule = () => {
+        if (isDisposed) return;
+        scheduleAutomaticFetchOfKnownItem(
+          fetchType,
+          itemPayload,
+          options,
+          onSkipped,
+        );
+      };
+      void offlineController.hydrateIfNeeded().then(schedule, schedule);
+      return 'scheduled';
+    }
+
+    return scheduleAutomaticFetchOfKnownItem(
+      fetchType,
+      itemPayload,
+      options,
+      onSkipped,
+    );
+  }
+
+  function scheduleAutomaticFetchOfKnownItem(
+    fetchType: FetchType,
+    itemPayload: ItemPayload,
+    options: { fields?: FieldsInput } | undefined,
+    onSkipped: (() => void) | undefined,
   ): ScheduleFetchResults {
     const itemKey = getItemKey(itemPayload);
+    // Only exists locally until its creation is confirmed, so the server
+    // doesn't know it yet
+    if (unsentCreationItemKeys.has(itemKey)) {
+      onSkipped?.();
+      return 'skipped';
+    }
+
     const scheduler = getOrCreateItemScheduler(itemKey, itemPayload);
     const fields = normalizeFieldsOption(options?.fields);
 

@@ -38,6 +38,7 @@ import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/
 import { isOfflineStoreError } from '../persistentStorage/offline/offlineStoreError.typeGuards';
 import {
   captureOfflineOverlayEntries,
+  getRecapturableOfflineOverlayKeys,
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
@@ -2054,11 +2055,42 @@ export function createCollectionStore<
     return firstResult;
   }
 
+  /**
+   * Schedules a fetch hooks start on their own, skipping unsent creations;
+   * `onSkipped` is called when the fetch is skipped.
+   */
   function scheduleAutomaticFetch(
     fetchType: FetchType,
     payload: ItemPayload,
+    onSkipped?: () => void,
+  ): void {
+    // The unsent creations are only known once the queued work is read, e.g.
+    // for a screen mounted at startup
+    if (offlineController && !offlineController.isHydrated()) {
+      const schedule = () => {
+        if (isDisposed) return;
+        scheduleAutomaticFetchOfKnownItem(fetchType, payload, onSkipped);
+      };
+      void offlineController.hydrateIfNeeded().then(schedule, schedule);
+      return;
+    }
+
+    scheduleAutomaticFetchOfKnownItem(fetchType, payload, onSkipped);
+  }
+
+  function scheduleAutomaticFetchOfKnownItem(
+    fetchType: FetchType,
+    payload: ItemPayload,
+    onSkipped: (() => void) | undefined,
   ): void {
     const itemKey = getItemKey(payload);
+    // Only exists locally until its creation is confirmed, so the server
+    // doesn't know it yet
+    if (unsentCreationItemKeys.has(itemKey)) {
+      onSkipped?.();
+      return;
+    }
+
     const scheduler = getScheduler(itemKey, payload);
     scheduler.scheduleFetch(itemKey, fetchType, payload);
   }
@@ -2388,7 +2420,7 @@ export function createCollectionStore<
       payload,
       options,
       store,
-      scheduleFetch,
+      scheduleAutomaticFetch,
       useMultipleItems,
       persistence ? isItemRestoredFromStorage : undefined,
     );
@@ -2829,6 +2861,13 @@ export function createCollectionStore<
           }
         });
 
+        captureOfflineOverlays(
+          getRecapturableOfflineOverlayKeys(
+            offlineOverlayStore.state,
+            revertedItems.keys(),
+          ),
+        );
+
         if (restoredItemKeys.length > 0) {
           touchItemsAndMaybeEnforceLimits(restoredItemKeys);
         }
@@ -2890,9 +2929,28 @@ export function createCollectionStore<
               },
             );
             try {
-              return runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(payloadToUse),
+              const updateResult = runWithBroadcastConsistency(
+                'optimistic',
+                () => optimisticUpdate(payloadToUse),
               );
+
+              if (updateResult !== false) {
+                // Hooks show the offline overlay of an item with queued work
+                // instead of its state, so it must show this change before
+                // it is queued too
+                captureOfflineOverlays(
+                  getRecapturableOfflineOverlayKeys(
+                    offlineOverlayStore.state,
+                    filterAndMap(affectedItemEntries, ({ itemKey }, index) =>
+                      store.state[itemKey] !== before[index]?.item
+                        ? itemKey
+                        : false,
+                    ),
+                  ),
+                );
+              }
+
+              return updateResult;
             } finally {
               addRollback(
                 affectedItemEntries.map(

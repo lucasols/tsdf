@@ -50,7 +50,11 @@ export function useItem<
     debouncePayload,
   }: UseItemOptions<ItemState, Selected>,
   store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
-  scheduleFetch: (fetchType: FetchType, payload: ItemPayload) => void,
+  scheduleAutomaticFetch: (
+    fetchType: FetchType,
+    payload: ItemPayload,
+    onSkipped: () => void,
+  ) => void,
   useMultipleItems: <S = ItemState | null>(
     items: CollectionUseMultipleItemsQuery<ItemPayload, undefined>[],
     options: UseMultipleItemsOptions<ItemState, S>,
@@ -141,7 +145,7 @@ export function useItem<
     requireFreshData === 'ifFromStorage' &&
       hasPayload &&
       !!isItemRestoredFromStorage?.(result.itemStateKey),
-    () => {
+    (skipRefresh) => {
       if (!fetchQuery) return;
 
       // A refresh already in flight brings server data newer than the
@@ -153,7 +157,7 @@ export function useItem<
         return;
       }
 
-      scheduleFetch('highPriority', fetchQuery.payload);
+      scheduleAutomaticFetch('highPriority', fetchQuery.payload, skipRefresh);
     },
   );
 

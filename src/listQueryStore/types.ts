@@ -331,7 +331,9 @@ export type OptimisticListUpdate<
    * affected query, so a single rule can decide membership from
    * `context.queryPayload` instead of needing one rule per query.
    *
-   * - `true`: the item should be in the query (added if missing)
+   * - `true`: the item should be in the query (added if missing). A query
+   *   that is not in memory is created with only the item, unless the store
+   *   has persistent storage, where it may have a saved copy and is left as is
    * - `false`: the item should not be in the query (removed if present)
    * - `null`: keep the membership as is and skip this rule for the query
    */

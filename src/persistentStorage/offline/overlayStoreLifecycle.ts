@@ -37,6 +37,30 @@ export function rebindOfflineOverlayEntries<
   });
 }
 
+/**
+ * The items of `itemKeys` with an overlay that a capture replaces. Used to
+ * capture again the overlays of items changed by a local optimistic update:
+ * hooks show the overlay instead of the store state, so until the change is
+ * queued (e.g. during a debounce) they would show the version queued before.
+ * An overlay moved to the final item of a temp entity keeps its data, as when
+ * a mutation is queued (see `captureOfflineOverlayEntries`).
+ */
+export function getRecapturableOfflineOverlayKeys(
+  overlays: Readonly<Record<string, OverlayWithVisibilityFlag>>,
+  itemKeys: Iterable<string>,
+): string[] {
+  const result: string[] = [];
+
+  for (const itemKey of itemKeys) {
+    const overlay = overlays[itemKey];
+    if (overlay && !overlay.keepVisibleWhileResolutionRequired) {
+      result.push(itemKey);
+    }
+  }
+
+  return result;
+}
+
 export function captureOfflineOverlayEntries<
   TOverlay extends OverlayWithVisibilityFlag,
 >(
