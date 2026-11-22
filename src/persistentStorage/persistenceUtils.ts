@@ -44,6 +44,19 @@ export function createTimedKeySet(): {
   };
 }
 
+/**
+ * Session key used by a store's persistence: `false`, like a session that is
+ * not ready, while the store's `persistentStorage.enabled` returns `false`.
+ */
+export function getPersistenceSessionKeyGetter(
+  getSessionKey: () => string | false,
+  enabled: (() => boolean) | undefined,
+): () => string | false {
+  if (!enabled) return getSessionKey;
+
+  return () => (enabled() ? getSessionKey() : false);
+}
+
 export function createShouldIgnoreItemPredicate<
   ItemPayload extends ValidPayload,
 >(

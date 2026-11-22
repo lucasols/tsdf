@@ -24,6 +24,7 @@ import {
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type CreateListQueryUserOperations,
@@ -36,6 +37,8 @@ import {
 } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
+
+const HOUR_MS = 60 * 60 * 1000;
 
 type CreateUserTempEntity = NonNullable<
   CreateListQueryUserOperations['createUser']['tempEntity']
@@ -94,6 +97,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   failCreateUser = false,
   storageAdapter = 'local-sync',
   keepPendingData = false,
+  maxQueries,
 }: {
   sessionKey: string;
   storeName: string;
@@ -111,6 +115,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   storageAdapter?: 'local-sync' | typeof opfsPersistentStorage;
   /** The saved row keeps the pending row's data instead of the server's. */
   keepPendingData?: boolean;
+  maxQueries?: number;
 }) {
   const env = createListQueryStoreTestEnv<
     UserRow,
@@ -127,6 +132,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
     }),
     testScenario,
     partialResources,
+    maxQueries,
     persistentStorage: {
       adapter: storageAdapter,
       schema: userRowSchema,
@@ -182,6 +188,121 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   }
 
   return { env, createUser };
+}
+
+/**
+ * At 0h the user sees the full users list and the "A" list online, so both
+ * are saved. At 7h the app restarts offline on a quick add form of the "A"
+ * tab, which creates a user declared into the saved lists filtered to names
+ * starting with A.
+ */
+async function restartOfflineAndCreateRowForFilteredLists(
+  storageAdapter: 'local-sync' | typeof opfsPersistentStorage,
+) {
+  const sessionKey = 'temp-queries-filter-access-session';
+  const storeName = 'temp-queries-filter-access-store';
+  const asyncStorage =
+    storageAdapter === 'local-sync'
+      ? null
+      : createOpfsPersistentStorageTestStore();
+  const localStorageScope = createLocalStoragePersistentTestStore().scope(
+    storeName,
+    sessionKey,
+  );
+  const asyncStorageScope = asyncStorage?.scope(storeName, sessionKey);
+
+  function formatAccessTime(lastAccessAt: number | undefined) {
+    if (lastAccessAt === undefined) return 'missing';
+    return `${Math.floor((lastAccessAt - TEST_INITIAL_TIME) / HOUR_MS)}h`;
+  }
+
+  function readListAccessTime(query: ListQueryParams) {
+    return formatAccessTime(
+      asyncStorage && asyncStorageScope
+        ? asyncStorage.readMetadata(
+            asyncStorageScope.listQuery.queryStorageKey(query),
+          )?.lastAccessAt
+        : localStorageScope.listQuery.readQueryEntry(query).timestamp,
+    );
+  }
+
+  function readRowAccessTime(id: number) {
+    return formatAccessTime(
+      asyncStorage && asyncStorageScope
+        ? asyncStorage.readMetadata(
+            asyncStorageScope.listQuery.itemStorageKey('users', id),
+          )?.lastAccessAt
+        : localStorageScope.listQuery.readItemEntry('users', id).timestamp,
+    );
+  }
+
+  /** Last access time saved for each entry, in hours since the start */
+  function readSavedAccessTimes() {
+    return {
+      allUsersList: readListAccessTime(usersQuery),
+      usersStartingWithAList: readListAccessTime(usersStartingWithAQuery),
+      // Ada is in both lists, Grace only in the full one
+      adaRow: readRowAccessTime(1),
+      graceRow: readRowAccessTime(2),
+    };
+  }
+
+  const envOptions = {
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+    addToQueries: {
+      queries: (payload) =>
+        payload.filters?.some(
+          (filter) => filter.op === 'startsWith' && filter.value === 'A',
+        ) ?? false,
+      appendTo: 'start',
+    },
+    storageAdapter,
+  } satisfies Parameters<typeof createUsersEnv>[0];
+
+  function renderUsersList(
+    env: ReturnType<typeof createUsersEnv>['env'],
+    query: ListQueryParams,
+  ) {
+    return renderHook(() =>
+      env.apiStore.useListQuery(query, { itemSelector: (item) => item.name }),
+    );
+  }
+
+  const first = createUsersEnv(envOptions);
+  const firstAllUsers = renderUsersList(first.env, usersQuery);
+  const firstUsersStartingWithA = renderUsersList(
+    first.env,
+    usersStartingWithAQuery,
+  );
+  await flushAllTimers();
+  firstAllUsers.unmount();
+  firstUsersStartingWithA.unmount();
+  first.env.apiStore.dispose();
+  expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+    adaRow: '0h'
+    allUsersList: '0h'
+    graceRow: '0h'
+    usersStartingWithAList: '0h'
+  `);
+
+  await advanceTime(7 * HOUR_MS);
+  network.setOffline();
+  resetSessionForTests();
+  const restarted = createUsersEnv(envOptions);
+  await flushAllTimers();
+  await act(async () => {
+    await resolveAfterAllTimers(
+      restarted.env.apiStore.performMutation('temp:Alan', {
+        mutation: () => Promise.resolve({ id: 3, name: 'Alan' }),
+        offline: { operation: 'createUser', input: { name: 'Alan' } },
+      }),
+    );
+  });
+  await flushAllTimers();
+
+  return { restarted, envOptions, readSavedAccessTimes, renderUsersList };
 }
 
 beforeEach(() => {
@@ -617,6 +738,32 @@ describe('temp entities declared in list queries', () => {
         appendTo: 'start',
       },
     },
+    // A filter can also read the list, e.g. only lists that aren't full yet:
+    // the list then stops matching once it has the row
+    {
+      storage: 'local storage',
+      storageAdapter: 'local-sync',
+      declaration: 'filter on the list rows',
+      addToQueries: {
+        queries: (payload, query) =>
+          payload.tableId === 'users' &&
+          !payload.filters &&
+          query.items.length < 3,
+        appendTo: 'start',
+      },
+    },
+    {
+      storage: 'async storage',
+      storageAdapter: opfsPersistentStorage,
+      declaration: 'filter on the list rows',
+      addToQueries: {
+        queries: (payload, query) =>
+          payload.tableId === 'users' &&
+          !payload.filters &&
+          query.items.length < 3,
+        appendTo: 'start',
+      },
+    },
   ] satisfies {
     storage: string;
     storageAdapter: 'local-sync' | typeof opfsPersistentStorage;
@@ -772,6 +919,179 @@ describe('temp entities declared in list queries', () => {
       `);
 
       hook.unmount();
+    },
+  );
+
+  test.each([
+    { storage: 'local storage', storageAdapter: 'local-sync' },
+    { storage: 'async storage', storageAdapter: opfsPersistentStorage },
+  ] as const)(
+    'a row created offline shows up in a list a filter declares after the list was dropped from memory ($storage)',
+    async ({ storageAdapter }) => {
+      if (storageAdapter !== 'local-sync') {
+        createOpfsPersistentStorageTestStore();
+      }
+      // Only one list is kept in memory
+      const { env } = createUsersEnv({
+        sessionKey: 'temp-queries-evicted-list-session',
+        storeName: 'temp-queries-evicted-list-store',
+        testScenario: 'idle',
+        addToQueries: {
+          queries: (payload) => payload.tableId === 'users' && !payload.filters,
+          appendTo: 'start',
+        },
+        storageAdapter,
+        maxQueries: 1,
+      });
+
+      function renderUsersList(query: ListQueryParams) {
+        return renderHook(() =>
+          env.apiStore.useListQuery(query, {
+            itemSelector: (item) => item.name,
+          }),
+        );
+      }
+
+      // Online, the user opens the full list and then the "A" list, so the
+      // full list is saved and then dropped from memory
+      const allUsers = renderUsersList(usersQuery);
+      await flushAllTimers();
+      allUsers.unmount();
+      const usersStartingWithA = renderUsersList(usersStartingWithAQuery);
+      await flushAllTimers();
+      usersStartingWithA.unmount();
+      await flushAllTimers();
+      // Only the "A" list is still in memory
+      expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(
+        `['{filters:[{field:"name",op:"startsWith",value:"A"}],tableId:"users"}']`,
+      );
+
+      // Offline, the user creates a row declared into the full list
+      act(() => {
+        network.setOffline();
+      });
+      await act(async () => {
+        await resolveAfterAllTimers(
+          env.apiStore.performMutation('temp:Alan', {
+            mutation: () => Promise.resolve({ id: 3, name: 'Alan' }),
+            offline: { operation: 'createUser', input: { name: 'Alan' } },
+          }),
+        );
+      });
+      await flushAllTimers();
+
+      // Opening the full list again shows the row, instead of the saved rows
+      // without it until the next online fetch
+      const reopened = renderUsersList(usersQuery);
+      await flushAllTimers();
+      expect(reopened.result.current.items).toMatchInlineSnapshot(
+        `['Alan', 'Ada', 'Grace']`,
+      );
+
+      reopened.unmount();
+    },
+  );
+
+  test.each([
+    { storage: 'local storage', storageAdapter: 'local-sync', read: 'hook' },
+    {
+      storage: 'async storage',
+      storageAdapter: opfsPersistentStorage,
+      read: 'hook',
+    },
+    {
+      storage: 'local storage',
+      storageAdapter: 'local-sync',
+      read: 'imperative',
+    },
+    {
+      storage: 'async storage',
+      storageAdapter: opfsPersistentStorage,
+      read: 'imperative',
+    },
+  ] as const)(
+    'saved lists a filter does not match keep their last access time, so storage expiry and eviction still see them as unused ($storage, $read read)',
+    async ({ storageAdapter, read }) => {
+      const { restarted, readSavedAccessTimes, renderUsersList } =
+        await restartOfflineAndCreateRowForFilteredLists(storageAdapter);
+
+      // At 7h every saved list was matched against the filter, but only the
+      // "A" list got the row, so only it and its rows count as used. The full
+      // list and the row only it has keep their 0h access time.
+      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+        adaRow: '7h'
+        allUsersList: '0h'
+        graceRow: '0h'
+        usersStartingWithAList: '7h'
+      `);
+
+      // At 14h the app reads the full list, with a screen or an imperative
+      // read. It's a real use, so it and its rows now count as used.
+      await advanceTime(7 * HOUR_MS);
+      if (read === 'hook') {
+        const allUsers = renderUsersList(restarted.env, usersQuery);
+        await flushAllTimers();
+        // The filter left the full list out, so it doesn't have the row
+        expect(allUsers.result.current.items).toMatchInlineSnapshot(
+          `['Ada', 'Grace']`,
+        );
+        allUsers.unmount();
+      } else {
+        const result = await resolveAfterAllTimers(
+          restarted.env.apiStore.getQueryFromStateOrFetch(usersQuery),
+        );
+        expect(
+          result.ok && result.value.items.map(({ data }) => data.name),
+        ).toMatchInlineSnapshot(`['Ada', 'Grace']`);
+      }
+      await flushAllTimers();
+      // Ada was already loaded with the "A" list at 7h, so only the full list
+      // and Grace, read from storage now, get a new access time
+      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+        adaRow: '7h'
+        allUsersList: '14h'
+        graceRow: '14h'
+        usersStartingWithAList: '7h'
+      `);
+    },
+  );
+
+  test.each([
+    { storage: 'local storage', storageAdapter: 'local-sync' },
+    { storage: 'async storage', storageAdapter: opfsPersistentStorage },
+  ] as const)(
+    'saved lists a filter does not match keep their last access time when the create is replayed after a restart ($storage)',
+    async ({ storageAdapter }) => {
+      const { restarted, envOptions, readSavedAccessTimes } =
+        await restartOfflineAndCreateRowForFilteredLists(storageAdapter);
+      restarted.env.apiStore.dispose();
+
+      // At 20h the app restarts online on another screen, so the queued
+      // create is replayed while every saved list is only in storage
+      await advanceTime(13 * HOUR_MS);
+      resetSessionForTests();
+      const replayed = createUsersEnv(envOptions);
+      await flushAllTimers();
+      act(() => {
+        network.goOnline();
+      });
+      await flushAllTimers();
+      // The create was saved
+      expect(replayed.env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+        `[]`,
+      );
+
+      // The replay read every saved list again to match the filter, but only
+      // the "A" list holds the saved row, so only it and its rows count as
+      // used. The full list and the row only it has keep their 0h access time.
+      expect(readSavedAccessTimes()).toMatchInlineSnapshot(`
+        adaRow: '20h'
+        allUsersList: '0h'
+        graceRow: '0h'
+        usersStartingWithAList: '20h'
+      `);
+
+      replayed.env.apiStore.dispose();
     },
   );
 

@@ -9,11 +9,13 @@ import {
   beforeEach,
   describe,
   expect,
+  expectTypeOf,
   test,
   vi,
 } from 'vitest';
 import type { ListQueryStore } from '../../src/listQueryStore/listQueryStore';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
+import type { RequireFreshData } from '../../src/utils/storeShared';
 import {
   createListQueryStoreTestEnv,
   type Row,
@@ -2355,5 +2357,29 @@ describe('type safety: fields requirement with partialResources', () => {
 
     void typeCheck_;
     expect(true).toBe(true); // Dummy assertion to satisfy test requirements
+  });
+
+  test("requireFreshData 'ifFromStorage' is only accepted without partialResources", () => {
+    type PartialStore = ListQueryStore<Row, string, string, true>;
+    type FullStore = ListQueryStore<Row, string, string>;
+
+    // Restored data is tracked per item and query, not per field, so with
+    // partialResources the hooks only accept `true` / `false`
+    expectTypeOf<
+      NonNullable<Parameters<PartialStore['useItem']>[1]>['requireFreshData']
+    >().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<
+      NonNullable<
+        Parameters<PartialStore['useListQuery']>[1]
+      >['requireFreshData']
+    >().toEqualTypeOf<boolean | undefined>();
+
+    // Without partialResources, `'ifFromStorage'` is accepted
+    expectTypeOf<
+      NonNullable<Parameters<FullStore['useItem']>[1]>['requireFreshData']
+    >().toEqualTypeOf<RequireFreshData | undefined>();
+    expectTypeOf<
+      NonNullable<Parameters<FullStore['useListQuery']>[1]>['requireFreshData']
+    >().toEqualTypeOf<RequireFreshData | undefined>();
   });
 });

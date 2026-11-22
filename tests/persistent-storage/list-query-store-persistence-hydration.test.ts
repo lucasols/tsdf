@@ -332,6 +332,76 @@ describe('localStorage: list query store persistence', () => {
     `);
   });
 
+  test('disabled persistence neither restores nor saves queries and items', async () => {
+    let persistenceEnabled = false;
+    const usersQuery = { tableId: 'users' };
+
+    // A query persisted by an earlier session where persistence was enabled
+    setCachedItem('lq-switch', 'sess1', 'users', 1, { id: 1, name: 'Cached' });
+    setCachedQuery('lq-switch', 'sess1', usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+
+    const env = createEnv({
+      storeName: 'lq-switch',
+      sessionKey: 'sess1',
+      serverData: {
+        users: [
+          { id: 1, name: 'Fresh 1' },
+          { id: 2, name: 'Fresh 2' },
+        ],
+      },
+      persistenceEnabled: () => persistenceEnabled,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = env.apiStore.useListQuery(usersQuery);
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+    await flushAllTimers();
+
+    // The persisted query is not restored: the hook loads it from the server
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ names: []
+      -> status: success ⋅ names: [Fresh 1, Fresh 2]
+      "
+    `);
+
+    // ...and neither the fetched query nor its rows are saved
+    const scope = persistentStore.scope('lq-switch', 'sess1');
+    expect(
+      scope.listQuery.readQueryEntry(usersQuery).data.items,
+    ).toMatchInlineSnapshot(`['"users||1']`);
+    expect(scope.listQuery.readItemData('users', 1)).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Cached'
+    `);
+    expect(scope.listQuery.readItemData('users', 2)).toBeNull();
+
+    // Once enabled, the next fetch results are saved again
+    persistenceEnabled = true;
+    env.apiStore.invalidateQueryAndItems({
+      queryPayload: usersQuery,
+      itemPayload: false,
+    });
+    await flushAllTimers();
+
+    expect(
+      scope.listQuery.readQueryEntry(usersQuery).data.items,
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+    expect(scope.listQuery.readItemData('users', 1)).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Fresh 1'
+    `);
+    expect(scope.listQuery.readItemData('users', 2)).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Fresh 2'
+    `);
+  });
+
   test('realtime stores revalidate cached localStorage query after first hydration', async () => {
     const usersQuery = { tableId: 'users' };
     const usersItem = storeItemKey('users', 1);

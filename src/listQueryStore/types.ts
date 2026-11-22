@@ -517,3 +517,16 @@ export type FieldsOption<HasPartialResources extends boolean> =
          */
         fields?: FieldsInput;
       };
+
+/**
+ * Options of `useItem` and `useListQuery` that change when `partialResources`
+ * is enabled.
+ */
+export type PartialResourcesHookOptions = FieldsOption<true> & {
+  /**
+   * `'ifFromStorage'` is not supported with `partialResources`: data restored
+   * from storage is tracked per item and query, not per field. Use `true`
+   * to refresh on mount.
+   */
+  requireFreshData?: boolean;
+};
