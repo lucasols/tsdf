@@ -559,7 +559,9 @@ type ListQueryMutationArgsBase<
    * Performs the server mutation for the affected item payloads. With an
    * `offline` descriptor, an item created offline whose creation was saved
    * since the call (e.g. during the `debounce` window) is passed with its
-   * final payload, so build the request from this argument.
+   * final payload, so build the request from this argument. Temp payloads of
+   * other items the request references are not rewritten: resolve them with
+   * `resolveTempItemPayload` of their store.
    */
   mutation: (
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,

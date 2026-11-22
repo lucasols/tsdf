@@ -703,6 +703,10 @@ export function createOfflineStoreController<
   // removal, tells storage takes writes again.
   let didLastInMemoryOnlyRetryFail = false;
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
+  // Bumped whenever a temp payload is mapped to its final one, so a mutation
+  // being queued can tell a creation was saved while it was not visible yet
+  // to `rebindQueuedEntriesAfterTempReconciliation`
+  let tempReconciliationCount = 0;
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
@@ -1055,6 +1059,7 @@ export function createOfflineStoreController<
       getCompositeKey(previousRef),
       resolveEntityRef(nextRef),
     );
+    tempReconciliationCount += 1;
 
     // The table lives as long as the session: drop the oldest remaps so it
     // cannot grow without bound in a long session.
@@ -1388,6 +1393,20 @@ export function createOfflineStoreController<
 
             queueEntries.set(entryId, entry);
             entryIdsFromAnotherTab.add(entryId);
+            // A creation queued in another tab reusing the temp payload of a
+            // saved one creates another entity (see
+            // `resolveSavedTempEntityRefs`)
+            if (
+              resolvedEntityRefBySerializedRef.size > 0 &&
+              entry.tempIds &&
+              isTempCreateOperation(entry.operation)
+            ) {
+              for (const tempId of entry.tempIds) {
+                resolvedEntityRefBySerializedRef.delete(
+                  getCompositeKey(tempId),
+                );
+              }
+            }
             return;
           }
 
@@ -4552,12 +4571,68 @@ export function createOfflineStoreController<
    * queued. Only the payloads the operation declares (`getEntityRefs` and
    * `dependsOn`) are looked up, so this costs nothing until a creation of the
    * session was saved.
+   *
+   * A creation forgets the saved creations of its own temp payloads instead:
+   * an app that reuses a temp payload once its creation was saved creates
+   * another entity, whose edits must not be sent for the saved one.
    */
   function resolveSavedTempEntityRefs(prepared: PreparedQueuedMutation): void {
     if (resolvedEntityRefBySerializedRef.size === 0) return;
 
     const { operation, operationName } = prepared;
-    const input = prepared.validatedInput;
+    if (operation.tempEntity || operation.tempEntities) {
+      for (const tempId of prepared.tempIds ??
+        getOperationRawEntityRefs(
+          operation,
+          operationName,
+          prepared.validatedInput,
+        )) {
+        resolvedEntityRefBySerializedRef.delete(getCompositeKey(tempId));
+      }
+    }
+
+    const rewrite = rewriteSavedTempEntityRefs(
+      operationName,
+      prepared.validatedInput,
+      prepared.entityRefs,
+    );
+    if (!rewrite) return;
+
+    prepared.validatedInput = rewrite.input;
+    if (rewrite.entityRefs) prepared.entityRefs = rewrite.entityRefs;
+  }
+
+  /**
+   * `resolveSavedTempEntityRefs` for work planned before a creation it
+   * references was saved, and not visible yet to the queue rebind
+   */
+  function resolveSavedTempEntityRefsOfWork<
+    TWork extends OfflineQueueEntry | PersistedOfflineResolutionRecord,
+  >(work: TWork): TWork {
+    if (resolvedEntityRefBySerializedRef.size === 0) return work;
+
+    const rewrite = rewriteSavedTempEntityRefs(
+      work.operation,
+      work.input,
+      work.entityRefs,
+    );
+    if (!rewrite) return work;
+
+    return {
+      ...work,
+      input: rewrite.input,
+      entityRefs: rewrite.entityRefs ?? work.entityRefs,
+    };
+  }
+
+  function rewriteSavedTempEntityRefs(
+    operationName: string,
+    input: unknown,
+    entityRefs: OfflineEntityRef[] | undefined,
+  ): { input: unknown; entityRefs: OfflineEntityRef[] | undefined } | null {
+    const operation = operations[operationName];
+    if (!operation) return null;
+
     const rawEntityRefs = [
       // The entities a creation creates are its own temp payloads
       ...(operation.tempEntity || operation.tempEntities
@@ -4583,22 +4658,20 @@ export function createOfflineStoreController<
         finalRef,
       );
     }
-    if (rewrittenInput === input) return;
+    if (rewrittenInput === input) return null;
 
     const validatedInput = validateWithSchema(
       operation.inputSchema,
       rewrittenInput,
     );
-    if (validatedInput === null) return;
+    if (validatedInput === null) return null;
 
-    prepared.validatedInput = validatedInput;
-    if (prepared.entityRefs) {
-      prepared.entityRefs = resolveEntityRefsForInput(
-        operationName,
-        validatedInput,
-        prepared.entityRefs,
-      );
-    }
+    return {
+      input: validatedInput,
+      entityRefs: entityRefs
+        ? resolveEntityRefsForInput(operationName, validatedInput, entityRefs)
+        : entityRefs,
+    };
   }
 
   function findTempIdIndex(
@@ -5103,10 +5176,12 @@ export function createOfflineStoreController<
     if (nextQueueOrderValue !== null) nextQueueOrder = nextQueueOrderValue;
     let plannedMutation: PlannedQueuedMutation;
     let pendingEntityQueriesLoaded = false;
+    let plannedAtTempReconciliationCount: number;
     for (;;) {
       // A creation the mutation references may have been saved since it was
       // prepared (e.g. while its direct request was sent): the queued work
       // was rewritten then, but not this mutation
+      plannedAtTempReconciliationCount = tempReconciliationCount;
       resolveSavedTempEntityRefs(preparedMutation);
       plannedMutation = await planPreparedMutation({
         current,
@@ -5154,7 +5229,7 @@ export function createOfflineStoreController<
     // Work for a temp entity whose creation already waits for a manual
     // resolution joins the descendants that were blocked when the creation
     // failed, instead of the queue: it is retried or discarded with it.
-    const blockedResolution =
+    let blockedResolution =
       plannedMutation.nextEntry &&
       isHeldBehindTempCreateResolution(plannedMutation.nextEntry)
         ? buildRetryExhaustedResolutionRecord(
@@ -5215,6 +5290,23 @@ export function createOfflineStoreController<
         await removeEntry(removedEntry.id, current, true);
       }
 
+      // A creation the planned work references may have been saved while the
+      // files were stored or the merged work removed, after the queue rebind
+      // ran but before the work is visible to it. Checked with no `await`
+      // before each write, which makes the work visible to a later rebind.
+      if (
+        plannedMutation.nextEntry &&
+        tempReconciliationCount !== plannedAtTempReconciliationCount
+      ) {
+        plannedMutation.nextEntry = resolveSavedTempEntityRefsOfWork(
+          plannedMutation.nextEntry,
+        );
+        appliedMutation.nextEntry = plannedMutation.nextEntry;
+        if (blockedResolution) {
+          blockedResolution =
+            resolveSavedTempEntityRefsOfWork(blockedResolution);
+        }
+      }
       if (plannedMutation.nextEntry) {
         appliedMutation.touchedNextEntry = true;
         if (blockedResolution) {
@@ -5224,6 +5316,15 @@ export function createOfflineStoreController<
         }
       }
 
+      if (
+        plannedMutation.replacedResolution &&
+        tempReconciliationCount !== plannedAtTempReconciliationCount
+      ) {
+        plannedMutation.replacedResolution = resolveSavedTempEntityRefsOfWork(
+          plannedMutation.replacedResolution,
+        );
+        appliedMutation.replacedResolution = plannedMutation.replacedResolution;
+      }
       if (plannedMutation.replacedResolution) {
         appliedMutation.touchedReplacedResolution = true;
         await persistResolution(

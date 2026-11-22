@@ -1144,6 +1144,8 @@ describe('an edit of a row created offline that is not queued yet when the creat
     // The app checks the connection with a ping. A latency pushed here is
     // used by the next check, the other checks answer right away.
     const connectionCheckLatencies: number[] = [];
+    // The id the server gives the next user it creates
+    let nextServerUserId = 3;
 
     const env: ReturnType<
       typeof createListQueryStoreTestEnv<
@@ -1206,8 +1208,12 @@ describe('an edit of a row created offline that is not queued yet when the creat
                 },
                 execute: async ({ input }) => {
                   replayedOperations.push({ operation: 'createUser', input });
-                  const result = { id: 3, name: input.name };
-                  await env.serverTable.delayedSetItem('users||3', result);
+                  const result = { id: nextServerUserId, name: input.name };
+                  nextServerUserId += 1;
+                  await env.serverTable.delayedSetItem(
+                    `users||${result.id}`,
+                    result,
+                  );
                   return result;
                 },
               },
@@ -1251,20 +1257,25 @@ describe('an edit of a row created offline that is not queued yet when the creat
     });
     await flushAllTimers();
 
-    env.addTimelineComments('beforeNextAction', ['create Linus offline']);
-    await act(async () => {
-      await env.apiStore.performMutation('temp:Linus', {
-        optimisticUpdate: () => {
-          env.apiStore.addItemToState(
-            'temp:Linus',
-            { id: -1, name: 'Linus' },
-            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
-          );
-        },
-        mutation: () => Promise.reject(new Error('never sent directly')),
-        offline: { operation: 'createUser', input: { name: 'Linus' } },
+    /** Creates the user Linus offline, under the temp id `temp:Linus` */
+    async function createLinus() {
+      await act(async () => {
+        await env.apiStore.performMutation('temp:Linus', {
+          optimisticUpdate: () => {
+            env.apiStore.addItemToState(
+              'temp:Linus',
+              { id: -1, name: 'Linus' },
+              { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+            );
+          },
+          mutation: () => Promise.reject(new Error('never sent directly')),
+          offline: { operation: 'createUser', input: { name: 'Linus' } },
+        });
       });
-    });
+    }
+
+    env.addTimelineComments('beforeNextAction', ['create Linus offline']);
+    await createLinus();
 
     // The results of the renames, in the order they settled
     const renameResults: unknown[] = [];
@@ -1325,6 +1336,7 @@ describe('an edit of a row created offline that is not queued yet when the creat
       onSuccessPayloads,
       renameResults,
       renameLinus,
+      createLinus,
       connectionCheckLatencies,
     };
   }
@@ -1614,6 +1626,75 @@ describe('an edit of a row created offline that is not queued yet when the creat
       8.02s | Ada, Grace, Linus edited | 🟠 <list-fetch-finished (value: {"count":3})
       "
     `);
+
+    hook.unmount();
+  });
+
+  test('a temp id reused after its creation was saved creates another user, whose rename is not sent for the first one', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-reused-temp-id-session';
+    const storeName = 'temp-edit-reused-temp-id-store';
+    const { env, hook, replayedOperations, renameLinus, createLinus } =
+      await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The first Linus is saved as users||3
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+
+    // Offline again, the app creates another Linus with the same temp id
+    // (e.g. a temp id derived from the name), and the user renames it
+    act(() => {
+      network.goOffline();
+    });
+    await createLinus();
+    renameLinus('Linus the second');
+    await advanceTime(1600);
+
+    // The rename is queued for the new Linus, not for the saved one
+    expect(
+      getOfflineQueueEntries(sessionKey, storeName).map((entry) =>
+        pick(getOfflineQueueEntryData(entry), ['operation', 'input']),
+      ),
+    ).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { itemId: 'temp:Linus', name: 'Linus the second' }
+        operation: 'patchUserName'
+    `);
+
+    // Once back online, the new Linus is created and renamed, and the first
+    // one keeps its name
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { itemId: 'users||4', name: 'Linus the second' }
+        operation: 'patchUserName'
+    `);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+    expect(env.serverTable.get('users||4')).toMatchInlineSnapshot(`
+      id: 4
+      name: 'Linus the second'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus', 'Linus the second']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 
     hook.unmount();
   });

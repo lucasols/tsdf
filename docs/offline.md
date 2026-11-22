@@ -407,6 +407,8 @@ await userStore.performMutation(tempUserPayload, {
 });
 ```
 
+Only the item payloads are passed to `mutation`. A temp payload of another item that the request references (a parent, or a relation set by the edit) is not rewritten for the online run: resolve it inside `mutation` with that item's store, e.g. `api.setManager({ id: userPayload, managerId: userStore.resolveTempItemPayload(tempManagerPayload) })`.
+
 Code that keeps a temp payload outside the store (a route open on the record, a selection, an embedded frame that created it) can follow the record in two ways:
 
 ```ts
@@ -426,6 +428,7 @@ const userPayload = userStore.resolveTempItemPayload(openedUserPayload);
 
 - The mapping is kept in memory, for the tabs that were open when the creation was saved (the 1000 most recent creations per store). A tab opened or reloaded afterwards starts from the saved item and cannot resolve the old temp payload, so replace temp payloads kept in URLs when the event fires.
 - A tab that does not hold the temp item is still told about it and can resolve it.
+- A temp payload used again for a new creation after its first creation was saved stands for the new item from then on: it no longer resolves to the first saved item, and its edits are sent for the new one.
 
 ### Deleting entities created offline
 

@@ -9,9 +9,16 @@ import {
   rc_unknown,
 } from 'runcheck';
 import { expect, test } from 'vitest';
-import type { DocumentOfflineOperationDefinition } from '../../src/main';
+import type {
+  DocumentOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
+} from '../../src/main';
 import { createStoreManager, opfsOfflineUploadAdapter } from '../../src/main';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { normalizeError } from '../mocks/testEnvUtils';
 import {
@@ -28,8 +35,9 @@ import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
+  userRowSchema,
 } from './offlineReplayTestShared';
-import { docSchema } from './offlineTestShared';
+import { docSchema, listQueryQueryPayloadSchema } from './offlineTestShared';
 import {
   network,
   resolveWithin,
@@ -1919,4 +1927,166 @@ test('switching org while the upload state is saved on a slow device does not se
     "
   `);
   expect(getOrgAQueue()).toMatchInlineSnapshot(`[]`);
+});
+
+type UserRow = { id: number; name: string };
+
+type UserPhotoOperations = {
+  createUser: ListQueryOfflineOperationDefinition<
+    UserRow,
+    ListQueryParams,
+    string,
+    { name: string },
+    unknown,
+    UserRow
+  >;
+  setUserPhoto: ListQueryOfflineOperationDefinition<
+    UserRow,
+    ListQueryParams,
+    string,
+    { itemId: string },
+    unknown
+  >;
+};
+
+test('a photo attached while the creation of its row is sent is queued for the saved row, even when the photo is saved on a slow device', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  const sessionKey = 'offline-upload-temp-row-photo-session';
+  const storeName = 'offline-upload-temp-row-photo-store';
+  const usersQuery = { tableId: 'users' } as const;
+  // The ids the photo was sent for, with the name of the attached file
+  const sentPhotos: Array<{ itemId: string; fileName?: string }> = [];
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      // A replay that fails is handed to the user right away
+      replayRetry: { maxFailures: 1, intervalMs: 1 },
+      uploads: {
+        // A slow device: storing a file attached to a mutation takes 1.5s
+        adapter: {
+          save: async (key, id, record) => {
+            if (record.state === 'pending') {
+              await new Promise((resolve) => setTimeout(resolve, 1_500));
+            }
+            await opfsOfflineUploadAdapter.save(key, id, record);
+          },
+          load: (key, id) => opfsOfflineUploadAdapter.load(key, id),
+          list: (key) => opfsOfflineUploadAdapter.list(key),
+          remove: (key, id) => opfsOfflineUploadAdapter.remove(key, id),
+          clearSession: (key) => opfsOfflineUploadAdapter.clearSession(key),
+        },
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
+    },
+  });
+
+  const env: ReturnType<
+    typeof createListQueryStoreTestEnv<
+      UserRow,
+      false,
+      false,
+      UserPhotoOperations
+    >
+  > = createListQueryStoreTestEnv<UserRow, false, false, UserPhotoOperations>(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: storeName,
+      storeManager,
+      testScenario: { loaded: { queries: [usersQuery] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: rc_object({ name: rc_string }),
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: async ({ input }) => {
+                const result = { id: 2, name: input.name };
+                await env.serverTable.delayedSetItem('users||2', result);
+                return result;
+              },
+            },
+            setUserPhoto: {
+              inputSchema: rc_object({ itemId: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: async (ctx) => {
+                sentPhotos.push({
+                  itemId: ctx.input.itemId,
+                  fileName: ctx.uploads.filesById.photo?.name,
+                });
+                // The server only knows the saved user
+                await env.serverTable.delayedUpdateItem(ctx.input.itemId, {});
+                return null;
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+  await flushAllTimers();
+
+  // --- Setup: Linus is created offline ---
+  await resolveWithin(
+    env.apiStore.performMutation('temp:Linus', {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState(
+          'temp:Linus',
+          { id: -1, name: 'Linus' },
+          { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+        );
+      },
+      mutation: () => Promise.reject(new Error('never sent directly')),
+      offline: { operation: 'createUser', input: { name: 'Linus' } },
+    }),
+  );
+
+  // --- Action: back online, the user attaches a photo to Linus while his
+  // creation is sent (1.2s). The photo waits for the creation, so it is
+  // queued, and storing its file (1.5s) ends after Linus is saved ---
+  act(() => {
+    network.goOnline();
+  });
+  const photoResult = env.apiStore.performMutation('temp:Linus', {
+    optimisticUpdate: () => {},
+    mutation: () => Promise.reject(new Error('never sent directly')),
+    offline: { operation: 'setUserPhoto', input: { itemId: 'temp:Linus' } },
+    upload: {
+      photo: new File(['photo bytes'], 'photo.jpg', {
+        type: 'image/jpeg',
+        lastModified: 1,
+      }),
+    },
+  });
+  await advanceTime(5_000);
+
+  // The photo was queued, then sent for the saved user, not the temp id the
+  // server does not know
+  expect((await photoResult).unwrap()).toMatchInlineSnapshot(`
+    kind: 'queued'
+  `);
+  expect(sentPhotos).toMatchInlineSnapshot(`
+    - { fileName: 'photo.jpg', itemId: 'users||2' }
+  `);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
 });
