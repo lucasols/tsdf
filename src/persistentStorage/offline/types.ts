@@ -835,10 +835,13 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** React hook subscribing to the session's upload list. */
   useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
-  /** React hook reading the file of a staged upload while it is staged. */
+  /**
+   * React hook reading the file of a staged upload while it is staged, and its
+   * server ref (`resolvedRef` on `missing`) once it was sent and released.
+   */
   useOfflineUploadFile: (
     id: string | false | null | undefined,
-  ) => OfflineUploadFile;
+  ) => OfflineUploadFile<TUploadRef>;
 };
 
 /** @internal */

@@ -806,6 +806,15 @@ function castResolvedUploadRef<TUploadRef extends ValidPayload>(
   return __LEGIT_CAST__<TUploadRef, ValidPayload>(resolvedRef);
 }
 
+function castUploadFile<TUploadRef extends ValidPayload>(
+  uploadFile: OfflineUploadFile,
+): OfflineUploadFile<TUploadRef> {
+  // WORKAROUND: Same rebind as `castUploads`, for the ref of a released upload.
+  return __LEGIT_CAST__<OfflineUploadFile<TUploadRef>, OfflineUploadFile>(
+    uploadFile,
+  );
+}
+
 function castResolvedUploadRefs<TUploadRef extends ValidPayload>(
   resolvedRefsById: Record<string, ValidPayload>,
 ): Record<string, TUploadRef> {
@@ -2754,7 +2763,12 @@ class SessionOfflineCoordinator {
     };
     this.#uploadFiles.set(id, entry);
     if (!this.#syncUploadFile(id, entry)) {
-      void this.#loadUploadFile(id, entry);
+      // A released upload already left storage, so its ref needs no read.
+      if (this.#releasedUploadRefs.has(id)) {
+        entry.value = this.#getMissingUploadFile(id);
+      } else {
+        void this.#loadUploadFile(id, entry);
+      }
     }
     // Entries are created while rendering, so the ones whose render never
     // commits (and therefore never subscribes) have to be released as well.
@@ -2791,8 +2805,17 @@ class SessionOfflineCoordinator {
     const file = this.#uploads.get(id)?.file;
 
     if (!file) {
-      // The upload left the session: deleted, expired or consumed.
-      if (entry.value.file) this.#setUploadFile(entry, missingUploadFile);
+      // The upload left the session: deleted, expired or consumed. A consumed
+      // upload that was sent exposes its server ref, which can also arrive or
+      // be forgotten after the entry settled as `missing` or `error`.
+      const { status, resolvedRef } = entry.value;
+      if (
+        status === 'success' ||
+        (status !== 'loading' &&
+          resolvedRef !== (this.#releasedUploadRefs.get(id) ?? null))
+      ) {
+        this.#setUploadFile(entry, this.#getMissingUploadFile(id));
+      }
       return false;
     }
 
@@ -2802,6 +2825,7 @@ class SessionOfflineCoordinator {
         url: URL.createObjectURL(file),
         file,
         error: null,
+        resolvedRef: null,
       });
     }
     return true;
@@ -2829,10 +2853,31 @@ class SessionOfflineCoordinator {
 
     this.#setUploadFile(
       entry,
-      failure
-        ? { status: 'error', url: null, file: null, error: failure }
-        : missingUploadFile,
+      // The upload can be released during a failed read, and its ref is then
+      // known without the file.
+      failure && !this.#releasedUploadRefs.has(id)
+        ? {
+            status: 'error',
+            url: null,
+            file: null,
+            error: failure,
+            resolvedRef: null,
+          }
+        : this.#getMissingUploadFile(id),
     );
+  }
+
+  #getMissingUploadFile(id: string): OfflineUploadFile {
+    const resolvedRef = this.#releasedUploadRefs.get(id);
+    if (resolvedRef === undefined) return missingUploadFile;
+
+    return {
+      status: 'missing',
+      url: null,
+      file: null,
+      error: null,
+      resolvedRef,
+    };
   }
 
   async #waitForUploadRemoval(id: string): Promise<void> {
@@ -4302,7 +4347,9 @@ export function createOfflineSession<
         [coordinator, id],
       );
 
-      return useSyncExternalStore(subscribe, getSnapshot);
+      return castUploadFile<TUploadRef>(
+        useSyncExternalStore(subscribe, getSnapshot),
+      );
     },
   };
 

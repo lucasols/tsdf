@@ -31,6 +31,8 @@ import type { UpdateValueOperations as DirectUploadUpdateOperations } from './of
 import { docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
+/** Ids sent through the session `upload` transport, in call order. */
+let transportUploads: string[] = [];
 const ATTACHED_UPLOAD_FILE_ID_PATTERN =
   /^offline-upload-file-attached-doc:[^:]+:[^:]+:avatar$/;
 
@@ -39,6 +41,7 @@ beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
+  transportUploads = [];
   resetSessionForTests({ clearStorage: true });
 });
 
@@ -136,6 +139,7 @@ function createUploadFileTestManager(
       uploads: {
         adapter,
         upload: async ({ id }) => {
+          transportUploads.push(id);
           await new Promise((resolve) => setTimeout(resolve, 20));
           return `server:${id}`;
         },
@@ -170,6 +174,7 @@ function describeStagedFile(staged: OfflineUploadFile) {
     url: staged.url,
     fileName: staged.file?.name ?? null,
     ...(staged.error ? { error: staged.error.message } : {}),
+    ...(staged.resolvedRef !== null ? { resolvedRef: staged.resolvedRef } : {}),
   };
 }
 
@@ -747,6 +752,193 @@ test('a file attached to a queued mutation is released once the mutation has bee
   expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
 
   fileHook.unmount();
+});
+
+type RichTextImageOperations = {
+  saveContent: DocumentOfflineOperationDefinition<
+    { value: string },
+    {
+      input: { html: string; imageUploadId: string };
+      result: { value: string };
+    }
+  >;
+};
+
+test('an image whose staged file was sent by replay switches to the uploaded server ref instead of being uploaded again', async () => {
+  createMockBrowserOpfs();
+  const objectUrls = trackObjectUrls();
+  const storage = createReadTrackingUploadAdapter();
+  const renders = createLoggerStore();
+
+  network.setOffline();
+  const storeManager = createUploadFileTestManager(
+    () => 'offline-upload-file-released-ref-session',
+    storage.adapter,
+  );
+
+  // A rich text document whose images reference staged upload ids. Saving it
+  // swaps each id for its server ref in the content sent to the server.
+  const env = createDocumentStoreTestEnv<string, RichTextImageOperations>('', {
+    id: 'offline-upload-file-rich-text-doc',
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: rc_object({ value: rc_string }),
+      offline: {
+        operations: {
+          saveContent: {
+            inputSchema: rc_object({
+              html: rc_string,
+              imageUploadId: rc_string,
+            }),
+            kind: 'update',
+            dependsOnUploads: ({ input }) => [input.imageUploadId],
+            execute: async ({ input, uploads }) => {
+              const serverRef = uploads.resolvedRefsById[input.imageUploadId];
+              if (typeof serverRef !== 'string') {
+                throw new Error('Expected the image upload to resolve');
+              }
+              const value = input.html.replace(
+                `upload:${input.imageUploadId}`,
+                serverRef,
+              );
+              await env.serverMock.delayedSetData(value);
+              return { value };
+            },
+          },
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  // The editor's image node only knows the staged id it was inserted with: the
+  // editor keeps its own content, which is not rewritten with server refs. It
+  // renders the local file while the upload is staged and the server file once
+  // the upload was sent and released.
+  function ImageNode({ node, uploadId }: { node: string; uploadId: string }) {
+    const staged = storeManager.useOfflineUploadFile(uploadId);
+    const src = staged.status === 'success' ? staged.url : staged.resolvedRef;
+
+    renders.add({ node, status: staged.status, src });
+
+    return null;
+  }
+
+  // Offline, the user pastes an image into the document and the editor saves
+  // the content.
+  renders.addMark('paste an image while offline');
+  (
+    await resolveAfterAllTimers(
+      storeManager.saveOfflineUpload({
+        id: 'image-1',
+        file: createImageFile('pasted.png', 'image bytes'),
+      }),
+    )
+  ).unwrap();
+  const editor = render(
+    <ImageNode
+      node="editor"
+      uploadId="image-1"
+    />,
+  );
+  await resolveAfterAllTimers(
+    env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = '<img src="upload:image-1">';
+        });
+      },
+      mutation: () => Promise.reject(new Error('Unexpected direct save')),
+      offline: {
+        operation: 'saveContent',
+        input: { html: '<img src="upload:image-1">', imageUploadId: 'image-1' },
+      },
+    }),
+  );
+
+  // Reconnect: replay uploads the image, saves the content and deletes the
+  // staged file, since no queued work uses it anymore.
+  renders.addMark('reconnect and replay');
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(10_000);
+
+  // The image node goes from the local file straight to the server ref, so it
+  // never needs to upload the file itself.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> paste an image while offline
+
+    -> node: editor ⋅ status: success ⋅ src: blob:staged-1
+
+    >>> reconnect and replay
+
+    -> node: editor ⋅ status: missing ⋅ src: server:image-1
+    "
+  `);
+  expect(objectUrls.events).toMatchInlineSnapshot(
+    `['create blob:staged-1 (pasted.png)', 'revoke blob:staged-1']`,
+  );
+
+  // The image was sent once, by the replay, and the server holds the content
+  // with its server ref.
+  expect(transportUploads).toMatchInlineSnapshot(`['image-1']`);
+  expect(env.serverMock.current).toMatchInlineSnapshot(
+    `"<img src="server:image-1">"`,
+  );
+  expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+
+  // The document is closed, and its file entry is released...
+  editor.unmount();
+  await advanceTime(1_000);
+
+  // ...then opened again: the image node mounts with the same staged id and
+  // gets the server ref right away, without a placeholder flash or a storage
+  // read, since the released upload already left storage.
+  storage.reads.length = 0;
+  renders.reset();
+  renders.addMark('reopen the document');
+  const reopenedEditor = render(
+    <ImageNode
+      node="reopened editor"
+      uploadId="image-1"
+    />,
+  );
+  await flushAllTimers();
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> reopen the document
+
+    -> node: reopened editor ⋅ status: missing ⋅ src: server:image-1
+    "
+  `);
+  expect(storage.reads).toMatchInlineSnapshot(`[]`);
+  // Still a single upload.
+  expect(transportUploads).toMatchInlineSnapshot(`['image-1']`);
+
+  // Once the app forgets the id, it is unknown again and nodes still using it
+  // report it as missing with no ref.
+  renders.reset();
+  renders.addMark('delete the released upload');
+  (
+    await resolveAfterAllTimers(storeManager.deleteOfflineUpload('image-1'))
+  ).unwrap();
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> delete the released upload
+
+    -> node: reopened editor ⋅ status: missing ⋅ src: null
+    "
+  `);
+
+  reopenedEditor.unmount();
 });
 
 test('a falsy id disables the hook, and the file is only kept while a consumer needs it', async () => {

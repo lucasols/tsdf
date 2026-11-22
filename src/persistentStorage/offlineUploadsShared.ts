@@ -55,17 +55,28 @@ export function applyRestoredUploadRef<TUpload extends OfflineUpload>(
   return pendingUpload;
 }
 
-function createEmptyUploadFile(
-  status: 'idle' | 'loading' | 'missing',
-): OfflineUploadFile {
-  return { status, url: null, file: null, error: null };
-}
-
-export const idleUploadFile: OfflineUploadFile = createEmptyUploadFile('idle');
-export const loadingUploadFile: OfflineUploadFile =
-  createEmptyUploadFile('loading');
-export const missingUploadFile: OfflineUploadFile =
-  createEmptyUploadFile('missing');
+// Typed with a `never` ref so they fit the upload file of any ref type.
+export const idleUploadFile: OfflineUploadFile<never> = {
+  status: 'idle',
+  url: null,
+  file: null,
+  error: null,
+  resolvedRef: null,
+};
+export const loadingUploadFile: OfflineUploadFile<never> = {
+  status: 'loading',
+  url: null,
+  file: null,
+  error: null,
+  resolvedRef: null,
+};
+export const missingUploadFile: OfflineUploadFile<never> = {
+  status: 'missing',
+  url: null,
+  file: null,
+  error: null,
+  resolvedRef: null,
+};
 
 export function stripStoredUploadFile<
   TResolvedRef extends ValidPayload = ValidPayload,

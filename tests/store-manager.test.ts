@@ -809,7 +809,7 @@ test('offline manager api returns empty defaults when offline is not configured'
     resolutionId: 'any-resolution-id'
   `);
   expect(offlineHook.result.current).toMatchInlineSnapshot(`
-    disabledUploadFile: { error: null, file: null, status: 'idle', url: null }
+    disabledUploadFile: { error: null, file: null, resolvedRef: null, status: 'idle', url: null }
     entities: []
     resolutions: []
 
@@ -824,7 +824,7 @@ test('offline manager api returns empty defaults when offline is not configured'
       sessionKey: 'shared-session'
       updatedAt: 1735689600000
 
-    uploadFile: { error: null, file: null, status: 'missing', url: null }
+    uploadFile: { error: null, file: null, resolvedRef: null, status: 'missing', url: null }
     uploads: []
   `);
 });

@@ -816,6 +816,7 @@ The hook returns an `OfflineUploadFile`, a union narrowed by `status`:
 - `url` — object URL of the staged file, managed by TSDF. Only set on `success`
 - `file` — the staged `File`, for reading its contents. Only set on `success`
 - `error` — the read failure. Only set on `error`
+- `resolvedRef` — the server ref of an upload that was sent and then deleted with the queued work that used it. Only set on `missing`, see [Following a released upload to its server ref](#following-a-released-upload-to-its-server-ref)
 
 Caching and URL lifetime:
 
@@ -832,7 +833,25 @@ The file follows the upload record, not its upload state: it stays available whi
 - A replayed mutation releases its uploads after its `onSuccessExecute` ran (and, for a temp entity create, after the result replaced the temp entity). When `onSuccessExecute` writes the server ref into the entity, the local file stays renderable until that render, and from then on the component passes a falsy id and renders the server file.
 - Otherwise the entity keeps the local ref until it is revalidated after replay, so the hook can report `missing` for a moment in between. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
 
-Outside of these windows, a local ref paired with `missing` means the staged file was deleted or expired, not that it is about to appear.
+Outside of these windows, a local ref paired with `missing` and no `resolvedRef` means the staged file was deleted or expired, not that it is about to appear.
+
+#### Following a released upload to its server ref
+
+Some data keeps the staged id after the upload was sent, e.g. a rich text editor whose content references images by upload id and is not rewritten when the save replays. Once the upload is deleted, the hook reports `missing` with the upload's server ref in `resolvedRef`, so the component switches to the uploaded file instead of uploading the file again:
+
+```tsx
+function ImageNode({ uploadId }: { uploadId: string }) {
+  const staged = storeManager.useOfflineUploadFile(uploadId);
+
+  if (staged.status === 'success') return <img src={staged.url} />;
+  // Typed with the upload ref of the manager.
+  if (staged.resolvedRef) return <img src={staged.resolvedRef.url} />;
+
+  return <ImagePlaceholder isLoading={staged.status === 'loading'} />;
+}
+```
+
+`resolvedRef` is the ref `resolveOfflineUpload(id)` returns for a sent upload that was deleted (see [Upload lifecycle](#upload-lifecycle)) and is kept for as long: in memory, for the rest of the app session, in every tab open when the upload was deleted. Tabs that show the staged file switch to the ref as soon as it is deleted, and components mounted later get it on their first render. It is `null` after a reload, in a tab opened later, after `deleteOfflineUpload(id)`, and for uploads deleted before they were sent, so data that must keep its file across reloads still needs the server ref written into it.
 
 ### Upload failure handling
 
