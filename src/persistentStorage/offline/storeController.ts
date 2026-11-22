@@ -170,9 +170,12 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
    * `payload` is the item payload the operation referenced, if any: the
    * store may have no state left to read it from (an item deleted locally).
    * Entities other changes still wait for a manual resolution on are left
-   * out: a refetch would replace those changes. `hasPendingResolutions` is `true` while other changes of the store still
-   * wait for a manual resolution: a broad refetch (e.g. of lists) would
-   * replace them, so the store should limit itself to the discarded entities.
+   * out: a refetch would replace those changes. `hasPendingResolutions` is
+   * `true` while other changes of the store still wait for a manual
+   * resolution: the store should then limit itself to the discarded
+   * entities, leaving broader refetches (e.g. of lists) to the recovery
+   * revalidation that follows the discard, which waits while a change on the
+   * whole store or on no entity is pending.
    */
   revalidateDiscardedEntities?: (
     entities: (OfflineEntityRef & { payload: ValidPayload | undefined })[],

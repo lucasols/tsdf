@@ -43,18 +43,21 @@ function applyFetchedItems<
   const query = draft.queries[queryKey];
   if (!query) return;
 
+  // Items with a change waiting for a manual resolution keep their local
+  // version, which the server data would replace: their data, staying hidden
+  // when deleted locally, and, when the list was loaded before, whether and
+  // where they are in it (the change may have moved them between lists, or
+  // the server rejected their creation). Positions in the replaced list, by
+  // item key.
+  const keepsLocalMembership =
+    resolutionItemKeys.size > 0 && query.wasLoaded && !appendToExisting;
+  let keptPositions: Map<string, number> | null = null;
+
   query.status = 'success';
   query.wasLoaded = true;
   query.hasMore = hasMore;
 
-  // Items with a change waiting for a manual resolution keep their local
-  // version, which the server data would replace: their data, staying hidden
-  // when deleted locally, and staying in the list when the server no longer
-  // lists them (e.g. a creation it rejected). Positions in the replaced list,
-  // by item key.
-  let keptPositions: Map<string, number> | null = null;
-
-  if (resolutionItemKeys.size > 0 && !appendToExisting) {
+  if (keepsLocalMembership) {
     for (const [index, itemKey] of query.items.entries()) {
       if (resolutionItemKeys.has(itemKey)) {
         keptPositions ??= new Map();
@@ -112,6 +115,9 @@ function applyFetchedItems<
       );
     }
 
+    // Placed by `keptPositions` instead
+    if (keepsLocalVersion && keepsLocalMembership) continue;
+
     // Deduplicate: skip items already in the list (handles both append
     // and chunked invalidation where parallel chunks may return overlapping items)
     if (!existingItemKeys.has(itemKey)) {
@@ -138,7 +144,8 @@ function applyFetchedItems<
   }
 
   if (keptPositions) {
-    // Kept items the server no longer lists go back where they were
+    // Kept items go back where they were, unless the server data replaced
+    // them (no local version to keep)
     for (const [itemKey, index] of keptPositions) {
       if (existingItemKeys.has(itemKey)) continue;
 

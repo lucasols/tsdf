@@ -280,7 +280,9 @@ export function excludeLoadedFields(
  * fields now available. When `fields` is empty the loaded-field set is
  * replaced with the keys of the merged item (a full fetch is assumed).
  * With `keepPrevValues`, the existing item is merged into `data` instead: the
- * fetch only adds the fields it is missing.
+ * fetch only adds the fields it is missing, and leaves a fully loaded item
+ * as it is (it misses no field, and merging could bring back fields it
+ * removed).
  */
 export function applyPartialItemMerge<ItemState extends ValidStoreState>(
   draft: {
@@ -294,6 +296,10 @@ export function applyPartialItemMerge<ItemState extends ValidStoreState>(
   keepPrevValues = false,
 ): ItemState {
   const prev = draft.items[itemKey] ?? undefined;
+  if (keepPrevValues && prev && draft.itemLoadedFields[itemKey] === '*') {
+    return prev;
+  }
+
   const merged =
     keepPrevValues && prev
       ? partialResources.mergeItems(data, prev)

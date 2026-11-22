@@ -1020,9 +1020,9 @@ export function createCollectionStore<
   // yet (still queued, or waiting for a manual resolution). They cannot be
   // refetched, so invalidations skip them.
   const unsentCreationItemKeys = new Set<string>();
-  // Items with a change waiting for a manual resolution: the reconnect and
-  // recovery revalidations skip them, since a refetch would replace the
-  // change the user still has to decide on.
+  // Items with a change waiting for a manual resolution: the window focus,
+  // reconnect and recovery revalidations skip them, since a refetch would
+  // replace the change the user still has to decide on.
   const resolutionItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
 
@@ -1339,9 +1339,10 @@ export function createCollectionStore<
               rebindOfflineOverlays(itemKeyRewrites);
             },
             revalidateDiscardedEntities: (entities) => {
-              // Discarding the last change of a realtime store schedules its
-              // recovery revalidation for the end of the reconnect cooldown:
-              // run it now with this refetch instead of fetching twice.
+              // A discard that releases an item (or the last change on no
+              // entity) of a realtime store schedules its recovery
+              // revalidation for the end of the reconnect cooldown: run it
+              // now with this refetch instead of fetching twice.
               focusLifecycle.flushPendingReconnectRevalidate();
               for (const { entityKey, payload } of entities) {
                 const item = store.state[entityKey];
@@ -2921,6 +2922,18 @@ export function createCollectionStore<
     return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
   }
 
+  // Window focus, reconnect and recovery revalidations leave out the items
+  // with a change waiting for a manual resolution: a refetch would replace
+  // the change the user still has to decide on.
+  function revalidateAllButResolutionItems(priority: FetchType): void {
+    invalidateItem(
+      resolutionItemKeys.size === 0
+        ? () => true
+        : (payload) => !resolutionItemKeys.has(getItemKey(payload)),
+      priority,
+    );
+  }
+
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -2928,13 +2941,10 @@ export function createCollectionStore<
     getWindowIsFocused,
     testOptions?.onWindowFocus ?? onWindowFocusDefault,
     () => {
-      invalidateItem(() => true, 'lowPriority');
+      revalidateAllButResolutionItems('lowPriority');
     },
     () => {
-      invalidateItem(
-        resolutionItemKeys.size === 0
-          ? () => true
-          : (payload) => !resolutionItemKeys.has(getItemKey(payload)),
+      revalidateAllButResolutionItems(
         usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
       );
     },

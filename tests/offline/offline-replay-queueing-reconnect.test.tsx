@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_object, rc_string } from 'runcheck';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
   CollectionOfflineOperationDefinition,
@@ -8,6 +8,7 @@ import type {
 } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
+import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -1289,6 +1290,201 @@ test('a list query change waiting for a decision only holds back its own row: th
     .     | Ada edited (saved) | Grace edited (saved) | Ada edited (saved), Grace edited (saved) | [rows, ada] ui-changed
     .     | Ada edited (saved) | Grace edited (saved) | Ada edited (saved), Grace edited (saved) | 🟢 [users||1] <fetch-finished (value: {"id":1,"name":"Ada edited (saved)"})
     .     | Ada edited (saved) | Grace edited (saved) | Ada edited (saved), Grace edited (saved) | 🔵 [users||2] <fetch-finished (value: {"id":2,"name":"Grace edited (saved)"})
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a row moved between lists by a change waiting for a decision stays where it was moved until the change is handled', async () => {
+  network.setOffline();
+  const sessionKey = 'recovery-revalidation-moved-row-session';
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  type UserRow = { id: number; name: string; type: string };
+
+  type ChangeTypeOperations = {
+    changeType: ListQueryOfflineOperationDefinition<
+      UserRow,
+      ListQueryParams,
+      string,
+      { itemId: string; type: string },
+      { reason: string }
+    >;
+  };
+
+  const adminsQuery: ListQueryParams = {
+    tableId: 'users',
+    filters: [{ op: 'eq', field: 'type', value: 'admin' }],
+  };
+  const regularUsersQuery: ListQueryParams = {
+    tableId: 'users',
+    filters: [{ op: 'eq', field: 'type', value: 'user' }],
+  };
+
+  // Someone else renames Ada while we are offline, so our change of her type
+  // conflicts and waits for the user to decide on it.
+  const env = createListQueryStoreTestEnv<
+    UserRow,
+    false,
+    false,
+    ChangeTypeOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada', type: 'admin' },
+        { id: 2, name: 'Grace', type: 'admin' },
+        { id: 3, name: 'Linus', type: 'user' },
+      ],
+    },
+    {
+      id: 'recovery-revalidation-moved-row-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: { loaded: { queries: [adminsQuery, regularUsersQuery] } },
+      revalidateOnWindowFocus: true,
+      bindFocusController: tabs.bind('a'),
+      // A row changing type moves between the admins and users lists
+      optimisticListUpdates: [
+        {
+          queries: (query) => query.tableId === 'users',
+          filterItem: (user, { queryPayload }) =>
+            queryPayload.filters?.some(
+              (filter) => filter.op === 'eq' && filter.value === user.type,
+            ) ?? null,
+        },
+      ],
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: rc_object({ id: rc_number, name: rc_string, type: rc_string }),
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            changeType: {
+              inputSchema: rc_object({ itemId: rc_string, type: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () => ({ reason: 'renamed by someone else' }),
+              },
+              // Never runs: the change always conflicts
+              execute: async () => {},
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const admins = env.apiStore.useListQuery(adminsQuery, {
+      itemSelector: (item) => item.name,
+    });
+    const regularUsers = env.apiStore.useListQuery(regularUsersQuery, {
+      itemSelector: (item) => item.name,
+    });
+    // A detail panel showing Ada
+    const ada = env.apiStore.useItem('users||1');
+    env.trackItemUI('admins', admins.items.join(', '));
+    env.trackItemUI('users', regularUsers.items.join(', '));
+    env.trackItemUI(
+      'ada',
+      ada.data ? `${ada.data.name}:${ada.data.type}` : '-',
+    );
+  });
+  await flushAllTimers();
+
+  // Offline: make Ada a regular user, which moves her to the users list.
+  // Meanwhile someone else renames her.
+  env.addTimelineComments('beforeNextAction', ['offline: Ada becomes a user']);
+  await act(async () => {
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (item) => ({
+          ...item,
+          type: 'user',
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'changeType',
+        input: { itemId: 'users||1', type: 'user' },
+      },
+    });
+  });
+  env.serverTable.updateItem('users||1', { name: 'Ada by Bob' });
+
+  // Back online: the change conflicts. Both lists are refetched, but the
+  // server still lists Ada as an admin: she stays where the change moved her,
+  // in the users list only.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the change conflicts, the lists are refetched',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Coming back to the tab revalidates the lists again, but not Ada: a
+  // refetch of her would replace the change the user still has to decide on.
+  env.addTimelineComments('beforeNextAction', [
+    'the user comes back to the tab: the lists are refetched, Ada is not',
+  ]);
+  await tabs.blur();
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  // The user drops the change: Ada and the lists are refetched, which moves
+  // her back to the admins list, with Bob's rename.
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected Ada to wait for a decision');
+  env.addTimelineComments('beforeNextAction', [
+    'the user discards the change: Ada goes back to the admins',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'changeType', {
+      action: 'discard',
+    });
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ada              | admins            | users             |
+    0      | Ada:admin        | Ada, Grace        | Linus             | [admins, users, ada] ui-initialized
+    3.01s  | Ada:admin        | Ada, Grace        | Linus             | -- offline: Ada becomes a user
+    .      | Ada:user         | Grace             | Linus, Ada        | [admins, users, ada] ui-changed
+    .      | Ada:user         | Grace             | Linus, Ada        | offline:changeType queued
+    .      | Ada:user         | Grace             | Linus, Ada        | [users||1] server-data-changed (value: {"name":"Ada by Bob"})
+    .      | Ada:user         | Grace             | Linus, Ada        | -- back online: the change conflicts, the lists are refetched
+    .      | Ada:user         | Grace             | Linus, Ada        | offline:changeType resolution-required
+    3.02s  | Ada:user         | Grace             | Linus, Ada        | 🔴 >list-fetch-started
+    .      | Ada:user         | Grace             | Linus, Ada        | 🟠 >list-fetch-started
+    3.82s  | Ada:user         | Grace             | Linus, Ada        | 🔴 <list-fetch-finished (value: {"count":2})
+    .      | Ada:user         | Grace             | Linus, Ada        | 🟠 <list-fetch-finished (value: {"count":1})
+    4.82s  | Ada:user         | Grace             | Linus, Ada        | -- the user comes back to the tab: the lists are refetched, Ada is not
+    .      | Ada:user         | Grace             | Linus, Ada        | 🔕 window-blurred
+    4.825s | Ada:user         | Grace             | Linus, Ada        | 👁 window-focused
+    4.835s | Ada:user         | Grace             | Linus, Ada        | 🟡 >list-fetch-started
+    .      | Ada:user         | Grace             | Linus, Ada        | 🟢 >list-fetch-started
+    5.635s | Ada:user         | Grace             | Linus, Ada        | 🟡 <list-fetch-finished (value: {"count":2})
+    .      | Ada:user         | Grace             | Linus, Ada        | 🟢 <list-fetch-finished (value: {"count":1})
+    6.645s | Ada:user         | Grace             | Linus, Ada        | -- the user discards the change: Ada goes back to the admins
+    .      | Ada:user         | Grace             | Linus, Ada        | 🔵 >list-fetch-started
+    .      | Ada:user         | Grace             | Linus, Ada        | 🟣 >list-fetch-started
+    .      | Ada:user         | Grace             | Linus, Ada        | 🟤 [users||1] >fetch-started
+    7.445s | Ada:user         | Grace             | Linus, Ada        | 🔵 <list-fetch-finished (value: {"count":2})
+    .      | Ada by Bob:admin | Ada by Bob, Grace | Linus, Ada by Bob | [admins, users, ada] ui-changed
+    .      | Ada by Bob:admin | Ada by Bob, Grace | Linus, Ada by Bob | 🟣 <list-fetch-finished (value: {"count":1})
+    .      | Ada by Bob:admin | Ada by Bob, Grace | Linus             | [users] ui-changed
+    .      | Ada by Bob:admin | Ada by Bob, Grace | Linus             | 🟤 [users||1] <fetch-finished (value: {"id":1,"name":"Ada by Bob","type":"admin"})
     "
   `);
 

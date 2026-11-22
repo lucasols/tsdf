@@ -1518,9 +1518,9 @@ export function createListQueryStore<
   // refetched, so invalidations skip them.
   const unsentCreationItemKeys = new Set<string>();
   // Items with a change waiting for a manual resolution. A refetch would
-  // replace the change the user still has to decide on, so the reconnect and
-  // recovery revalidations skip them, and list fetches keep their local
-  // version.
+  // replace the change the user still has to decide on, so the window focus,
+  // reconnect and recovery revalidations skip them, and list fetches keep
+  // their local version.
   const resolutionItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
@@ -2506,9 +2506,10 @@ export function createListQueryStore<
           rebindOfflineOverlays(itemKeyRewrites);
         },
         revalidateDiscardedEntities: (entities, hasPendingResolutions) => {
-          // Discarding the last change of a realtime store schedules its
-          // recovery revalidation for the end of the reconnect cooldown: run
-          // it now with this refetch instead of fetching twice.
+          // A discard that releases an item (or the last change on the whole
+          // store) of a realtime store schedules its recovery revalidation
+          // for the end of the reconnect cooldown: run it now with this
+          // refetch instead of fetching twice.
           focusLifecycle.flushPendingReconnectRevalidate();
           invalidateQueryAndItems({
             itemPayload: filterAndMap(
@@ -3718,6 +3719,24 @@ export function createListQueryStore<
     return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
   }
 
+  // Window focus, reconnect and recovery revalidations leave out the items
+  // with a change waiting for a manual resolution: a refetch would replace
+  // the change the user still has to decide on.
+  function revalidateAllButResolutionItems(type: FetchType): void {
+    if (resolutionItemKeys.size === 0) {
+      invalidateQueryAndItems({ all: true, type });
+      return;
+    }
+
+    // Lists too: they keep the local version of these items
+    invalidateQueryAndItems({
+      queryPayload: () => true,
+      itemPayload: (itemPayload) =>
+        !resolutionItemKeys.has(getItemKey(itemPayload)),
+      type,
+    });
+  }
+
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -3725,23 +3744,12 @@ export function createListQueryStore<
     getWindowIsFocused,
     testOptions?.onWindowFocus ?? onWindowFocusDefault,
     () => {
-      invalidateQueryAndItems({ all: true, type: 'lowPriority' });
+      revalidateAllButResolutionItems('lowPriority');
     },
     () => {
-      const type = usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority';
-
-      if (resolutionItemKeys.size === 0) {
-        invalidateQueryAndItems({ all: true, type });
-        return;
-      }
-
-      // Lists too: they keep the local version of these items
-      invalidateQueryAndItems({
-        queryPayload: () => true,
-        itemPayload: (itemPayload) =>
-          !resolutionItemKeys.has(getItemKey(itemPayload)),
-        type,
-      });
+      revalidateAllButResolutionItems(
+        usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
+      );
     },
     reevaluateDelayedRTUs,
     getIsOfflineMode,
