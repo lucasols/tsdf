@@ -11,8 +11,21 @@ import {
   resetManagedLocalStorageState,
   syncManagedLocalStorageSessionProtection,
 } from '../../src/persistentStorage/localStorageMetadata';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import type { UpdateValueOperations } from '../offline/offlineReplayTestShared';
+import {
+  docMutationInputSchema,
+  docSchema,
+} from '../offline/offlineTestShared';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   clearSimulatedLocalStorageQuota,
   createEnv,
@@ -314,5 +327,96 @@ describe('localStorage quota exceeded recovery', () => {
 
     // the removal itself cannot hit the quota, so no new error was reported
     expect(errors.length).toBe(1);
+  });
+});
+
+describe('offline changes queued while localStorage is full', () => {
+  const network = createOfflineNetworkMock();
+
+  afterEach(() => {
+    resetSessionForTests({ clearStorage: true });
+  });
+
+  function createOfflineDocumentApp(errors: unknown[]) {
+    const sessionKey = 'quota-offline-session';
+    const storeManager = createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+      onPersistentStorageError: (error) => errors.push(error),
+    });
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: 'quota-offline-doc',
+      getSessionKey: () => sessionKey,
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              kind: 'update',
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
+              },
+            },
+          },
+        },
+      },
+    });
+    return { env, storeManager };
+  }
+
+  function queueOfflineUpdate(
+    env: ReturnType<typeof createOfflineDocumentApp>['env'],
+    value: number,
+  ) {
+    return env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = value;
+        });
+      },
+      mutation: async () => {
+        await env.serverMock.delayedSetData(value);
+        return value;
+      },
+      offline: { operation: 'updateValue', input: { value } },
+    });
+  }
+
+  test('a change whose payload fits but whose storage index does not is flagged as not stored on the device', async () => {
+    const errors: unknown[] = [];
+    network.setOffline();
+    const { env, storeManager } = createOfflineDocumentApp(errors);
+    await flushAllTimers();
+
+    // Other data of the app almost fills the origin quota: the queued change
+    // itself still fits, but the index TSDF writes next to it, which is how a
+    // reload finds the change, does not.
+    localStorage.setItem('other-app-data', 'z'.repeat(3000));
+    simulateLocalStorageQuota(getLocalStorageUsedChars() + 300);
+
+    await resolveAfterAllTimers(queueOfflineUpdate(env, 2));
+    await flushAllTimers();
+
+    // A reload cannot find the change, so the app is told it only lives in
+    // memory, and the quota error is reported once.
+    expect(storeManager.getOfflineStatus().inMemoryOnlyMutations).toBe(1);
+    expect(errors.length).toBe(1);
+
+    // Indeed, a reload finds no queued change.
+    clearSimulatedLocalStorageQuota();
+    env.apiStore.dispose();
+    resetSessionForTests();
+    resetManagedLocalStorageState();
+    const reloaded = createOfflineDocumentApp(errors);
+    await flushAllTimers();
+    expect(reloaded.env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+      `[]`,
+    );
   });
 });

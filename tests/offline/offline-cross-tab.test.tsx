@@ -98,6 +98,46 @@ test('an edit queued in a tab that was closed is sent by the remaining tab', asy
   `);
 });
 
+test('an edit a background tab could not store stops being flagged once the leader tab sends it', async () => {
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+  setDocumentHidden(false);
+
+  // Tab B cannot write its queued edits to storage (e.g. the browser
+  // refuses its writes), so the edit only lives in the tabs' memory.
+  const originalSetItem = Storage.prototype.setItem.bind(localStorage);
+  const setItem = vi
+    .spyOn(localStorage, 'setItem')
+    .mockImplementation((key, value) => {
+      if (key.includes('.oq.')) throw new Error('Write failed');
+      originalSetItem(key, value);
+    });
+  await tabB.queueEdit(2);
+  setItem.mockRestore();
+
+  // Tab B warns about it; tab A got the edit from tab B, but it is not the
+  // tab whose write failed.
+  expect([
+    tabA.storeManager.getOfflineStatus().inMemoryOnlyMutations,
+    tabB.storeManager.getOfflineStatus().inMemoryOnlyMutations,
+  ]).toMatchInlineSnapshot(`[0, 1]`);
+
+  // The leader tab sends the edit once the network is back.
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(`['tab A sent doc = 2']`);
+
+  // Nothing is at risk in tab B anymore.
+  expect(tabB.storeManager.getOfflineStatus().inMemoryOnlyMutations).toBe(0);
+  expect(describeTabs(tabB)).toMatchInlineSnapshot(`
+    tab B:
+      entities: []
+      leader: '❌'
+      resolutions: []
+  `);
+});
+
 test('an edit another tab already sent is not sent again after the leader tab closes', async () => {
   network.setOffline();
   const tabA = await openTab('A', { focused: true });

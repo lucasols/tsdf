@@ -237,6 +237,8 @@ type SessionStoreContribution = {
   resolutions: OfflineResolutionRecord[];
   referencedUploadIds: string[];
   protectedKeys: string[];
+  /** Records of the store this tab holds only in memory (failed writes) */
+  inMemoryOnlyRecordCount: number;
   replayHead: SessionReplayHead | null;
 };
 
@@ -470,6 +472,7 @@ export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
     isOfflineMode: false,
     isForcedOffline: false,
     isNetworkDetectedOffline: false,
+    inMemoryOnlyMutations: 0,
     isLeader: true,
     updatedAt: Date.now(),
     lastFailureAt: null,
@@ -537,6 +540,7 @@ function normalizePersistedOfflineStatus(
       isForcedOffline: compactStatus.f === COMPACT_OFFLINE_STATUS_FLAG,
       // Not persisted: the coordinator stamps its own detection on it
       isNetworkDetectedOffline: false,
+      inMemoryOnlyMutations: 0,
       isLeader: true,
       updatedAt:
         typeof compactStatus.u === 'number' ? compactStatus.u : Date.now(),
@@ -991,6 +995,11 @@ class SessionOfflineCoordinator {
    * enablement say.
    */
   #networkDetectedOffline = false;
+  /**
+   * Offline records this tab's stores hold only in memory, reported as
+   * `status.inMemoryOnlyMutations`.
+   */
+  #inMemoryOnlyMutations = 0;
   /** Last value of the session gate applied to the status. */
   #appliedSessionEnabled = true;
   /**
@@ -3619,7 +3628,9 @@ class SessionOfflineCoordinator {
   #refreshAggregates(publish = true): void {
     const referencedUploadIds = new Set<string>();
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+    let inMemoryOnlyMutations = 0;
     for (const contribution of this.#storeContributions.values()) {
+      inMemoryOnlyMutations += contribution.inMemoryOnlyRecordCount;
       for (const uploadId of contribution.referencedUploadIds) {
         referencedUploadIds.add(uploadId);
       }
@@ -3756,8 +3767,25 @@ class SessionOfflineCoordinator {
       setSessionProtectedKeysSnapshot(this.sessionKey, nextProtectedKeys);
     }
 
+    // Neither persisted nor published: each tab reports its own records
+    const statusUpdate =
+      inMemoryOnlyMutations === this.#inMemoryOnlyMutations
+        ? undefined
+        : {
+            status: this.#stampLocalStatus({
+              ...this.store.state.status,
+              inMemoryOnlyMutations,
+            }),
+          };
+    this.#inMemoryOnlyMutations = inMemoryOnlyMutations;
     this.store.setPartialState(
-      { entities, attemptedCreationEntityIds, resolutions, hasQueuedMutations },
+      {
+        entities,
+        attemptedCreationEntityIds,
+        resolutions,
+        hasQueuedMutations,
+        ...statusUpdate,
+      },
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
@@ -3796,6 +3824,7 @@ class SessionOfflineCoordinator {
       // This tab's own detection, never the one of a remote or persisted
       // status
       isNetworkDetectedOffline: this.#networkDetectedOffline,
+      inMemoryOnlyMutations: this.#inMemoryOnlyMutations,
     });
   }
 

@@ -150,7 +150,7 @@ if (result.ok) {
 - `silentErrors: true` still calls `onMutationError(error, { silentErrors: true })`; handlers should use the flag to suppress user-facing noise while preserving logging/recovery.
 - `revalidateOnSuccess`: `true | false | 'queries' | (queryPayload) => boolean | { queries, items }` (List Query).
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).
-- `blockWindowClose` on `createStoreManager(...)` prevents accidental window close mid-mutation; it defaults to `null`.
+- `blockWindowClose` on `createStoreManager(...)` prevents accidental window close mid-mutation, and while queued offline mutations exist only in memory; it defaults to `null`.
 - Lifecycle events: `store.storeEvents.on('mutationStart' | 'mutationEnd', ...)`.
 - Items created offline: `store.storeEvents.on('tempEntityReconciled', ({ payload: { tempId, finalPayload } }) => ...)` fires in every tab when the item is saved; `store.resolveTempItemPayload(payload)` returns the final payload later (Collection, List Query).
 
@@ -229,7 +229,7 @@ Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`
 
 Offline creates: `tempEntity` / `tempEntities` (Collection and List Query) insert a pending entity under a temp payload and reconcile it to the server payload after replay. In List Query stores, `addToQueries` puts the pending entity in the lists that should show it (no manual `addItemToState`), and `loadedFields` declares its loaded fields when partial resources are enabled.
 
-Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query; its `selector` also gets each item's `ItemOfflineState`). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation, creationAttempted }`, re-rendering only when that item's state changes.
+Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query; its `selector` also gets each item's `ItemOfflineState`). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation, creationAttempted }`, re-rendering only when that item's state changes. Queued work a failed storage write left only in memory (lost on reload) is reported by `status.inMemoryOnlyMutations`, `isInMemoryOnly: true` on its entities and `{ kind: 'queued', inMemoryOnly: true }`; see `docs/offline.md#changes-not-stored-on-the-device`.
 
 Deleting something created offline: give the delete operation `supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true }` and treat not-found as success in its `execute`. A creation never sent (`isUnsentCreation && !creationAttempted`) is cancelled locally with the work queued on it; an attempted one is kept and the delete replays after it. See `docs/offline.md#deleting-entities-created-offline`.
 

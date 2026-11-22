@@ -182,7 +182,7 @@ If the second attempt also fails, the error is reported through `onPersistentSto
 
 #### When a write fails
 
-A persistence write that still fails after the recovery above is reported through `onPersistentStorageError` and dropped. In-memory store state is not affected and the app keeps working; the entry keeps its previous persisted value (or stays absent) until the store saves it again. See [Offline](./offline.md#queuing-mutations) for what this means for queued mutations.
+A persistence write that still fails after the recovery above is reported through `onPersistentStorageError` and dropped. In-memory store state is not affected and the app keeps working; the entry keeps its previous persisted value (or stays absent) until the store saves it again. See [Offline - Changes not stored on the device](./offline.md#changes-not-stored-on-the-device) for what this means for queued mutations.
 
 ### Custom async adapters
 

@@ -914,6 +914,7 @@ export function createDocumentStore<
           __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
             offlineOperationsForRuntime,
           ),
+          blockWindowClose,
         )
       : null;
 
