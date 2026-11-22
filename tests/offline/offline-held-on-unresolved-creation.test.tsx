@@ -1,6 +1,8 @@
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   createTasksEnv,
   network,
@@ -765,6 +767,44 @@ describe('tasks whose creation waits for a manual decision', () => {
     expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
 
     list.unmount();
+  });
+
+  test('after a restart, opening the screen of the waiting task shows it without fetching it from the server', async () => {
+    const sessionKey = 'open-unresolved-task-after-restart-session';
+    const storeName = 'open-unresolved-task-after-restart-store';
+    const { env: first, list } = await createTaskWhoseCreationKeepsFailing(
+      sessionKey,
+      storeName,
+    );
+    list.unmount();
+    first.apiStore.dispose();
+
+    // The app restarts online on the screen of the task: the task is restored
+    // from storage as stale data, which a screen normally refetches when it
+    // mounts
+    resetSessionForTests();
+    const env = createTasksEnv(sessionKey, storeName);
+    const taskScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Plan trip', {
+        selector: (task) => task?.name ?? null,
+      }),
+    );
+    await flushAllTimers();
+
+    // The server doesn't know the task until its creation is sent again, so
+    // it is not fetched: the screen shows the local task instead of a
+    // not-found error
+    expect(
+      env.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(pick(taskScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Plan trip'
+      error: null
+      status: 'success'
+    `);
+
+    taskScreen.unmount();
   });
 });
 

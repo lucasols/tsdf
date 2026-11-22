@@ -3992,7 +3992,29 @@ export function createListQueryStore<
     itemPayload: ItemPayload,
     options?: { fields?: FieldsInput },
   ): ScheduleFetchResults {
+    // The unsent creations are only known once the queued work is read, e.g.
+    // for a screen mounted at startup
+    if (offlineController && !offlineController.isHydrated()) {
+      const schedule = () => {
+        scheduleAutomaticFetchOfKnownItem(fetchType, itemPayload, options);
+      };
+      void offlineController.hydrateIfNeeded().then(schedule, schedule);
+      return 'scheduled';
+    }
+
+    return scheduleAutomaticFetchOfKnownItem(fetchType, itemPayload, options);
+  }
+
+  function scheduleAutomaticFetchOfKnownItem(
+    fetchType: FetchType,
+    itemPayload: ItemPayload,
+    options: { fields?: FieldsInput } | undefined,
+  ): ScheduleFetchResults {
     const itemKey = getItemKey(itemPayload);
+    // Only exists locally until its creation is confirmed, so the server
+    // doesn't know it yet
+    if (unsentCreationItemKeys.has(itemKey)) return 'skipped';
+
     const scheduler = getOrCreateItemScheduler(itemKey, itemPayload);
     const fields = normalizeFieldsOption(options?.fields);
 

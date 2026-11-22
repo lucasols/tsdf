@@ -2047,7 +2047,28 @@ export function createCollectionStore<
     fetchType: FetchType,
     payload: ItemPayload,
   ): void {
+    // The unsent creations are only known once the queued work is read, e.g.
+    // for a screen mounted at startup
+    if (offlineController && !offlineController.isHydrated()) {
+      const schedule = () => {
+        scheduleAutomaticFetchOfKnownItem(fetchType, payload);
+      };
+      void offlineController.hydrateIfNeeded().then(schedule, schedule);
+      return;
+    }
+
+    scheduleAutomaticFetchOfKnownItem(fetchType, payload);
+  }
+
+  function scheduleAutomaticFetchOfKnownItem(
+    fetchType: FetchType,
+    payload: ItemPayload,
+  ): void {
     const itemKey = getItemKey(payload);
+    // Only exists locally until its creation is confirmed, so the server
+    // doesn't know it yet
+    if (unsentCreationItemKeys.has(itemKey)) return;
+
     const scheduler = getScheduler(itemKey, payload);
     scheduler.scheduleFetch(itemKey, fetchType, payload);
   }

@@ -952,12 +952,12 @@ test('an offline creation that keeps its client-generated id shows the server va
     time  | user      |
     0     | -         | offline:createUser queued
     .     | "  Ada  " | [user] ui-initialized
-    1.01s | "  Ada  " | -- back online: the creation is replayed and the item revalidated
+    1s    | "  Ada  " | -- back online: the creation is replayed and the item revalidated
     .     | "  Ada  " | offline:createUser replay-started
-    2.21s | "  Ada  " | [users||client-1] server-data-changed (value: {"name":"Ada"})
+    2.2s  | "  Ada  " | [users||client-1] server-data-changed (value: {"name":"Ada"})
     .     | "  Ada  " | offline:createUser replay-finished
-    2.22s | "  Ada  " | 🔴 [users||client-1] >fetch-started
-    3.02s | "  Ada  " | 🔴 [users||client-1] <fetch-finished (value: {"name":"Ada"})
+    2.21s | "  Ada  " | 🔴 [users||client-1] >fetch-started
+    3.01s | "  Ada  " | 🔴 [users||client-1] <fetch-finished (value: {"name":"Ada"})
     .     | "Ada"     | [user] ui-changed
     "
   `);

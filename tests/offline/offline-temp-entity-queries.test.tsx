@@ -1192,7 +1192,7 @@ describe('temp entities with partial resources', () => {
       time   | list-items                  | list-status | new-user | new-user-status |
       0      | -                           | -           | -        | -               | -- restart the app offline with the details still open
       .      | Ada, Grace, Linus, Margaret | success     | Linus    | success         | [list-status, list-items, new-user-status, new-user] ui-initialized
-      10ms   | Ada, Grace, Linus, Margaret | success     | Linus    | success         | [list-status, list-status, new-user-status, new-user-status] ui-changed
+      10ms   | Ada, Grace, Linus, Margaret | success     | Linus    | success         | [list-status, list-status] ui-changed
       12s    | Ada, Grace, Linus, Margaret | success     | Linus    | success         | -- go online — the creates are saved one by one, then the store revalidates
       .      | Ada, Grace, Linus, Margaret | success     | Linus    | success         | offline:createUser replay-started
       13.2s  | Ada, Grace, Linus, Margaret | success     | Linus    | success         | [users||3] server-data-changed (value: {"id":3,"name":"Linus"})

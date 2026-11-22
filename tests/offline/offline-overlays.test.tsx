@@ -577,7 +577,7 @@ describe('collection overlays', () => {
       .     | null | yes     | deleted | [name, status, pending] ui-changed
       .     | null | yes     | deleted | offline:deleteItem queued
       .     | null | yes     | deleted | -- reconnect — stale refetch must not resurrect the deleted item
-      .     | null | yes     | deleted | [users||1] scheduled-fetch-triggered
+      .     | null | yes     | deleted | [users||1] scheduled-fetch-coalesced
       .     | null | yes     | deleted | offline:deleteItem replay-started
       10ms  | null | yes     | deleted | 🔴 [users||1] >fetch-started
       810ms | null | yes     | deleted | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})

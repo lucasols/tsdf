@@ -10,6 +10,7 @@ import {
   pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   createStoreManagerForSession,
   createTasksAndCommentsEnv,
@@ -1170,6 +1171,44 @@ describe('collection items', () => {
     `);
 
     note.unmount();
+  });
+
+  test('after a restart, opening the screen of a note created offline shows it without fetching it from the server', async () => {
+    const sessionKey = 'open-unsent-note-after-restart-session';
+    const storeName = 'open-unsent-note-after-restart-store';
+    network.setOffline();
+    const first = createNotesEnv(sessionKey, storeName);
+    await first.createNote('Ideas');
+    await flushAllTimers();
+    first.apiStore.dispose();
+
+    // The app restarts online on the screen of the note: the note is restored
+    // from storage as stale data, which a screen normally refetches when it
+    // mounts
+    resetSessionForTests();
+    network.setOnline();
+    const env = createNotesEnv(sessionKey, storeName);
+    const noteScreen = renderHook(() =>
+      env.apiStore.useItem('temp:Ideas', {
+        selector: (item) => item?.value.name ?? null,
+      }),
+    );
+    await flushAllTimers();
+
+    // The server doesn't know the note until its creation is confirmed, so it
+    // is not fetched: the screen shows the local note instead of a not-found
+    // error
+    expect(
+      env.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(pick(noteScreen.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+      data: 'Ideas'
+      error: null
+      status: 'success'
+    `);
+
+    noteScreen.unmount();
   });
 });
 
