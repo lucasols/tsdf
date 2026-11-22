@@ -305,6 +305,11 @@ export function createMutationApi<
   onItemMutationsEnd: () => void,
   /** Offline creations not sent yet: local-only items that cannot be refetched. */
   unsentCreationItemKeys: ReadonlySet<string>,
+  /**
+   * Whether queries that are not in memory may have a copy in persistent
+   * storage, which optimistic list updates must not replace.
+   */
+  hasPersistentStorage: boolean,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -1327,6 +1332,13 @@ export function createMutationApi<
       deferredOptimisticQueryInvalidationsStack[
         deferredOptimisticQueryInvalidationsStack.length - 1
       ];
+    // Resolved before the draft is created: a filter reads the saved queries
+    // that are not in memory, and with sync storage that loads them into the
+    // state, so the draft must already include them
+    const rulesWithQueries = optimisticListUpdates.map((rule) => ({
+      rule,
+      relatedFilterQueries: getQueriesKeyArray(rule.queries),
+    }));
 
     store.produceState((draftState) => {
       for (const { itemKey, payload: itemPayload } of items) {
@@ -1352,14 +1364,9 @@ export function createMutationApi<
         };
 
         for (const {
-          queries,
-          filterItem,
-          appendNewTo = 'end',
-          invalidateQueries,
-          sort,
-        } of optimisticListUpdates) {
-          const relatedFilterQueries = getQueriesKeyArray(queries);
-
+          rule: { filterItem, appendNewTo = 'end', invalidateQueries, sort },
+          relatedFilterQueries,
+        } of rulesWithQueries) {
           for (const { key: queryKey, payload } of relatedFilterQueries) {
             const queryState = draftState.queries[queryKey];
 
@@ -1389,6 +1396,12 @@ export function createMutationApi<
               if (itemShouldBeIncluded === null) continue;
 
               if (itemShouldBeIncluded) {
+                // A query only in persistent storage (not loaded yet, being
+                // loaded, or evicted from memory) would be replaced by a list
+                // with only this item. It is left as is: a query restored from
+                // storage is refetched when it is used.
+                if (!queryState && hasPersistentStorage) continue;
+
                 captureAndLockOptimisticMutationQuery(queryKey);
 
                 if (!queryState) {
