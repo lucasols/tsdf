@@ -275,12 +275,35 @@ Optional replay behavior:
 - `getServerSnapshot(ctx)` - Loads fresh server state before replay checks.
 - `shouldSkipSync(ctx)` - Drops queued work when the server already reflects it.
 - `conflictHandling` - Detects conflicts and creates manual resolution records.
-- `accumulation` - Merges newer queued inputs into an existing queued mutation.
+- `accumulation` - Merges newer queued inputs into an existing queued mutation. See [Accumulating queued mutations](#accumulating-queued-mutations).
 - `supersedes` - Prunes older queued work for the same entity.
 
 Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up and sends or resolves them. Apps are expected to reload tabs running an old deploy: TSDF doesn't coordinate the order of offline work between deploys, so an old tab can send its own edits around the work it keeps. Records of an operation removed from the app for good also stay in storage until the session's storage is cleared (`clearSessionStorage`), so keep an operation defined until its queued work is likely gone.
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
+
+### Accumulating Queued Mutations
+
+With `accumulation`, a mutation is merged into the newest queued mutation of the same operation and entity refs that was never sent, so the server receives one request instead of one per edit. `mergeInput` combines the inputs, and the optional `canMerge` refuses a merge, which queues the incoming mutation as a separate entry sent after the existing one. Use it when some edits must reach the server as separate requests, e.g. edits of a record made with different permission contexts:
+
+```ts
+updateRecord: {
+  inputSchema: updateRecordInputSchema,
+  kind: 'update',
+  getEntityRefs: ({ input }) => [input.recordId],
+  accumulation: {
+    canMerge: ({ existingInput, incomingInput }) =>
+      existingInput.permissionCtx === incomingInput.permissionCtx,
+    mergeInput: ({ existingInput, incomingInput }) => ({
+      ...incomingInput,
+      fields: { ...existingInput.fields, ...incomingInput.fields },
+    }),
+  },
+  execute: ({ input }) => api.updateRecord(input),
+},
+```
+
+Only the newest queued mutation is a merge candidate. When it is refused, the incoming mutation is not merged into an older one either, since that would send it before the newer work: a table edit, an app block edit and another table edit are sent as three requests, in that order. Later mutations can merge into the separate entry.
 
 ### Temp Entities in List Queries
 
@@ -427,7 +450,7 @@ While the creation of an entity made offline waits for a resolution, the server 
 
 They follow the decision about the creation: `retry` (default scope) sends the creation again and then the blocked mutations with the server id, `discard` drops them with the creation. For a creation that hit a conflict, `requeue` sends them after the new creation, and `commit` sends them with the ref of the entity the result keeps. A `requeue` that creates other items than the original creation (e.g. a new client-generated id after an "id already taken" conflict) does not send them: they stay as resolutions of their own for the user to decide. This includes a delete with `dropSelfIfTempLifecycleCancelled`: the creation may have reached the server, so it is not cancelled locally; the delete is sent after the creation is retried, or dropped when it is discarded.
 
-A blocked mutation was never sent, so a later mutation of the same entity treats it like an unsent queued one: an `accumulation` operation merges into it, and a `supersedes` operation prunes it. This keeps the order the user made the changes in, e.g. moving a task under the waiting entity and then back under a server task sends only the second move, and retrying the creation does not move the task again. When the merged input no longer depends on the waiting entity, it is queued and sent right away. To make this possible, an online mutation of such an operation for an entity with blocked work is queued instead of sent directly. A mutation of an operation with neither `accumulation` nor `supersedes` does not touch the blocked one: it is sent first, and the blocked one is sent after it once the creation is retried.
+A blocked mutation was never sent, so a later mutation of the same entity treats it like an unsent queued one: an `accumulation` operation merges into it (unless `canMerge` refuses), and a `supersedes` operation prunes it. This keeps the order the user made the changes in, e.g. moving a task under the waiting entity and then back under a server task sends only the second move, and retrying the creation does not move the task again. When the merged input no longer depends on the waiting entity, it is queued and sent right away. To make this possible, an online mutation of such an operation for an entity with blocked work is queued instead of sent directly. A mutation of an operation with neither `accumulation` nor `supersedes` does not touch the blocked one: it is sent first, and the blocked one is sent after it once the creation is retried.
 
 When the merged input still depends on the waiting entity, the changes merged into it go with the decision about the creation too: discarding the creation also drops them, e.g. a rename of a server task merged into its held move under the waiting entity.
 

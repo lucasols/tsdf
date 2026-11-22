@@ -4304,13 +4304,20 @@ export function createOfflineStoreController<
             entries: workingQueue.values(),
           });
       const existingWork = heldResolution ?? existingEntry;
+      const mergeContext = existingWork && {
+        sessionKey: current.sessionKey,
+        existingInput: existingWork.input,
+        incomingInput: validatedInput,
+      };
 
-      if (existingWork) {
-        const mergedInput = await operation.accumulation.mergeInput({
-          sessionKey: current.sessionKey,
-          existingInput: existingWork.input,
-          incomingInput: validatedInput,
-        });
+      // A refused merge queues the incoming mutation as a separate entry
+      // after the existing work.
+      if (
+        mergeContext &&
+        operation.accumulation.canMerge?.(mergeContext) !== false
+      ) {
+        const mergedInput =
+          await operation.accumulation.mergeInput(mergeContext);
         const validatedMergedInput = validateWithSchema(
           operation.inputSchema,
           mergedInput,

@@ -1161,6 +1161,20 @@ export type OfflineAccumulationConfig<TInput> = {
   mergeInput: (
     ctx: OfflineAccumulationMergeContext<TInput>,
   ) => Promise<TInput> | TInput;
+  /**
+   * Whether the incoming mutation may be merged into the existing one. Return
+   * `false` to queue the incoming mutation as a separate entry, sent after the
+   * existing one (e.g. edits of the same record made with different
+   * permissions, which the server must receive as separate requests).
+   *
+   * Only the newest queued mutation of the operation for the same entity is a
+   * merge candidate: when it is refused, the incoming mutation is not merged
+   * into an older one either, since that would send it before the newer work.
+   * Later mutations can still merge into the separate entry.
+   *
+   * Omit it to always merge.
+   */
+  canMerge?: (ctx: OfflineAccumulationMergeContext<TInput>) => boolean;
 };
 
 /**
