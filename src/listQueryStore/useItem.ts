@@ -27,7 +27,8 @@ export type UseItemOptions<
    * refresh succeeds or fails, even when cached data exists. `true` refreshes
    * on every mount, so use it sparingly. `'ifFromStorage'` only refreshes
    * while the cached item was restored from persistent storage and not
-   * refreshed from the server yet in this tab. Cannot be combined with
+   * refreshed from the server yet in this tab. `'ifFromStorage'` is not
+   * supported with `partialResources`. Cannot be combined with
    * `debouncePayload`.
    */
   requireFreshData?: RequireFreshData;

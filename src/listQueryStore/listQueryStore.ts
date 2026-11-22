@@ -144,6 +144,7 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type PartialResourcesConfig,
+  type PartialResourcesHookOptions,
   type QueryFetchPayload,
   type TSDFItemQuery,
   type TSFDListQuery,
@@ -453,7 +454,7 @@ type ListQueryUseListQueryApi<
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
       ? [
           options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> &
-            FieldsOption<true>,
+            PartialResourcesHookOptions,
         ]
       : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
   ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
@@ -486,7 +487,10 @@ type ListQueryUseItemApi<
   <Selected = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
-      ? [options: UseItemOptions<ItemState, Selected> & FieldsOption<true>]
+      ? [
+          options: UseItemOptions<ItemState, Selected> &
+            PartialResourcesHookOptions,
+        ]
       : [options?: UseItemOptions<ItemState, Selected>]
   ): TSFDUseListItemReturn<Selected, ItemPayload>;
 };
@@ -3644,7 +3648,7 @@ export function createListQueryStore<
       ...args: ListQueryHasPartialResources<TPartialResources> extends true
         ? [
             options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> &
-              FieldsOption<true>,
+              PartialResourcesHookOptions,
           ]
         : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
     ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
@@ -3731,7 +3735,10 @@ export function createListQueryStore<
     <Selected = ItemState | null>(
       itemPayload: ItemPayload | false | null | undefined,
       ...args: ListQueryHasPartialResources<TPartialResources> extends true
-        ? [options: UseItemOptions<ItemState, Selected> & FieldsOption<true>]
+        ? [
+            options: UseItemOptions<ItemState, Selected> &
+              PartialResourcesHookOptions,
+          ]
         : [options?: UseItemOptions<ItemState, Selected>]
     ): TSFDUseListItemReturn<Selected, ItemPayload>;
   } = function useItem<Selected = ItemState | null>(

@@ -82,8 +82,14 @@ const doc = docContentStore.useItem(docId, {
   its rows, so opening one of them with `useItem` does not fetch again. A
   `loadMore` in offset pagination mode only appends rows, so it does not mark
   the query as refreshed, and rows appended from storage mark the query as
-  restored again. With [partial resources](./partial-resources.md), only a
-  fetch of all fields (`'*'`) marks an item as refreshed.
+  restored again.
+- List query stores with [partial resources](./partial-resources.md) don't
+  support `'ifFromStorage'` (a type error), because restored data is tracked
+  per item and query, not per field. Use `true` there.
+- Only the exact query is tracked. A `useListQuery` result derived from other
+  queries with [`derivedQueries`](./list-query-store.md#derived-queries) shows
+  their rows without checking whether they were restored, so use `true` when a
+  derived view must be fresh.
 - Cross-tab snapshots and `updateState`/`updateItemState` changes don't mark
   restored data as refreshed, because they can be based on restored data too.
 - Mounts that find a refresh of the restored data in flight wait for it

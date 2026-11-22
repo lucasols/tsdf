@@ -27,8 +27,10 @@ export type UseListQueryOptions<
    * refresh succeeds or fails, even when cached data exists. `true` refreshes
    * on every mount, so use it sparingly. `'ifFromStorage'` only refreshes
    * while the cached query was restored from persistent storage and not
-   * refreshed from the server yet in this tab. Cannot be combined with
-   * `debouncePayload`.
+   * refreshed from the server yet in this tab. `'ifFromStorage'` only tracks
+   * the exact query: a result derived with `derivedQueries` isn't checked, so
+   * use `true` when it must be fresh. `'ifFromStorage'` is not supported with
+   * `partialResources`. Cannot be combined with `debouncePayload`.
    */
   requireFreshData?: RequireFreshData;
   /**

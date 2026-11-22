@@ -69,7 +69,9 @@ export function isStrictItemKeyPrefix(
  * - `'ifFromStorage'`: behaves like `true` only while the cached data was
  *   restored from persistent storage and was not refreshed from the server
  *   yet in this tab. Data already fresh in memory keeps the normal cache
- *   behavior: no forced fetch and no `loading` status.
+ *   behavior: no forced fetch and no `loading` status. List query stores with
+ *   `partialResources` don't support it. A list query result derived with
+ *   `derivedQueries` isn't checked, so use `true` when it must be fresh.
  * - `false` (default): normal cache behavior.
  */
 export type RequireFreshData = boolean | 'ifFromStorage';
