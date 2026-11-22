@@ -489,6 +489,34 @@ type CollectionOfflineMutationArgs<
   upload?: OfflineMutationUploadsInput;
 };
 
+/**
+ * {@link CollectionOfflineMutationArgs} whose `offline` descriptor may be
+ * `undefined`, for calls that only queue offline in some cases.
+ */
+type CollectionOptionalOfflineMutationArgs<
+  T,
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
+    ItemState,
+    ItemPayload
+  >,
+> = CollectionMutationArgsBase<T, ItemPayload> & {
+  /**
+   * Queues this mutation through the store's registered offline operation when
+   * the session is offline or the direct request fails with an offline outage.
+   * `undefined` runs it as a plain online mutation.
+   */
+  offline: TOfflineOperations extends null
+    ? never
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+  /**
+   * Files to attach if this mutation is queued for offline replay. Ignored
+   * when `offline` is `undefined`.
+   */
+  upload?: OfflineMutationUploadsInput;
+};
+
 type CollectionPerformMutation<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -574,11 +602,21 @@ type CollectionPerformMutation<
       StoreMutationError | MutationSkipped
     >
   >;
+  /**
+   * Runs a collection mutation whose `offline` descriptor may be `undefined`
+   * (`offline: descriptor | undefined`), so one call covers mutations that
+   * only queue offline in some cases. Pass `null` when there is no current
+   * item target; optimistic updates then receive no payload.
+   *
+   * The success value is the direct server result when `offline` is
+   * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
+   * `{ kind: 'queued' }`) otherwise.
+   */
   <T>(
     payload: CollectionMutationPayload<ItemPayload>,
     args:
       | CollectionOnlineMutationArgs<T, ItemPayload>
-      | CollectionOfflineMutationArgs<
+      | CollectionOptionalOfflineMutationArgs<
           T,
           ItemState,
           ItemPayload,
@@ -2459,7 +2497,7 @@ export function createCollectionStore<
     payload: CollectionMutationPayload<ItemPayload>,
     args:
       | CollectionOnlineMutationArgs<T, ItemPayload>
-      | CollectionOfflineMutationArgs<
+      | CollectionOptionalOfflineMutationArgs<
           T,
           ItemState,
           ItemPayload,
@@ -2485,7 +2523,7 @@ export function createCollectionStore<
       upload,
     }:
       | CollectionOnlineMutationArgs<T, ItemPayload>
-      | CollectionOfflineMutationArgs<
+      | CollectionOptionalOfflineMutationArgs<
           T,
           ItemState,
           ItemPayload,

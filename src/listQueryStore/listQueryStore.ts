@@ -598,6 +598,36 @@ type ListQueryOfflineMutationArgs<
   upload?: OfflineMutationUploadsInput;
 };
 
+/**
+ * {@link ListQueryOfflineMutationArgs} whose `offline` descriptor may be
+ * `undefined`, for calls that only queue offline in some cases.
+ */
+type ListQueryOptionalOfflineMutationArgs<
+  T,
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >,
+> = ListQueryMutationArgsBase<T, ItemState, QueryPayload, ItemPayload> & {
+  /**
+   * Queues this mutation through the store's registered offline operation when
+   * the session is offline or the direct request fails with an offline outage.
+   * `undefined` runs it as a plain online mutation.
+   */
+  offline: TOfflineOperations extends null
+    ? never
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+  /**
+   * Files to attach if this mutation is queued for offline replay. Ignored
+   * when `offline` is `undefined`.
+   */
+  upload?: OfflineMutationUploadsInput;
+};
+
 type ListQueryPerformMutationApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -687,11 +717,21 @@ type ListQueryPerformMutationApi<
       StoreMutationError | MutationSkipped
     >
   >;
+  /**
+   * Runs a list-query mutation whose `offline` descriptor may be `undefined`
+   * (`offline: descriptor | undefined`), so one call covers mutations that
+   * only queue offline in some cases. Pass `null` when there is no current
+   * item target; optimistic updates then receive no payload.
+   *
+   * The success value is the direct server result when `offline` is
+   * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
+   * `{ kind: 'queued' }`) otherwise.
+   */
   <T>(
     payload: ListQueryMutationPayload<ItemState, ItemPayload>,
     args:
       | ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>
-      | ListQueryOfflineMutationArgs<
+      | ListQueryOptionalOfflineMutationArgs<
           T,
           ItemState,
           QueryPayload,
