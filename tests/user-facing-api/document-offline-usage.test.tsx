@@ -214,6 +214,7 @@ test('direct document store runtime offline controls public api', async () => {
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
     isLeader: '✅'
+    isNetworkDetectedOffline: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
@@ -239,6 +240,7 @@ test('direct document store runtime offline controls public api', async () => {
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
     isLeader: '✅'
+    isNetworkDetectedOffline: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
@@ -273,6 +275,7 @@ test('direct document store runtime offline controls public api', async () => {
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
     isLeader: '✅'
+    isNetworkDetectedOffline: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
@@ -630,6 +633,7 @@ test('direct document store offline public api', async () => {
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
     isLeader: '✅'
+    isNetworkDetectedOffline: '❌'
     isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
@@ -791,6 +795,7 @@ test('direct document store offline public api', async () => {
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
     isLeader: '✅'
+    isNetworkDetectedOffline: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
@@ -934,6 +939,7 @@ test('direct document store offline public api', async () => {
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
     isLeader: '✅'
+    isNetworkDetectedOffline: '❌'
     isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null

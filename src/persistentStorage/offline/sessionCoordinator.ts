@@ -466,6 +466,7 @@ export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
     outage: { enabled: false, active: false },
     isOfflineMode: false,
     isForcedOffline: false,
+    isNetworkDetectedOffline: false,
     isLeader: true,
     updatedAt: Date.now(),
     lastFailureAt: null,
@@ -531,6 +532,8 @@ function normalizePersistedOfflineStatus(
       outage,
       isOfflineMode,
       isForcedOffline: compactStatus.f === COMPACT_OFFLINE_STATUS_FLAG,
+      // Not persisted: the coordinator stamps its own detection on it
+      isNetworkDetectedOffline: false,
       isLeader: true,
       updatedAt:
         typeof compactStatus.u === 'number' ? compactStatus.u : Date.now(),
@@ -979,6 +982,12 @@ class SessionOfflineCoordinator {
    * the first operations after a reload are already treated as offline.
    */
   #forcedOffline = false;
+  /**
+   * Last answer of this tab's network detection, reported as
+   * `status.isNetworkDetectedOffline` whatever the session gate or the mode
+   * enablement say.
+   */
+  #networkDetectedOffline = false;
   /** Last value of the session gate applied to the status. */
   #appliedSessionEnabled = true;
   /**
@@ -2220,6 +2229,40 @@ class SessionOfflineCoordinator {
       this.#browserReportsOnline();
   }
 
+  /**
+   * Keeps the answer of a network detection for `isNetworkDetectedOffline`,
+   * unless a newer detection started meanwhile. Sessions without
+   * `offlineSession.network` don't report it.
+   */
+  #setNetworkDetectedOffline(token: number, detectedOffline: boolean): void {
+    if (!this.#canonicalConfig.hasNetworkConfig) return;
+    if (token !== this.#networkStateToken) return;
+
+    this.#networkDetectedOffline = detectedOffline;
+  }
+
+  /**
+   * Writes a change of `isNetworkDetectedOffline` the detection did not write
+   * with a mode change. Neither persisted nor published: each tab reports its
+   * own detection.
+   */
+  #syncNetworkDetectedStatus(): void {
+    const status = this.store.state.status;
+    if (status.isNetworkDetectedOffline === this.#networkDetectedOffline) {
+      return;
+    }
+
+    this.store.setPartialState(
+      {
+        status: this.#stampLocalStatus({
+          ...status,
+          isNetworkDetectedOffline: this.#networkDetectedOffline,
+        }),
+      },
+      { action: 'offline-session-status' },
+    );
+  }
+
   #handleConnectivityChange(
     wasEffectivelyOffline: boolean,
     wasReplayBlocked: boolean,
@@ -2310,17 +2353,37 @@ class SessionOfflineCoordinator {
   async refreshNetworkState(): Promise<boolean> {
     const sessionEnabled = this.#syncSessionGate();
     const token = ++this.#networkStateToken;
+    // A closed session gate ignores network detection: it only keeps
+    // `isNetworkDetectedOffline` up to date, without holding back the fetch or
+    // mutation that asked for the refresh, even when the detection fails
+    if (!sessionEnabled) {
+      if (!this.#canonicalConfig.hasNetworkConfig) return false;
 
-    // A closed session gate ignores network detection
-    if (!sessionEnabled) return false;
+      let detection: boolean | Promise<boolean>;
+      try {
+        detection = this.#getCurrentOfflineState();
+      } catch {
+        return false;
+      }
+      if (typeof detection === 'boolean') {
+        this.#setNetworkDetectedOffline(token, detection);
+        this.#syncNetworkDetectedStatus();
+      } else {
+        detection.then((detectedOffline) => {
+          this.#setNetworkDetectedOffline(token, detectedOffline);
+          this.#syncNetworkDetectedStatus();
+        }, noop);
+      }
+      return false;
+    }
 
-    const detectedOffline = this.#getCurrentOfflineState();
-    const isOffline = this.#applyRefreshedNetworkState(
-      token,
-      typeof detectedOffline === 'boolean'
-        ? detectedOffline
-        : await detectedOffline,
-    );
+    const detection = this.#getCurrentOfflineState();
+    const detectedOffline =
+      typeof detection === 'boolean' ? detection : await detection;
+    // Set before the detection is applied, so the status it writes carries it
+    this.#setNetworkDetectedOffline(token, detectedOffline);
+    const isOffline = this.#applyRefreshedNetworkState(token, detectedOffline);
+    this.#syncNetworkDetectedStatus();
 
     // The gate has reopened: once the network detection confirms the session
     // is online, mutations queued before it closed can be replayed
@@ -2637,6 +2700,7 @@ class SessionOfflineCoordinator {
     const initial = this.#getCurrentOfflineState();
 
     if (typeof initial === 'boolean') {
+      this.#networkDetectedOffline = initial;
       this.setNetworkActive(initial, { classified: false });
     }
   }
@@ -3626,6 +3690,9 @@ class SessionOfflineCoordinator {
       ...gatedStatus,
       isOfflineMode,
       isForcedOffline: this.#forcedOffline,
+      // This tab's own detection, never the one of a remote or persisted
+      // status
+      isNetworkDetectedOffline: this.#networkDetectedOffline,
     });
   }
 

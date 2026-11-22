@@ -1800,3 +1800,57 @@ test('disabling runtime network support preserves the compact persisted status f
       u: 1735689600000
   `);
 });
+
+test('with network mode disabled at runtime, the status still reports the connectivity the browser detects', async () => {
+  const sessionKey = 'runtime-disabled-network-connectivity';
+  const { storeManager } = createManagedOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
+  const statusChanges = createLoggerStore();
+
+  // -- The user turns "work offline" off: the session stays online --
+  storeManager
+    .setOfflineRuntimeConfig({ network: { enabled: false } })
+    .unwrap();
+
+  statusChanges.addMark('Browser goes offline');
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+  statusChanges.add(
+    pick(storeManager.getOfflineStatus(), [
+      'isNetworkDetectedOffline',
+      'isOfflineMode',
+      'network',
+    ]),
+  );
+
+  statusChanges.addMark('Browser reconnects');
+  act(() => {
+    network.goOnline();
+  });
+  await Promise.resolve();
+  statusChanges.add(
+    pick(storeManager.getOfflineStatus(), [
+      'isNetworkDetectedOffline',
+      'isOfflineMode',
+      'network',
+    ]),
+  );
+
+  // Offline mode is never entered, but the lost connection is still reported
+  expect(statusChanges.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> Browser goes offline
+
+    -> isNetworkDetectedOffline: ✅ ⋅ isOfflineMode: ❌ ⋅ network: {enabled:❌, active:❌}
+
+    >>> Browser reconnects
+
+    -> isNetworkDetectedOffline: ❌ ⋅ isOfflineMode: ❌ ⋅ network: {enabled:❌, active:❌}
+    "
+  `);
+});

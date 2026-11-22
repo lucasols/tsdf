@@ -631,6 +631,7 @@ describe('collection', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000
       lastRecoveryCheckAt: null
@@ -1066,6 +1067,7 @@ describe('list-query', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000
       lastRecoveryCheckAt: null

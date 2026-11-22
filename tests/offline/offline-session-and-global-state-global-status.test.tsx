@@ -320,6 +320,7 @@ test('global offline status is shared across stores in the same session', async 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
     isLeader: '✅'
+    isNetworkDetectedOffline: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null

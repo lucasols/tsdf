@@ -507,6 +507,22 @@ Each store also exposes scoped APIs:
 
 List-query stores additionally expose `usePendingOfflineItems(...)`, which returns pending creates/updates and pending deletes without mounting or fetching a query. Its `selector` receives each item's [per-item state](#per-item-state) as a third argument, so a "pending changes" list can tell items created offline (`isUnsentCreation`) from edited ones without reading `useOfflineEntities()`.
 
+### Connection state
+
+`status.isOfflineMode` tells whether the session is in offline mode, and `status.network.active` / `status.outage.active` which cause put it there. `status.isNetworkDetectedOffline` is what the network detection (`network.getIsOffline`, or `navigator.onLine` by default, and [forced offline mode](#forced-offline-mode)) last reported, whether or not the session follows it (forced offline mode only counts while network mode is enabled and the session gate is open). It is also reported while the [session gate](#session-gate) is closed or network mode is disabled, so the same status can drive both the offline mode UI and a "no connection" banner for users without offline mode:
+
+```tsx
+const status = storeManager.useOfflineStatus();
+
+const showNoConnection =
+  status.isNetworkDetectedOffline && !status.isOfflineMode;
+```
+
+- It requires `offlineSession.network`, and is always `false` without it or while there is no active session key.
+- It is updated on the browser `online` / `offline` events (unless `network.listenToBrowserEvents` is `false`) and before fetches and mutations.
+- A failure classified as `network` (by `classifyFailure` or the [health check](#health-check)) does not change it: it only activates `network.active`.
+- It is local to the tab: it is not persisted nor shared with the other tabs of the session.
+
 ### Per-item state
 
 Collection and list-query stores expose `useItemOfflineState(itemPayload)` / `getItemOfflineState(itemPayload)` for per-row UI such as sync badges. They return `null` when the item has nothing queued, otherwise `{ syncState, pendingMutations, requiresResolution, isUnsentCreation, creationAttempted }`:
@@ -569,7 +585,7 @@ const storeManager = createStoreManager({
 
 While it returns `false` the session behaves as if no offline session existed:
 
-- it never enters offline mode: network detection is ignored and neither `classifyFailure` nor `healthCheck` is called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled
+- it never enters offline mode: network detection is ignored and neither `classifyFailure` nor `healthCheck` is called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled. `isNetworkDetectedOffline` still reports the connectivity the network detection sees (see [Connection state](#connection-state)), so the app can show a "no connection" state without reading `navigator.onLine` itself. For that, `network.getIsOffline` keeps being called on every fetch, mutation and status read, so a `getIsOffline` that pings a server keeps sending those requests while the gate is closed
 - fetches always go to the network and fail with their normal errors
 - mutations with an `offline` descriptor run as plain online mutations (see [Queuing Mutations](#queuing-mutations))
 

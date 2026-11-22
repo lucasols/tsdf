@@ -294,6 +294,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000
       lastRecoveryCheckAt: null
@@ -363,6 +364,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: null
@@ -392,6 +394,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: null
@@ -461,6 +464,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: null
@@ -490,6 +494,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: null
@@ -574,6 +579,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: 1735689601210
@@ -728,6 +734,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: 1735689601224
@@ -1006,6 +1013,7 @@ describe('document', () => {
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
       isForcedOffline: '❌'
       isLeader: '✅'
+      isNetworkDetectedOffline: '❌'
       isOfflineMode: '❌'
       lastFailureAt: null
       lastRecoveryCheckAt: null

@@ -1809,6 +1809,40 @@ test('a tab whose own connectivity check fails stays offline until that check pa
   `);
 });
 
+test('a "no connection" detected in one tab is not shown in the other tabs nor after a reload', async () => {
+  // The app's connectivity check also requires the tab's realtime connection,
+  // which each tab opens on its own: tab A's is down, tab B's is up.
+  const tabB = await openTab('B', { focused: false });
+  const tabA = await openTab('A', {
+    focused: true,
+    network: { getIsOffline: () => true },
+  });
+  // Tab A queues an edit offline, so its offline status reaches the other
+  // tabs and the persisted session
+  await tabA.queueEdit(2);
+  await advanceTime(1_000);
+
+  function describeConnection(...tabs: Tab[]) {
+    return tabs.map(
+      (tab) =>
+        `tab ${tab.name}: ${tab.storeManager.getOfflineStatus().isNetworkDetectedOffline ? 'no connection' : 'connected'}`,
+    );
+  }
+
+  // Each tab reports what its own check sees: tab B keeps showing it is
+  // connected even after receiving tab A's offline status
+  expect(describeConnection(tabA, tabB)).toMatchInlineSnapshot(
+    `['tab A: no connection', 'tab B: connected']`,
+  );
+
+  // A tab opened later (e.g. a reload) restores the persisted session, but
+  // not tab A's detection: its own check sees the connection
+  const tabC = await openTab('C', { focused: false });
+  expect(describeConnection(tabC)).toMatchInlineSnapshot(
+    `['tab C: connected']`,
+  );
+});
+
 test('the tab that created an item offline learns its final id when another tab sends it', async () => {
   network.setOffline();
   const tabA = await openUsersTab('A', { focused: true });
