@@ -348,6 +348,22 @@ export type OptimisticListUpdate<
        * and must be read while `filterItem` is running.
        */
       readonly isInQuery: boolean;
+      /**
+       * Item state before the `updateItemState` / `addItemToState` call that
+       * triggered this rule, or `null` when the item was not in the store
+       * (e.g. a new item). Compare it with `item` to tell what changed.
+       */
+      readonly previousItem: ItemState | null;
+      /**
+       * Payloads of the cached queries that listed the item before the
+       * `updateItemState` / `addItemToState` call that triggered this rule.
+       * Being in a similar query tells the item matched the filters that the
+       * client can't evaluate, e.g. a moved item keeps the server-only filters
+       * of the list it left. Queries only in persistent storage are not
+       * included. Computed on first read, so it costs nothing when unused,
+       * and must be read while `filterItem` is running.
+       */
+      readonly previousQueries: readonly QueryPayload[];
     },
   ) => boolean | null;
   /** Where newly matching items should be inserted in affected query pages. */

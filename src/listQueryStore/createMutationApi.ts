@@ -1307,8 +1307,14 @@ export function createMutationApi<
     };
   }
 
+  /**
+   * `previousState` is the store state before the `updateItemState` /
+   * `addItemToState` call, which immer leaves untouched, so the `filterItem`
+   * context can read the previous item and query membership without copies.
+   */
   function applyOptimisticListUpdates(
     items: { itemKey: string; payload: ItemPayload }[],
+    previousState: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
   ) {
     if (!optimisticListUpdates) return;
 
@@ -1324,6 +1330,23 @@ export function createMutationApi<
         const item = draftState.items[itemKey];
 
         if (!item) continue;
+
+        const previousItem = previousState.items[itemKey] ?? null;
+        // Scans every cached query, so it runs at most once per item and only
+        // when a rule reads `context.previousQueries`
+        let previousQueries: QueryPayload[] | undefined;
+        const getPreviousQueries = () => {
+          if (previousQueries) return previousQueries;
+
+          previousQueries = [];
+          for (const query of Object.values(previousState.queries)) {
+            if (query.items.includes(itemKey)) {
+              previousQueries.push(query.payload);
+            }
+          }
+
+          return previousQueries;
+        };
 
         for (const {
           queries,
@@ -1353,6 +1376,10 @@ export function createMutationApi<
                 itemPayload,
                 get isInQuery() {
                   return getItemIndex() !== -1;
+                },
+                previousItem,
+                get previousQueries() {
+                  return getPreviousQueries();
                 },
               });
 
@@ -1544,6 +1571,7 @@ export function createMutationApi<
 
     let someItemWasUpdated = false;
     const updatedItemKeys = new Set<string>();
+    const previousState = store.state;
 
     store.batch(
       () => {
@@ -1564,7 +1592,7 @@ export function createMutationApi<
         });
 
         if (someItemWasUpdated) {
-          applyOptimisticListUpdates(itemKeys);
+          applyOptimisticListUpdates(itemKeys, previousState);
         }
 
         if (options.ifNothingWasUpdated && !someItemWasUpdated) {
@@ -1601,6 +1629,7 @@ export function createMutationApi<
     loadedFields?: ItemLoadedFields,
   ) {
     const itemKey = getItemKey(itemPayload);
+    const previousState = store.state;
 
     store.batch(() => {
       store.produceState(
@@ -1650,7 +1679,10 @@ export function createMutationApi<
         { action: 'create-item-state' },
       );
 
-      applyOptimisticListUpdates([{ itemKey, payload: itemPayload }]);
+      applyOptimisticListUpdates(
+        [{ itemKey, payload: itemPayload }],
+        previousState,
+      );
     });
 
     publishItemSnapshot(itemKey);
