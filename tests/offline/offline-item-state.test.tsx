@@ -544,8 +544,9 @@ describe('list-query rows', () => {
     // - While the creation is sent the selector runs again with
     //   `creationAttempted: true`: the server may already have Margaret.
     // - Once the server assigns `users||4` the creation leaves the panel (the
-    //   hook reports an equal list once more while the final row replaces the
-    //   temp one), then Ada's rename syncs and the panel empties.
+    //   hook reports an equal `items` list once more because the temp row is
+    //   briefly in `deletedItems` while the final row replaces it), then Ada's
+    //   rename syncs and the panel empties.
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
       -> panel: no pending changes
