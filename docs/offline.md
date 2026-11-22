@@ -113,6 +113,8 @@ The mutation promise resolves only after the queue write has settled, so a mutat
 
 Without an active offline session — `getSessionKey()` returns `false`, or the [session gate](#session-gate) is closed — the same call runs as a plain online mutation: `mutation` is called, a success resolves with `{ kind: 'online', data }`, and a failure goes through the normal error handling (optimistic update rolled back, `onMutationError` called). Nothing is queued.
 
+Queued work belongs to the session key it was queued in. When `getSessionKey()` changes without a reload (logout, or switching to another org or tenant), the replay of the previous session stops before its next step: TSDF does not start uploads of that session, call its `getServerSnapshot` / `shouldSkipSync` / `detectConflict` hooks, or call its `execute`. The entry being replayed stays queued as it was (no failed attempt, no resolution), and it is replayed once that session key is active again. A request `execute` already sent, or an upload transport already running, cannot be recalled: an upload that finishes is kept for that session, and one that fails after the switch does not count as a failure of the operation. The upload transport receives the `sessionKey` that owns the upload, so it can send the file with that session's credentials rather than the ones of the session now active. A mutation that runs online right away stops the same way while its uploads are sent, see [Direct runs](#direct-runs).
+
 ## Health Check
 
 The session is in offline mode for one of two causes: `network` (this device cannot reach the backend) or `outage` (the backend is reached but down). Browser `online` / `offline` events only cover part of the first one. For everything else the app usually has one health endpoint that answers both "this request failed: is it the network, an outage, or just this request?" and "are we back?". Wire it once with `offlineSession.healthCheck`:
@@ -745,6 +747,7 @@ await userStore.performMutation(
 - With the [session gate](#session-gate) closed the uploads are resolved and released the same way. Nothing is queued then.
 - With `offline: descriptor | undefined`, `uploads` (the second argument for collection and list query stores) is optional in the `mutation` type: it is set when the descriptor is, and `undefined` when the call runs as a plain online mutation.
 - A failed upload is handled as described in [Dependency uploads of a direct run](#dependency-uploads-of-a-direct-run). `mutation` is not called.
+- When `getSessionKey()` changes while the uploads are sent (switching to another org, logout), `mutation` is not called and no upload of the previous session is started. The mutation fails with an error whose `id` is `'offline-session-unavailable'` (code 460) and goes through the normal error handling. It is not queued, because it would then be replayed in a session the user left. The uploads stay staged in the previous session: one that finished keeps its ref, so running the mutation again in that session does not upload it again.
 - Don't resolve or delete these uploads yourself with `resolveOfflineUpload(s)` / `deleteOfflineUpload`: an upload deleted before the request is sent is gone when the mutation falls back to the queue, and its replay fails.
 
 ### Upload refs
