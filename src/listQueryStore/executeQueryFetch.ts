@@ -38,6 +38,7 @@ function applyFetchedItems<
   getItemKey: (params: ItemPayload) => string,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
   appendToExisting: boolean,
+  isLoadMore: boolean,
   resolutionItemKeys: ReadonlySet<string>,
 ) {
   const query = draft.queries[queryKey];
@@ -45,13 +46,16 @@ function applyFetchedItems<
 
   // Items with a change waiting for a manual resolution keep their local
   // version, which the server data would replace: their data, staying hidden
-  // when deleted locally, and, when the list was loaded before, whether and
-  // where they are in it (the change may have moved them between lists, or
-  // the server rejected their creation). Positions in the replaced list, by
-  // item key.
+  // when deleted locally, and, in the part of the list loaded before, whether
+  // and where they are in it (the change may have moved them between lists,
+  // or the server rejected their creation). Positions in the replaced list,
+  // by item key.
   const keepsLocalMembership =
     resolutionItemKeys.size > 0 && query.wasLoaded && !appendToExisting;
   let keptPositions: Map<string, number> | null = null;
+  // A load more replacing the list returns the part loaded before first, then
+  // the new rows, placed where the server lists them
+  const newRowsStart = isLoadMore ? query.items.length : Infinity;
 
   query.status = 'success';
   query.wasLoaded = true;
@@ -72,7 +76,7 @@ function applyFetchedItems<
 
   const existingItemKeys = new Set(query.items);
 
-  for (const { data, itemPayload } of items) {
+  for (const [index, { data, itemPayload }] of items.entries()) {
     const itemKey = getItemKey(itemPayload);
 
     const keepsLocalVersion =
@@ -116,7 +120,13 @@ function applyFetchedItems<
     }
 
     // Placed by `keptPositions` instead
-    if (keepsLocalVersion && keepsLocalMembership) continue;
+    if (
+      keepsLocalVersion &&
+      keepsLocalMembership &&
+      (index < newRowsStart || keptPositions?.has(itemKey))
+    ) {
+      continue;
+    }
 
     // Deduplicate: skip items already in the list (handles both append
     // and chunked invalidation where parallel chunks may return overlapping items)
@@ -345,6 +355,7 @@ export async function executeQueryFetch<
               getItemKey,
               partialResources,
               appendToExisting,
+              fetchPayload.type === 'loadMore',
               resolutionItemKeys,
             );
           },

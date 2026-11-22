@@ -1491,6 +1491,271 @@ test('a row moved between lists by a change waiting for a decision stays where i
   hook.unmount();
 });
 
+test('a document change waiting for a decision is not replaced by window-focus revalidations', async () => {
+  network.setOffline();
+  const sessionKey = 'recovery-revalidation-document-focus-session';
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
+      id: 'recovery-revalidation-document-focus-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: 'loaded',
+      revalidateOnWindowFocus: true,
+      bindFocusController: tabs.bind('a'),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              kind: 'update',
+              // Never runs: the change always conflicts
+              execute: () => Promise.resolve(),
+              onSuccessExecute: () => {},
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: () => ({ reason: 'server-changed' }),
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    env.trackUIChanges(`value:${doc.data?.value ?? 'null'}`);
+  });
+  await flushAllTimers();
+
+  // Offline, the user sets the value to 2. Meanwhile someone else sets it to
+  // 5, so the change conflicts and waits for a decision once back online.
+  env.addTimelineComments('beforeNextAction', [
+    'offline: the value is set to 2',
+  ]);
+  await act(async () => {
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+  });
+  env.serverMock.setData(5);
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the change conflicts',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Coming back to the tab doesn't refetch the document: the refetch would
+  // replace the change the user still has to decide on.
+  env.addTimelineComments('beforeNextAction', [
+    'the user comes back to the tab: the document is not refetched',
+  ]);
+  await tabs.blur();
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  // Discarding the change refetches the document, showing the server value
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution)
+    throw new Error('Expected the change to wait for a decision');
+  env.addTimelineComments('beforeNextAction', [
+    'the user discards the change: the server value is shown',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
+      action: 'discard',
+    });
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui        |
+    0      | "value:1" | ui-initialized
+    1.01s  | "value:1" | -- offline: the value is set to 2
+    .      | "value:2" | ui-changed
+    .      | "value:2" | offline:updateValue queued
+    .      | "value:2" | server-data-changed (value: 5)
+    .      | "value:2" | -- back online: the change conflicts
+    .      | "value:2" | offline:updateValue resolution-required
+    2.01s  | "value:2" | -- the user comes back to the tab: the document is not refetched
+    .      | "value:2" | 🔕 window-blurred
+    2.015s | "value:2" | 👁 window-focused
+    2.03s  | "value:2" | -- the user discards the change: the server value is shown
+    .      | "value:2" | 🔴 >fetch-started
+    2.83s  | "value:2" | 🔴 <fetch-finished (value: 5)
+    .      | "value:5" | ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a row waiting for a decision shows up when loading more of a list brings it in', async () => {
+  const sessionKey = 'recovery-revalidation-load-more-session';
+
+  type UserRow = { id: number; name: string };
+
+  type RenameOperations = {
+    rename: ListQueryOfflineOperationDefinition<
+      UserRow,
+      ListQueryParams,
+      string,
+      { itemId: string; name: string },
+      { reason: string }
+    >;
+  };
+
+  const usersQuery: ListQueryParams = { tableId: 'users' };
+
+  const env = createListQueryStoreTestEnv<
+    UserRow,
+    false,
+    false,
+    RenameOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+        { id: 3, name: 'Linus' },
+        { id: 4, name: 'Ken' },
+      ],
+    },
+    {
+      id: 'recovery-revalidation-load-more-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      // The list shows two users per page
+      defaultQuerySize: 2,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: rc_object({ id: rc_number, name: rc_string }),
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            rename: {
+              inputSchema: rc_object({ itemId: rc_string, name: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () => ({ reason: 'renamed by someone else' }),
+              },
+              // Never runs: the change always conflicts
+              execute: async () => {},
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const users = env.apiStore.useListQuery(usersQuery, {
+      itemSelector: (item) => item.name,
+    });
+    // A detail panel showing Ken, who is not on the list's first page
+    const ken = env.apiStore.useItem('users||4');
+    env.trackItemUI('users', users.items.join(', '));
+    env.trackItemUI('ken', ken.data ? ken.data.name : '-');
+  });
+  await flushAllTimers();
+
+  // Offline, the user renames Ken from his detail panel. Meanwhile someone
+  // else renames him too, so the change conflicts and waits for a decision.
+  env.addTimelineComments('beforeNextAction', ['offline: Ken is renamed']);
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(100);
+  await act(async () => {
+    await env.apiStore.performMutation('users||4', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||4', (item) => ({
+          ...item,
+          name: 'Ken local',
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'rename',
+        input: { itemId: 'users||4', name: 'Ken local' },
+      },
+    });
+  });
+  env.serverTable.updateItem('users||4', { name: 'Ken by Bob' });
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the rename conflicts',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Loading more of the list brings Ken in: he is shown with his local name,
+  // where the server lists him, instead of being left out of the list.
+  env.addTimelineComments('beforeNextAction', [
+    'the user loads more of the list: Ken shows up with his local name',
+  ]);
+  act(() => {
+    env.apiStore.loadMore(usersQuery, 2);
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ken       | users                        |
+    0     | -         |                              | [users, ken] ui-initialized
+    10ms  | -         |                              | 🔴 >list-fetch-started
+    .     | -         |                              | 🟠 [users||4] >fetch-started
+    810ms | -         |                              | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | -         | Ada, Grace                   | [users] ui-changed
+    .     | -         | Ada, Grace                   | 🟠 [users||4] <fetch-finished (value: {"id":4,"name":"Ken"})
+    .     | Ken       | Ada, Grace                   | [ken] ui-changed
+    1.91s | Ken       | Ada, Grace                   | -- offline: Ken is renamed
+    .     | Ken local | Ada, Grace                   | [ken] ui-changed
+    .     | Ken local | Ada, Grace                   | offline:rename queued
+    .     | Ken local | Ada, Grace                   | [users||4] server-data-changed (value: {"name":"Ken by Bob"})
+    .     | Ken local | Ada, Grace                   | -- back online: the rename conflicts
+    .     | Ken local | Ada, Grace                   | offline:rename resolution-required
+    1.92s | Ken local | Ada, Grace                   | 🟡 >list-fetch-started
+    2.72s | Ken local | Ada, Grace                   | 🟡 <list-fetch-finished (value: {"count":2})
+    3.73s | Ken local | Ada, Grace                   | -- the user loads more of the list: Ken shows up with his local name
+    .     | Ken local | Ada, Grace                   | 🟢 >list-fetch-started
+    4.53s | Ken local | Ada, Grace                   | 🟢 <list-fetch-finished (value: {"count":4})
+    .     | Ken local | Ada, Grace, Linus, Ken local | [users] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('a collection change waiting for a decision only holds back its own item: the other replayed items are revalidated after recovering', async () => {
   network.setOffline();
   const sessionKey = 'recovery-revalidation-collection-session';
