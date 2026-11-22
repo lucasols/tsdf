@@ -240,7 +240,14 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   replaceOfflineUpload: (
     args: ReplaceOfflineUploadArgs,
   ) => Promise<ResultType<void, Error>>;
-  /** Loads a previously stored session-scoped upload. */
+  /**
+   * Loads a previously stored session-scoped upload.
+   *
+   * The file can read from the stored upload, and then stops being readable
+   * once the upload is deleted or replaced: read it into memory
+   * (`new File([await file.arrayBuffer()], file.name, { type: file.type })`)
+   * to keep it longer.
+   */
   loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
   /**
    * Deletes a stored upload that no queued work references. Only needed for

@@ -890,7 +890,14 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   saveOfflineUpload: (args: SaveOfflineUploadArgs) => Promise<void>;
   /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
   replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) => Promise<void>;
-  /** Loads a previously stored session-scoped upload. */
+  /**
+   * Loads a previously stored session-scoped upload.
+   *
+   * The file can read from the stored upload, and then stops being readable
+   * once the upload is deleted or replaced: read it into memory
+   * (`new File([await file.arrayBuffer()], file.name, { type: file.type })`)
+   * to keep it longer.
+   */
   loadOfflineUpload: (id: string) => Promise<File | null>;
   /**
    * Deletes a stored upload that no queued work references. Only needed for

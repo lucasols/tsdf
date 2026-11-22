@@ -77,6 +77,10 @@ export type ReplaceOfflineUploadArgs = {
  * (e.g. `<img src={url}>`), never revoke it, and do not keep it outside of
  * render: always use the latest value returned by the hook.
  *
+ * `file` can read from the stored upload, and then stops being readable once
+ * the upload is deleted or replaced: read it into memory to keep it longer
+ * (for example to undo a replacement).
+ *
  * Narrow on `status`:
  *
  * - `idle`: the hook was called with a falsy id.
