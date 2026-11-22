@@ -1836,11 +1836,12 @@ export function createListQueryStore<
     if (!inMemoryOnly) persistence?.touchQueriesLoadedWithoutTouch(queryKeys);
   }
 
-  function touchItems(itemKeys: string[]): void {
+  /** `inMemoryOnly` works like in `touchQueries`, for changed rows. */
+  function touchItems(itemKeys: string[], inMemoryOnly = false): void {
     itemCacheRuntime.touch(itemKeys, (itemKey) => {
       return store.state.itemQueries[itemKey] !== undefined;
     });
-    persistence?.touchItemsLoadedWithoutTouch(itemKeys);
+    if (!inMemoryOnly) persistence?.touchItemsLoadedWithoutTouch(itemKeys);
   }
 
   function registerActiveQueryRefs(queryKeys: string[]): () => void {
@@ -4060,7 +4061,10 @@ export function createListQueryStore<
   function touchUpdatedItemEntries(
     itemEntries: { itemKey: string; payload: ItemPayload }[],
   ): void {
-    touchItems(itemEntries.map(({ itemKey }) => itemKey));
+    touchItems(
+      itemEntries.map(({ itemKey }) => itemKey),
+      true,
+    );
     touchQueries(getRelatedQueryKeysForItemEntries(itemEntries), true);
     if (shouldScheduleCacheLimitEnforcement()) {
       scheduleCacheLimitEnforcement();

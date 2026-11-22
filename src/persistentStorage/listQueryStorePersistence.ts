@@ -1994,14 +1994,6 @@ export function setupListQueryPersistence<
     // without it, where `inferFields` governs), so state presence is judged by
     // the item and its query alone.
     if (existingItemQuery !== undefined && existingItem !== undefined) {
-      // Already in memory, maybe loaded without touch for internal work
-      if (
-        touch &&
-        existingItemQuery !== null &&
-        itemKeysLoadedWithoutTouch.has(itemKey)
-      ) {
-        touchItemsLoadedWithoutTouch([itemKey]);
-      }
       return existingItemQuery !== null;
     }
     if (existingItemQuery === null) return false;
@@ -2054,20 +2046,11 @@ export function setupListQueryPersistence<
 
     const resultsByKey = new Map<string, Promise<boolean>>();
     const batchKeys: string[] = [];
-    // Already in memory, maybe loaded without touch for internal work
-    const existingItemKeys: string[] = [];
 
     for (const itemKey of [...new Set(itemKeys)]) {
       const existingItemQuery = storeRef.state.itemQueries[itemKey];
       const existingItem = storeRef.state.items[itemKey];
       if (existingItemQuery !== undefined && existingItem !== undefined) {
-        if (
-          touch &&
-          existingItemQuery !== null &&
-          itemKeysLoadedWithoutTouch.has(itemKey)
-        ) {
-          existingItemKeys.push(itemKey);
-        }
         resultsByKey.set(itemKey, Promise.resolve(existingItemQuery !== null));
         continue;
       }
@@ -2086,10 +2069,6 @@ export function setupListQueryPersistence<
       }
 
       batchKeys.push(itemKey);
-    }
-
-    if (existingItemKeys.length > 0) {
-      touchItemsLoadedWithoutTouch(existingItemKeys);
     }
 
     if (batchKeys.length > 0) {
@@ -2311,6 +2290,25 @@ export function setupListQueryPersistence<
   ): Promise<boolean[]> {
     if (!getItemDerivedGroup) {
       return groupKeys.map(() => false);
+    }
+
+    // The derived lists of these groups show the rows of the group already in
+    // memory, so the ones loaded without touch to match a filter are now used
+    if (itemKeysLoadedWithoutTouch.size > 0 && storeRef) {
+      const activeStore = storeRef;
+      const groupKeySet = new Set(groupKeys);
+      const shownItemKeys = [...itemKeysLoadedWithoutTouch].filter(
+        (itemKey) => {
+          const item = activeStore.state.items[itemKey];
+          const itemQuery = activeStore.state.itemQueries[itemKey];
+          return (
+            !!item &&
+            !!itemQuery &&
+            groupKeySet.has(getItemDerivedGroup(item, itemQuery.payload))
+          );
+        },
+      );
+      touchItemsLoadedWithoutTouch(shownItemKeys);
     }
 
     const resultsByGroupKey = new Map<string, Promise<boolean>>();
