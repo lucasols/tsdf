@@ -126,21 +126,25 @@ describe('tasks whose creation waits for a manual decision', () => {
       17s    | Write report, Review budget, Plan trip        | offline:createTask replay-started
       22s    | Write report, Review budget, Plan trip        | offline:createTask replay-started
       .      | Write report, Review budget, Plan trip        | offline:createTask resolution-required
-      .      | Write report, Review budget, Plan trip        | -- offline: rename the task whose creation waits for a decision
+      22.01s | Write report, Review budget, Plan trip        | 🔴 >list-fetch-started
+      22.81s | Write report, Review budget, Plan trip        | 🔴 <list-fetch-finished (value: {"count":2})
+      23.81s | Write report, Review budget, Plan trip        | -- offline: rename the task whose creation waits for a decision
       .      | Write report, Review budget, Plan summer trip | [tasks] ui-changed
       .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan summer trip | offline:renameTask queued
-      23s    | Write report, Review budget, Plan summer trip | -- back online: nothing can be sent for the task yet
-      .      | Write report, Review budget, Plan summer trip | -- the user asks to send the creation again
+      23.82s | Write report, Review budget, Plan summer trip | -- back online: nothing can be sent for the task yet
+      .      | Write report, Review budget, Plan summer trip | 🟠 >list-fetch-started
+      24.62s | Write report, Review budget, Plan summer trip | 🟠 <list-fetch-finished (value: {"count":2})
+      25.62s | Write report, Review budget, Plan summer trip | -- the user asks to send the creation again
       .      | Write report, Review budget, Plan summer trip | offline:createTask replay-started
-      24.2s  | Write report, Review budget, Plan summer trip | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
+      26.82s | Write report, Review budget, Plan summer trip | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
       .      | Write report, Review budget, Plan summer trip | offline:createTask replay-finished
       .      | Write report, Review budget, Plan summer trip | [tasks, tasks] ui-changed
       .      | Write report, Review budget, Plan summer trip | offline:renameTask replay-started
-      25.4s  | Write report, Review budget, Plan summer trip | [tasks||3] server-data-changed (value: {"name":"Plan summer trip"})
+      28.02s | Write report, Review budget, Plan summer trip | [tasks||3] server-data-changed (value: {"name":"Plan summer trip"})
       .      | Write report, Review budget, Plan summer trip | offline:renameTask replay-finished
-      25.41s | Write report, Review budget, Plan summer trip | 🔴 >list-fetch-started
-      26.21s | Write report, Review budget, Plan summer trip | 🔴 <list-fetch-finished (value: {"count":3})
+      28.03s | Write report, Review budget, Plan summer trip | 🟡 >list-fetch-started
+      28.83s | Write report, Review budget, Plan summer trip | 🟡 <list-fetch-finished (value: {"count":3})
       "
     `);
 
@@ -247,20 +251,22 @@ describe('tasks whose creation waits for a manual decision', () => {
       8.01s  | Write report, Review budget, Plan trip | offline:createTask replay-started
       13.01s | Write report, Review budget, Plan trip | offline:createTask replay-started
       .      | Write report, Review budget, Plan trip | offline:createTask resolution-required
-      .      | Write report, Review budget, Plan trip | -- delete the task whose creation waits for a decision
+      13.02s | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
+      13.82s | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
+      14.82s | Write report, Review budget, Plan trip | -- delete the task whose creation waits for a decision
       .      | Write report, Review budget            | [tasks] ui-changed
       .      | Write report, Review budget            | offline:deleteTask resolution-required
       .      | Write report, Review budget            | offline:deleteTask queued
-      14.01s | Write report, Review budget            | -- the user asks to send the creation again
+      15.82s | Write report, Review budget            | -- the user asks to send the creation again
       .      | Write report, Review budget            | offline:createTask replay-started
-      15.21s | Write report, Review budget            | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
+      17.02s | Write report, Review budget            | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
       .      | Write report, Review budget            | offline:createTask replay-finished
       .      | Write report, Review budget            | offline:deleteTask replay-started
       .      | Write report, Review budget            | [tasks||3] >delete-item-started (value: {"id":3,"name":"Plan trip"})
-      16.05s | Write report, Review budget            | [tasks||3] <delete-item-persisted (value: {"id":3,"name":"Plan trip"})
-      16.41s | Write report, Review budget            | offline:deleteTask replay-finished
-      16.42s | Write report, Review budget            | 🔴 >list-fetch-started
-      17.22s | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      17.86s | Write report, Review budget            | [tasks||3] <delete-item-persisted (value: {"id":3,"name":"Plan trip"})
+      18.22s | Write report, Review budget            | offline:deleteTask replay-finished
+      18.23s | Write report, Review budget            | 🟠 >list-fetch-started
+      19.03s | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -908,22 +914,24 @@ describe('tasks created with a client-generated id whose creation waits for a ma
       14.01s | Write report, Review budget, Plan summer trip | offline:createTaskWithId replay-started
       .      | Write report, Review budget, Plan summer trip | offline:createTaskWithId resolution-required
       .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
-      .      | Write report, Review budget, Plan summer trip | -- online: rename the task whose creation waits for a decision
+      14.02s | Write report, Review budget, Plan summer trip | 🔴 >list-fetch-started
+      14.82s | Write report, Review budget, Plan summer trip | 🔴 <list-fetch-finished (value: {"count":2})
+      15.82s | Write report, Review budget, Plan summer trip | -- online: rename the task whose creation waits for a decision
       .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
       .      | Write report, Review budget, Plan winter trip | [tasks] ui-changed
       .      | Write report, Review budget, Plan winter trip | offline:renameTask queued
-      15.01s | Write report, Review budget, Plan winter trip | -- the user asks to send the creation again
+      16.82s | Write report, Review budget, Plan winter trip | -- the user asks to send the creation again
       .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-started
-      16.21s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      18.02s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
       .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-finished
       .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-started
-      17.41s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan summer trip"})
+      19.22s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan summer trip"})
       .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-finished
       .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-started
-      18.61s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan winter trip"})
+      20.42s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan winter trip"})
       .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-finished
-      18.62s | Write report, Review budget, Plan winter trip | 🔴 >list-fetch-started
-      19.42s | Write report, Review budget, Plan winter trip | 🔴 <list-fetch-finished (value: {"count":3})
+      20.43s | Write report, Review budget, Plan winter trip | 🟠 >list-fetch-started
+      21.23s | Write report, Review budget, Plan winter trip | 🟠 <list-fetch-finished (value: {"count":3})
       "
     `);
 

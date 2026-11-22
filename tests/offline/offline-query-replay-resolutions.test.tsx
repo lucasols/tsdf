@@ -275,16 +275,18 @@ describe('list-query replay', () => {
     );
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time | query-items | query-status |
-      0    | Ada         | success      | [query-status, query-items] ui-initialized
-      12s  | Ada         | success      | -- queue an offline edit for the existing row
-      .    | Ada pending | success      | [query-items] ui-changed
-      .    | Ada pending | success      | offline:patchUserName queued
-      .    | Ada pending | success      | -- go back online and let replay retries exhaust
-      .    | Ada pending | success      | offline:patchUserName replay-started
-      17s  | Ada pending | success      | offline:patchUserName replay-started
-      22s  | Ada pending | success      | offline:patchUserName replay-started
-      .    | Ada pending | success      | offline:patchUserName resolution-required
+      time   | query-items | query-status |
+      0      | Ada         | success      | [query-status, query-items] ui-initialized
+      12s    | Ada         | success      | -- queue an offline edit for the existing row
+      .      | Ada pending | success      | [query-items] ui-changed
+      .      | Ada pending | success      | offline:patchUserName queued
+      .      | Ada pending | success      | -- go back online and let replay retries exhaust
+      .      | Ada pending | success      | offline:patchUserName replay-started
+      17s    | Ada pending | success      | offline:patchUserName replay-started
+      22s    | Ada pending | success      | offline:patchUserName replay-started
+      .      | Ada pending | success      | offline:patchUserName resolution-required
+      22.01s | Ada pending | success      | 🔴 >list-fetch-started
+      22.81s | Ada pending | success      | 🔴 <list-fetch-finished (value: {"count":1})
       "
     `);
 
@@ -683,10 +685,12 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
-      .      | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent to cascade-clear all descendants
+      13.02s | Ada, Grace, Parent offline, Child blocked edit | 🔴 >list-fetch-started
+      13.82s | Ada, Grace, Parent offline, Child blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
+      14.82s | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent to cascade-clear all descendants
       .      | Ada, Grace                                     | ui-changed
-      13.02s | Ada, Grace                                     | 🔴 >list-fetch-started
-      13.82s | Ada, Grace                                     | 🔴 <list-fetch-finished (value: {"count":2})
+      14.83s | Ada, Grace                                     | 🟠 >list-fetch-started
+      15.63s | Ada, Grace                                     | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -1008,16 +1012,18 @@ describe('list-query replay', () => {
       13.01s | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser resolution-required
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName resolution-required
-      .      | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the remapped descendant replays too
+      13.02s | Ada, Grace, Linus blocked edit | success      | 🔴 >list-fetch-started
+      13.82s | Ada, Grace, Linus blocked edit | success      | 🔴 <list-fetch-finished (value: {"count":2})
+      14.82s | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the remapped descendant replays too
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
-      14.21s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
+      16.02s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-finished
       .      | Ada, Grace, Linus blocked edit | success      | [query-items, query-items] ui-changed
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-started
-      15.41s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+      17.22s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-finished
-      15.42s | Ada, Grace, Linus blocked edit | success      | 🔴 >list-fetch-started
-      16.22s | Ada, Grace, Linus blocked edit | success      | 🔴 <list-fetch-finished (value: {"count":3})
+      17.23s | Ada, Grace, Linus blocked edit | success      | 🟠 >list-fetch-started
+      18.03s | Ada, Grace, Linus blocked edit | success      | 🟠 <list-fetch-finished (value: {"count":3})
       "
     `);
 
@@ -1228,9 +1234,11 @@ describe('list-query replay', () => {
       13.01s | Ada, Grace, Linus discarded edit | offline:createUser replay-started
       .      | Ada, Grace, Linus discarded edit | offline:createUser resolution-required
       .      | Ada, Grace, Linus discarded edit | offline:patchUserName resolution-required
-      .      | Ada, Grace                       | ui-changed
-      13.02s | Ada, Grace                       | 🔴 >list-fetch-started
-      13.82s | Ada, Grace                       | 🔴 <list-fetch-finished (value: {"count":2})
+      13.02s | Ada, Grace, Linus discarded edit | 🔴 >list-fetch-started
+      13.82s | Ada, Grace, Linus discarded edit | 🔴 <list-fetch-finished (value: {"count":2})
+      14.82s | Ada, Grace                       | ui-changed
+      14.83s | Ada, Grace                       | 🟠 >list-fetch-started
+      15.63s | Ada, Grace                       | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -1369,14 +1377,16 @@ test('discarding failed offline changes puts the rows back to what the server ha
     throw new Error('Expected both changes to be waiting for a resolution');
   }
 
+  // Once both changes wait for a decision, the store revalidates its lists:
+  // the refetched list keeps both rows as they are locally (Ada renamed, Grace
+  // hidden), since the user still has to decide on them.
+
   // Discard the rename. Nothing can roll the optimistic rename back, so the
-  // store refetches what the discarded change touched. The lists are not
-  // refetched yet: Grace's delete still waits for a decision, and refetched
-  // lists would bring her back while the user still has to decide on her
-  // delete. Only Ada's item would be refetched, and no screen shows it outside
-  // of the list, so the row keeps the renamed value for now.
+  // store refetches what the discarded change touched, and its lists. Grace's
+  // delete still waits for a decision, so the refetched list keeps her hidden,
+  // while Ada's row goes back to what the server has.
   env.addTimelineComments('beforeNextAction', [
-    'discard the rename: no refetch while the delete waits for a decision',
+    'discard the rename: the lists are refetched, Grace stays hidden',
   ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
@@ -1387,8 +1397,9 @@ test('discarding failed offline changes puts the rows back to what the server ha
   });
   await flushAllTimers();
 
-  // Grace is still hidden while her delete waits for a decision.
-  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada renamed']`);
+  // Ada shows the server value, Grace is still hidden while her delete waits
+  // for a decision.
+  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada']`);
 
   // Discard the delete: with nothing left to resolve the store revalidates
   // its lists, which puts both rows back to what the server has. Grace, deleted
@@ -1425,13 +1436,18 @@ test('discarding failed offline changes puts the rows back to what the server ha
     18.01s | Ada renamed        | offline:deleteUser replay-started
     23.01s | Ada renamed        | offline:deleteUser replay-started
     .      | Ada renamed        | offline:deleteUser resolution-required
-    34.02s | Ada renamed        | -- discard the rename: no refetch while the delete waits for a decision
-    .      | Ada renamed        | -- discard the delete: the lists are refetched and show the server rows
-    .      | Ada renamed        | 🔴 >list-fetch-started
-    .      | Ada renamed        | 🟠 [users||2] >fetch-started
-    34.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
+    23.02s | Ada renamed        | 🔴 >list-fetch-started
+    23.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
+    33.02s | Ada renamed        | -- discard the rename: the lists are refetched, Grace stays hidden
+    .      | Ada renamed        | 🟠 >list-fetch-started
+    33.82s | Ada renamed        | 🟠 <list-fetch-finished (value: {"count":2})
+    .      | Ada                | [rows] ui-changed
+    34.83s | Ada                | -- discard the delete: the lists are refetched and show the server rows
+    .      | Ada                | 🟡 >list-fetch-started
+    .      | Ada                | 🟢 [users||2] >fetch-started
+    35.63s | Ada                | 🟡 <list-fetch-finished (value: {"count":2})
     .      | Ada, Grace         | [rows] ui-changed
-    .      | Ada, Grace         | 🟠 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
+    .      | Ada, Grace         | 🟢 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
     "
   `);
 
@@ -1816,10 +1832,12 @@ describe('discarding a failed offline creation with a client-generated id', () =
       8.01s  | Linus     | Ada, Linus | offline:createUser replay-started
       13.01s | Linus     | Ada, Linus | offline:createUser replay-started
       .      | Linus     | Ada, Linus | offline:createUser resolution-required
+      13.02s | Linus     | Ada, Linus | 🔴 >list-fetch-started
+      13.82s | Linus     | Ada, Linus | 🔴 <list-fetch-finished (value: {"count":1})
       18.01s | Linus     | Ada, Linus | -- discard the creation: Linus is removed
       .      | - deleted | Ada        | [rows, linus] ui-changed
-      18.02s | - deleted | Ada        | 🔴 >list-fetch-started
-      18.82s | - deleted | Ada        | 🔴 <list-fetch-finished (value: {"count":1})
+      18.02s | - deleted | Ada        | 🟠 >list-fetch-started
+      18.82s | - deleted | Ada        | 🟠 <list-fetch-finished (value: {"count":1})
       "
     `);
 
@@ -1887,10 +1905,12 @@ describe('discarding a failed offline creation with a client-generated id', () =
       9.21s  | Linus     | Ada, Linus | offline:createUser replay-started
       14.21s | Linus     | Ada, Linus | offline:createUser replay-started
       .      | Linus     | Ada, Linus | offline:createUser resolution-required
+      14.22s | Linus     | Ada, Linus | 🔴 >list-fetch-started
+      15.02s | Linus     | Ada, Linus | 🔴 <list-fetch-finished (value: {"count":2})
       18.01s | Linus     | Ada, Linus | -- discard the creation: Linus is removed, then restored from the server
       .      | - deleted | Ada        | [rows, linus] ui-changed
-      18.02s | - deleted | Ada        | 🔴 >list-fetch-started
-      18.82s | - deleted | Ada        | 🔴 <list-fetch-finished (value: {"count":2})
+      18.02s | - deleted | Ada        | 🟠 >list-fetch-started
+      18.82s | - deleted | Ada        | 🟠 <list-fetch-finished (value: {"count":2})
       .      | Linus     | Ada, Linus | [rows, linus] ui-changed
       "
     `);
@@ -1983,10 +2003,12 @@ describe('discarding a failed offline creation with a client-generated id', () =
       13s    | Linus T.  | Ada, Linus T. | offline:createUser replay-started
       .      | Linus T.  | Ada, Linus T. | offline:createUser resolution-required
       .      | Linus T.  | Ada, Linus T. | offline:patchUserName resolution-required
+      13.01s | Linus T.  | Ada, Linus T. | 🔴 >list-fetch-started
+      13.81s | Linus T.  | Ada, Linus T. | 🔴 <list-fetch-finished (value: {"count":1})
       33s    | Linus T.  | Ada, Linus T. | -- discard the creation: Linus and his rename are dropped, no refetch
       .      | - deleted | Ada           | [rows, linus] ui-changed
-      33.01s | - deleted | Ada           | 🔴 >list-fetch-started
-      33.81s | - deleted | Ada           | 🔴 <list-fetch-finished (value: {"count":1})
+      33.01s | - deleted | Ada           | 🟠 >list-fetch-started
+      33.81s | - deleted | Ada           | 🟠 <list-fetch-finished (value: {"count":1})
       "
     `);
 
@@ -2067,10 +2089,12 @@ describe('discarding a failed offline creation with a client-generated id', () =
       13.01s | Linus     | Ada, Grace, Linus | offline:createManager replay-started
       .      | Linus     | Ada, Grace, Linus | offline:createManager resolution-required
       .      | Linus     | Ada, Grace, Linus | offline:createUser resolution-required
+      13.02s | Linus     | Ada, Grace, Linus | 🔴 >list-fetch-started
+      13.82s | Linus     | Ada, Grace, Linus | 🔴 <list-fetch-finished (value: {"count":1})
       18.01s | Linus     | Ada, Grace, Linus | -- discard Grace: Linus is discarded and removed with her
       .      | - deleted | Ada               | [rows, linus] ui-changed
-      18.02s | - deleted | Ada               | 🔴 >list-fetch-started
-      18.82s | - deleted | Ada               | 🔴 <list-fetch-finished (value: {"count":1})
+      18.02s | - deleted | Ada               | 🟠 >list-fetch-started
+      18.82s | - deleted | Ada               | 🟠 <list-fetch-finished (value: {"count":1})
       "
     `);
 

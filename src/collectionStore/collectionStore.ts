@@ -1020,6 +1020,10 @@ export function createCollectionStore<
   // yet (still queued, or waiting for a manual resolution). They cannot be
   // refetched, so invalidations skip them.
   const unsentCreationItemKeys = new Set<string>();
+  // Items with a change waiting for a manual resolution: the reconnect and
+  // recovery revalidations skip them, since a refetch would replace the
+  // change the user still has to decide on.
+  const resolutionItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
 
   let initialData:
@@ -1162,6 +1166,7 @@ export function createCollectionStore<
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState({});
     unsentCreationItemKeys.clear();
+    resolutionItemKeys.clear();
   }
 
   function rebindOfflineOverlays(
@@ -1357,9 +1362,13 @@ export function createCollectionStore<
               if (offlineOverlaySessionKey !== sessionKey)
                 clearOfflineOverlays(sessionKey);
               unsentCreationItemKeys.clear();
+              resolutionItemKeys.clear();
               for (const entity of entities) {
                 if (entity.tempId !== undefined) {
                   unsentCreationItemKeys.add(entity.entityKey);
+                }
+                if (entity.requiresResolution) {
+                  resolutionItemKeys.add(entity.entityKey);
                 }
               }
               const activeItemKeys = new Set(
@@ -2923,7 +2932,9 @@ export function createCollectionStore<
     },
     () => {
       invalidateItem(
-        () => true,
+        resolutionItemKeys.size === 0
+          ? () => true
+          : (payload) => !resolutionItemKeys.has(getItemKey(payload)),
         usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
       );
     },

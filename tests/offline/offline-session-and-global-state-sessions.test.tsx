@@ -549,19 +549,21 @@ test('a global offline view sees the same blocked temp item as the store after r
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time | query-items                    |
-    0    | Ada, Grace                     | ui-initialized
-    12s  | Ada, Grace                     | -- queue a temp create and then edit the same temp item while still offline
-    .    | Ada, Grace, Linus offline      | ui-changed
-    .    | Ada, Grace, Linus offline      | offline:createUser queued
-    .    | Ada, Grace, Linus blocked edit | ui-changed
-    .    | Ada, Grace, Linus blocked edit | offline:patchUserName queued
-    .    | Ada, Grace, Linus blocked edit | -- go back online and let replay exhaust every retry for the temp create
-    .    | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    17s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    22s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    .    | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
-    .    | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
+    time   | query-items                    |
+    0      | Ada, Grace                     | ui-initialized
+    12s    | Ada, Grace                     | -- queue a temp create and then edit the same temp item while still offline
+    .      | Ada, Grace, Linus offline      | ui-changed
+    .      | Ada, Grace, Linus offline      | offline:createUser queued
+    .      | Ada, Grace, Linus blocked edit | ui-changed
+    .      | Ada, Grace, Linus blocked edit | offline:patchUserName queued
+    .      | Ada, Grace, Linus blocked edit | -- go back online and let replay exhaust every retry for the temp create
+    .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    17s    | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    22s    | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
+    .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
+    22.01s | Ada, Grace, Linus blocked edit | 🔴 >list-fetch-started
+    22.81s | Ada, Grace, Linus blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 

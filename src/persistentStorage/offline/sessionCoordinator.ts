@@ -387,40 +387,95 @@ type SessionStoreState = {
 };
 
 /**
- * The stores (by name) that cannot be revalidated against the server yet, or
- * `null` when no store of the session can:
+ * What a store with changes waiting for a manual resolution cannot revalidate
+ * yet: a refetch would replace the local changes the user still has to
+ * decide on.
  *
- * - offline, or with queued mutations still to replay: anything fetched now
- *   may predate the replayed mutations, in any store
- * - a store with changes waiting for a manual resolution: a refetch would
- *   replace the local changes the user still has to decide on
+ * - `itemKeys`: the items with such a change. The store revalidates the rest,
+ *   leaving them out (see `RegisteredStore.onOfflineRecovery`).
+ * - `wholeStore`: nothing can be revalidated, as the change is on the whole
+ *   store (a document, a query) or references no entity, so it could be on
+ *   anything.
+ */
+type StoreAwaitingRecovery = { itemKeys: Set<string>; wholeStore: boolean };
+
+/**
+ * The stores (by name) with changes waiting for a manual resolution, or
+ * `null` when no store of the session can be revalidated against the server
+ * yet: offline, or with queued mutations still to replay (anything fetched
+ * now may predate the replayed mutations, in any store).
  */
 function getStoresAwaitingRecovery(
   state: SessionStoreState,
-): ReadonlySet<string> | null {
+): ReadonlyMap<string, StoreAwaitingRecovery> | null {
   if (state.status.isOfflineMode || state.hasQueuedMutations) return null;
 
-  const storeNames = new Set<string>();
+  const stores = new Map<string, StoreAwaitingRecovery>();
+
+  function getStore(storeName: string): StoreAwaitingRecovery {
+    let store = stores.get(storeName);
+    if (!store) {
+      store = { itemKeys: new Set(), wholeStore: false };
+      stores.set(storeName, store);
+    }
+    return store;
+  }
 
   for (const entity of state.entities) {
     if (entity.pendingMutations > 0) return null;
-    if (entity.requiresResolution) storeNames.add(entity.storeName);
+    if (!entity.requiresResolution) continue;
+
+    const store = getStore(entity.storeName);
+    if (entity.entityKind === 'item') store.itemKeys.add(entity.entityKey);
+    else store.wholeStore = true;
   }
 
-  // Also from the resolutions: an operation may reference no entity
+  // An operation may reference no entity
   for (const resolution of state.resolutions) {
-    storeNames.add(resolution.storeName);
+    if (resolution.entityRefs.length === 0) {
+      getStore(resolution.storeName).wholeStore = true;
+    }
   }
 
-  return storeNames;
+  return stores;
+}
+
+/**
+ * Whether the store can revalidate now that it could not before: the session
+ * recovered (online with its queued mutations replayed), or changes of the
+ * store waiting for a manual resolution were handled. A store revalidates
+ * everything but its items still waiting for a resolution, so it is not
+ * held back by them, only by a change on the whole store.
+ */
+function getHasStoreRecovered(
+  storeName: string,
+  current: ReadonlyMap<string, StoreAwaitingRecovery>,
+  prev: ReadonlyMap<string, StoreAwaitingRecovery> | null,
+): boolean {
+  const currentStore = current.get(storeName);
+  if (currentStore?.wholeStore) return false;
+  if (prev === null) return true;
+
+  const prevStore = prev.get(storeName);
+  if (!prevStore) return false;
+  if (!currentStore || prevStore.wholeStore) return true;
+
+  // A handled change: its items are now revalidated with the rest
+  for (const itemKey of prevStore.itemKeys) {
+    if (!currentStore.itemKeys.has(itemKey)) return true;
+  }
+
+  return false;
 }
 
 /**
  * Subscribes to stores recovering in this tab (any session key; listeners
  * filter by the key they care about). A store recovers when its session is
- * back online with its queued mutations replayed and the store has no change
- * left waiting for a manual resolution: from then on its cached data can be
- * revalidated against the server.
+ * back online with its queued mutations replayed, and again each time one of
+ * its changes waiting for a manual resolution is handled: its cached data can
+ * then be revalidated against the server, except the items still waiting for
+ * a resolution. A store with such a change on the whole store (or on no
+ * entity) recovers once it is handled.
  * @internal
  */
 export function subscribeToOfflineRecovery(
@@ -1094,11 +1149,8 @@ class SessionOfflineCoordinator {
       if (prevAwaitingStores?.size === 0) return;
 
       for (const listener of offlineRecoveryListeners) {
-        listener(
-          sessionKey,
-          (storeName) =>
-            !awaitingStores.has(storeName) &&
-            (prevAwaitingStores === null || prevAwaitingStores.has(storeName)),
+        listener(sessionKey, (storeName) =>
+          getHasStoreRecovered(storeName, awaitingStores, prevAwaitingStores),
         );
       }
     });

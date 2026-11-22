@@ -23,6 +23,7 @@ import {
   getOfflineQueueEntryData,
   type UpdateValueConflictOperations,
   type UpdateValueOperations,
+  userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
 import { createReplayFailure } from './offlineReplayTestShared';
@@ -30,6 +31,7 @@ import {
   classifyMutationOutage,
   classifyRetryableReplayFailure,
   collectionCreateInputSchema,
+  collectionSchema,
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
@@ -1103,6 +1105,339 @@ test('an offline creation that references no entity and waits for a decision del
     3.02s | Ada        | 🔴 >list-fetch-started
     3.82s | Ada        | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Ada, Grace | [users] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a list query change waiting for a decision only holds back its own row: the other replayed rows and the lists are revalidated after recovering', async () => {
+  network.setOffline();
+  const sessionKey = 'recovery-revalidation-list-session';
+
+  type RenameUserOperations = {
+    renameUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { itemId: string; name: string },
+      { reason: string }
+    >;
+  };
+
+  // The server computes part of what it saves (like an updated-at field): it
+  // stores the sent name with a ` (saved)` suffix, which only a revalidation
+  // brings to the client. Someone else renames Ada while we are offline, so
+  // our rename of her conflicts and waits for the user to decide on it.
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    RenameUserOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'recovery-revalidation-list-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            renameUser: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: ({ input }) =>
+                  input.itemId === 'users||1'
+                    ? { reason: 'renamed by someone else' }
+                    : null,
+              },
+              execute: async ({ input }) => {
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  name: `${input.name} (saved)`,
+                });
+              },
+              // The app keeps the optimistic values: the revalidation after
+              // the replay brings what the server saved.
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { itemSelector: (item) => item.name },
+    );
+    // Screens that show each user on their own (e.g. a detail panel)
+    const ada = env.apiStore.useItem('users||1');
+    const grace = env.apiStore.useItem('users||2');
+    env.trackItemUI('rows', query.items.join(', '));
+    env.trackItemUI('ada', ada.data?.name ?? `- ${ada.status}`);
+    env.trackItemUI('grace', grace.data?.name ?? `- ${grace.status}`);
+  });
+  await flushAllTimers();
+
+  // Offline: rename both users. Meanwhile someone else renames Ada.
+  env.addTimelineComments('beforeNextAction', [
+    'offline: rename Ada and Grace',
+  ]);
+  for (const [itemId, name] of [
+    ['users||1', 'Ada edited'],
+    ['users||2', 'Grace edited'],
+  ] as const) {
+    await act(async () => {
+      await env.apiStore.performMutation(itemId, {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState(itemId, (item) => ({ ...item, name }));
+        },
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: { operation: 'renameUser', input: { itemId, name } },
+      });
+    });
+  }
+  env.serverTable.updateItem('users||1', { name: 'Ada by Bob' });
+  env.serverTable.clearFetchHistory();
+
+  // Back online: Ada's rename waits for a decision and Grace's is saved. The
+  // store revalidates once the queue is drained, leaving out only Ada: her
+  // item is not refetched, and the refetched list keeps her local rename
+  // instead of Bob's, since the user still has to decide on it. Grace's row
+  // and item show what the server saved.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: Ada conflicts, Grace is saved, then all but Ada is revalidated',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // One list fetch and one item fetch, for Grace only
+  expect(env.serverTable.getRequestHistory('all', { includeTime: false }))
+    .toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 2
+      - _type: 'item'
+        payload: { itemId: 'users||2' }
+    `);
+
+  // The user keeps their rename of Ada: the app saves it through its own API,
+  // then marks the conflict as handled. Only then is Ada revalidated, which
+  // brings what the server saved for her. With nothing left waiting for a
+  // decision, the store revalidates everything, like any recovery.
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected Ada to wait for a decision');
+  env.serverTable.updateItem('users||1', { name: 'Ada edited (saved)' });
+  env.addTimelineComments('beforeNextAction', [
+    'the user keeps their rename of Ada: Ada and the list are revalidated',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'renameUser', {
+      action: 'commit',
+    });
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ada                | grace                | rows                                     |
+    0     | Ada                | Grace                | Ada, Grace                               | [rows, ada, grace] ui-initialized
+    3.01s | Ada                | Grace                | Ada, Grace                               | -- offline: rename Ada and Grace
+    .     | Ada edited         | Grace                | Ada edited, Grace                        | [rows, ada] ui-changed
+    .     | Ada edited         | Grace                | Ada edited, Grace                        | offline:renameUser queued
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | [rows, grace] ui-changed
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | offline:renameUser queued
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | [users||1] server-data-changed (value: {"name":"Ada by Bob"})
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | -- back online: Ada conflicts, Grace is saved, then all but Ada is revalidated
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | offline:renameUser resolution-required
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | offline:renameUser replay-started
+    4.21s | Ada edited         | Grace edited         | Ada edited, Grace edited                 | [users||2] server-data-changed (value: {"name":"Grace edited (saved)"})
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | offline:renameUser replay-finished
+    4.22s | Ada edited         | Grace edited         | Ada edited, Grace edited                 | 🔴 >list-fetch-started
+    .     | Ada edited         | Grace edited         | Ada edited, Grace edited                 | 🟠 [users||2] >fetch-started
+    5.02s | Ada edited         | Grace edited         | Ada edited, Grace edited                 | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | [rows, grace] ui-changed
+    .     | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | 🟠 [users||2] <fetch-finished (value: {"id":2,"name":"Grace edited (saved)"})
+    6.02s | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+    6.03s | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | -- the user keeps their rename of Ada: Ada and the list are revalidated
+    .     | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | 🟡 >list-fetch-started
+    .     | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | 🟢 [users||1] >fetch-started
+    .     | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | 🔵 [users||2] >fetch-started
+    6.83s | Ada edited         | Grace edited (saved) | Ada edited, Grace edited (saved)         | 🟡 <list-fetch-finished (value: {"count":2})
+    .     | Ada edited (saved) | Grace edited (saved) | Ada edited (saved), Grace edited (saved) | [rows, ada] ui-changed
+    .     | Ada edited (saved) | Grace edited (saved) | Ada edited (saved), Grace edited (saved) | 🟢 [users||1] <fetch-finished (value: {"id":1,"name":"Ada edited (saved)"})
+    .     | Ada edited (saved) | Grace edited (saved) | Ada edited (saved), Grace edited (saved) | 🔵 [users||2] <fetch-finished (value: {"id":2,"name":"Grace edited (saved)"})
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a collection change waiting for a decision only holds back its own item: the other replayed items are revalidated after recovering', async () => {
+  network.setOffline();
+  const sessionKey = 'recovery-revalidation-collection-session';
+
+  type RenameItemOperations = {
+    renameItem: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string; name: string }
+    >;
+  };
+
+  // The server rejects Ada's rename until it is fixed, so the rename ends up
+  // waiting for the user to decide on it. It saves Grace's, adding a
+  // ` (saved)` suffix that only a revalidation brings to the client.
+  let serverRejectsAda = true;
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    RenameItemOperations
+  >(
+    { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
+    {
+      id: 'recovery-revalidation-collection-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+          replayRetry: { maxFailures: 1, intervalMs: 1 },
+        },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            renameItem: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: async ({ input }) => {
+                if (input.itemId === 'users||1' && serverRejectsAda) {
+                  throw new Error('rename rejected');
+                }
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  name: `${input.name} (saved)`,
+                });
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const ada = env.apiStore.useItem('users||1');
+    const grace = env.apiStore.useItem('users||2');
+    env.trackItemUI('ada', ada.data?.value.name ?? `- ${ada.status}`);
+    env.trackItemUI('grace', grace.data?.value.name ?? `- ${grace.status}`);
+  });
+  await flushAllTimers();
+
+  // Offline: rename both users.
+  env.addTimelineComments('beforeNextAction', [
+    'offline: rename Ada and Grace',
+  ]);
+  for (const [itemId, name] of [
+    ['users||1', 'Ada edited'],
+    ['users||2', 'Grace edited'],
+  ] as const) {
+    await act(async () => {
+      await env.apiStore.performMutation(itemId, {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState(itemId, (draft) => {
+            draft.value.name = name;
+          });
+        },
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: { operation: 'renameItem', input: { itemId, name } },
+      });
+    });
+  }
+
+  // Back online: Ada's rename waits for a decision and Grace's is saved. Once
+  // the queue is drained only Grace is refetched: a refetch of Ada would
+  // replace the rename the user still has to decide on.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: Ada needs a decision, Grace is saved and refetched',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Once the server is fixed, the user sends Ada's rename again: it is saved,
+  // and only now is Ada refetched.
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected Ada to wait for a decision');
+  serverRejectsAda = false;
+  env.addTimelineComments('beforeNextAction', [
+    'the user sends the rename of Ada again: it is saved, then Ada is refetched',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'renameItem', {
+      action: 'retry',
+    });
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ada                | grace                |
+    0     | Ada                | Grace                | [ada, grace] ui-initialized
+    1.01s | Ada                | Grace                | -- offline: rename Ada and Grace
+    .     | Ada edited         | Grace                | [ada] ui-changed
+    .     | Ada edited         | Grace                | offline:renameItem queued
+    .     | Ada edited         | Grace edited         | [grace] ui-changed
+    .     | Ada edited         | Grace edited         | offline:renameItem queued
+    .     | Ada edited         | Grace edited         | -- back online: Ada needs a decision, Grace is saved and refetched
+    .     | Ada edited         | Grace edited         | offline:renameItem replay-started
+    .     | Ada edited         | Grace edited         | offline:renameItem resolution-required
+    .     | Ada edited         | Grace edited         | offline:renameItem replay-started
+    2.21s | Ada edited         | Grace edited         | [users||2] server-data-changed (value: {"name":"Grace edited (saved)"})
+    .     | Ada edited         | Grace edited         | offline:renameItem replay-finished
+    2.22s | Ada edited         | Grace edited         | 🔴 [users||2] >fetch-started
+    3.02s | Ada edited         | Grace edited         | 🔴 [users||2] <fetch-finished (value: {"name":"Grace edited (saved)"})
+    .     | Ada edited         | Grace edited (saved) | [grace] ui-changed
+    4.02s | Ada edited         | Grace edited (saved) | -- the user sends the rename of Ada again: it is saved, then Ada is refetched
+    .     | Ada edited         | Grace edited (saved) | offline:renameItem replay-started
+    5.22s | Ada edited         | Grace edited (saved) | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+    .     | Ada edited         | Grace edited (saved) | offline:renameItem replay-finished
+    5.23s | Ada edited         | Grace edited (saved) | 🟠 [users||1] >fetch-started
+    .     | Ada edited         | Grace edited (saved) | 🟡 [users||2] >fetch-started
+    6.03s | Ada edited         | Grace edited (saved) | 🟠 [users||1] <fetch-finished (value: {"name":"Ada edited (saved)"})
+    .     | Ada edited (saved) | Grace edited (saved) | [ada] ui-changed
+    .     | Ada edited (saved) | Grace edited (saved) | 🟡 [users||2] <fetch-finished (value: {"name":"Grace edited (saved)"})
     "
   `);
 

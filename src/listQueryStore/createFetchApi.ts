@@ -264,6 +264,8 @@ export function createFetchApi<
   offlineController: OfflineAwareFetchController | null | undefined,
   itemPendingInvalidationFields: Map<string, Map<string, FetchType | null>>,
   itemsPendingFullInvalidation: Map<string, FetchType>,
+  /** Items list fetches keep the local version of, see `executeQueryFetch`. */
+  resolutionItemKeys: ReadonlySet<string>,
 ) {
   type Query = TSFDListQuery<QueryPayload>;
 
@@ -408,6 +410,7 @@ export function createFetchApi<
             partialResources,
             offsetPagination,
             offlineController,
+            resolutionItemKeys,
           );
           onQueryFetchSettled?.({
             requests,

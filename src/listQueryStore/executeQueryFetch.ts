@@ -38,6 +38,7 @@ function applyFetchedItems<
   getItemKey: (params: ItemPayload) => string,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
   appendToExisting: boolean,
+  resolutionItemKeys: ReadonlySet<string>,
 ) {
   const query = draft.queries[queryKey];
   if (!query) return;
@@ -45,6 +46,22 @@ function applyFetchedItems<
   query.status = 'success';
   query.wasLoaded = true;
   query.hasMore = hasMore;
+
+  // Items with a change waiting for a manual resolution keep their local
+  // version, which the server data would replace: their data, staying hidden
+  // when deleted locally, and staying in the list when the server no longer
+  // lists them (e.g. a creation it rejected). Positions in the replaced list,
+  // by item key.
+  let keptPositions: Map<string, number> | null = null;
+
+  if (resolutionItemKeys.size > 0 && !appendToExisting) {
+    for (const [index, itemKey] of query.items.entries()) {
+      if (resolutionItemKeys.has(itemKey)) {
+        keptPositions ??= new Map();
+        keptPositions.set(itemKey, index);
+      }
+    }
+  }
 
   if (!appendToExisting) {
     query.items = [];
@@ -55,8 +72,22 @@ function applyFetchedItems<
   for (const { data, itemPayload } of items) {
     const itemKey = getItemKey(itemPayload);
 
+    const keepsLocalVersion =
+      resolutionItemKeys.size > 0 &&
+      resolutionItemKeys.has(itemKey) &&
+      draft.items[itemKey] !== undefined;
+
+    if (keepsLocalVersion && draft.items[itemKey] === null) continue;
+
     if (partialResources) {
-      applyPartialItemMerge(draft, itemKey, data, fields, partialResources);
+      applyPartialItemMerge(
+        draft,
+        itemKey,
+        data,
+        fields,
+        partialResources,
+        keepsLocalVersion,
+      );
 
       const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
       if (invalidationFields) {
@@ -74,7 +105,7 @@ function applyFetchedItems<
           }
         }
       }
-    } else {
+    } else if (!keepsLocalVersion) {
       draft.items[itemKey] = reusePrevIfEqual(
         draft.items[itemKey] ?? undefined,
         data,
@@ -87,6 +118,8 @@ function applyFetchedItems<
       query.items.push(itemKey);
       existingItemKeys.add(itemKey);
     }
+
+    if (keepsLocalVersion) continue;
 
     const itemQuery = draft.itemQueries[itemKey];
 
@@ -101,6 +134,15 @@ function applyFetchedItems<
         wasLoaded: true,
         payload: itemPayload,
       };
+    }
+  }
+
+  if (keptPositions) {
+    // Kept items the server no longer lists go back where they were
+    for (const [itemKey, index] of keptPositions) {
+      if (existingItemKeys.has(itemKey)) continue;
+
+      query.items.splice(Math.min(index, query.items.length), 0, itemKey);
     }
   }
 }
@@ -121,9 +163,10 @@ export async function executeQueryFetch<
   errorNormalizer: (exception: Error) => StoreError,
   getItemKey: (params: ItemPayload) => string,
   updateItemSchedulerTiming: (itemKey: string, startTime: number) => void,
-  partialResources?: PartialResourcesConfig<ItemState>,
-  offsetPagination?: OffsetPaginationConfig,
-  offlineController?: OfflineAwareFetchController | null,
+  partialResources: PartialResourcesConfig<ItemState> | undefined,
+  offsetPagination: OffsetPaginationConfig | undefined,
+  offlineController: OfflineAwareFetchController | null | undefined,
+  resolutionItemKeys: ReadonlySet<string>,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
 
@@ -295,6 +338,7 @@ export async function executeQueryFetch<
               getItemKey,
               partialResources,
               appendToExisting,
+              resolutionItemKeys,
             );
           },
           { action: 'query-fetch-success' },

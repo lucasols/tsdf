@@ -1414,12 +1414,14 @@ describe('items of other stores', () => {
       8.01s  | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
       13.01s | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
       .      | no comments         | Write report, Review budget, Plan trip | offline:createTask resolution-required
-      .      | no comments         | Write report, Review budget, Plan trip | -- offline again: comment on the task whose creation failed
+      13.02s | no comments         | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
+      13.82s | no comments         | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
+      14.82s | no comments         | Write report, Review budget, Plan trip | -- offline again: comment on the task whose creation failed
       .      | Ask Ana about dates | Write report, Review budget, Plan trip | [comments] ui-changed
       .      | Ask Ana about dates | Write report, Review budget, Plan trip | -- discard the failed task creation
       .      | no comments         | Write report, Review budget            | [tasks, comments] ui-changed
-      14.02s | no comments         | Write report, Review budget            | 🔴 >list-fetch-started
-      14.82s | no comments         | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      15.83s | no comments         | Write report, Review budget            | 🟠 >list-fetch-started
+      16.63s | no comments         | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -1553,14 +1555,16 @@ describe('items of other stores', () => {
       10.01s | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       15.01s | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
-      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | -- online: add another comment to the task
+      15.02s | Ask Ana about the dates               | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
+      15.82s | Ask Ana about the dates               | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
+      16.82s | Ask Ana about the dates               | Write report, Review budget, Plan trip | -- online: add another comment to the task
       .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | [comments] ui-changed
-      16.01s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | -- the user asks to send the task creation again
+      17.82s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | -- the user asks to send the task creation again
       .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
-      17.21s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      19.02s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
       .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | offline:createTaskWithId replay-finished
-      20.82s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
-      21.62s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":3})
+      22.63s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🟠 >list-fetch-started
+      23.43s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🟠 <list-fetch-finished (value: {"count":3})
       "
     `);
 

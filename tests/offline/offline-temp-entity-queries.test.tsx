@@ -944,12 +944,16 @@ describe('temp entities declared in list queries', () => {
       .      | Ada, Alan | Ada, Grace, Alan | -- go online — the server rejects the create
       .      | Ada, Alan | Ada, Grace, Alan | offline:createUser replay-started
       .      | Ada, Alan | Ada, Grace, Alan | offline:createUser resolution-required
-      13s    | Ada, Alan | Ada, Grace, Alan | -- the user discards the create
+      12.01s | Ada, Alan | Ada, Grace, Alan | 🔴 >list-fetch-started
+      .      | Ada, Alan | Ada, Grace, Alan | 🟠 >list-fetch-started
+      12.81s | Ada, Alan | Ada, Grace, Alan | 🔴 <list-fetch-finished (value: {"count":2})
+      .      | Ada, Alan | Ada, Grace, Alan | 🟠 <list-fetch-finished (value: {"count":1})
+      13.81s | Ada, Alan | Ada, Grace, Alan | -- the user discards the create
       .      | Ada       | Ada, Grace       | [all-users, a-users] ui-changed
-      13.01s | Ada       | Ada, Grace       | 🔴 >list-fetch-started
-      .      | Ada       | Ada, Grace       | 🟠 >list-fetch-started
-      13.81s | Ada       | Ada, Grace       | 🔴 <list-fetch-finished (value: {"count":2})
-      .      | Ada       | Ada, Grace       | 🟠 <list-fetch-finished (value: {"count":1})
+      13.82s | Ada       | Ada, Grace       | 🟡 >list-fetch-started
+      .      | Ada       | Ada, Grace       | 🟢 >list-fetch-started
+      14.62s | Ada       | Ada, Grace       | 🟡 <list-fetch-finished (value: {"count":2})
+      .      | Ada       | Ada, Grace       | 🟢 <list-fetch-finished (value: {"count":1})
       "
     `);
 

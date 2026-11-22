@@ -347,6 +347,11 @@ type RegisteredStore = {
   id: string;
   reset: () => void;
   onTransportReconnect: () => void;
+  /**
+   * The store can be revalidated against the server again: its session
+   * recovered or one of its changes waiting for a manual resolution was
+   * handled. Items still waiting for a resolution are left out.
+   */
   onOfflineRecovery: () => void;
   /**
    * Applies a generic resolution action to one of the store's own offline
