@@ -35,6 +35,7 @@ import {
 import {
   recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
+  useOfflineStoreAttemptedCreationEntityIds,
   useOfflineStoreEntitiesWithPayload,
   useOfflineStoreItemState,
   useOfflineStoreResolutions,
@@ -3461,11 +3462,20 @@ export function createListQueryStore<
       SelectedItem
     > = {},
   ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload> {
+    const offlineStoreName = resolvedPersistentStorageConfig ? id : undefined;
     const offlineEntities = useOfflineStoreEntitiesWithPayload({
       sessionKey: getSessionKeyForRuntime(),
       inactiveScope: id,
-      storeName: resolvedPersistentStorageConfig ? id : undefined,
+      storeName: offlineStoreName,
     });
+    // Only read by the `selector`'s `offlineState`, so hooks without one
+    // don't re-render when a creation of the store starts being sent
+    const attemptedCreationEntityIds =
+      useOfflineStoreAttemptedCreationEntityIds(
+        getSessionKeyForRuntime(),
+        id,
+        options.selector ? offlineStoreName : undefined,
+      );
     const offlineOverlaysSelector = useCallback(
       (
         state: Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>,
@@ -3494,6 +3504,7 @@ export function createListQueryStore<
       !!persistence && !persistence.hasAsyncPreload,
       persistence?.readHydratedItem,
       offlineEntities,
+      attemptedCreationEntityIds,
       offlineOverlays,
     );
   };

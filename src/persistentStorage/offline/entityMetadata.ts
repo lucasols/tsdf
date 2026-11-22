@@ -69,6 +69,20 @@ export function toItemOfflineState(
 ): ItemOfflineState | null {
   if (entity?.entityKind !== 'item') return null;
 
+  return buildItemOfflineState(entity, attemptedCreationEntityIds);
+}
+
+/**
+ * {@link toItemOfflineState} for an entity already known to be an item.
+ *
+ * @param attemptedCreationEntityIds - ids of the session's (or the store's)
+ * unsent creations whose creation was already sent or waits for a manual
+ * resolution
+ */
+export function buildItemOfflineState(
+  entity: InternalGlobalOfflineEntity,
+  attemptedCreationEntityIds: readonly string[],
+): ItemOfflineState {
   // A temp entity not reconciled to its server payload yet (the stores'
   // `unsentCreationItemKeys`), or an item with a client-generated id whose
   // creation the server has not confirmed yet.

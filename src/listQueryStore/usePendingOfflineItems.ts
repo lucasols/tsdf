@@ -9,8 +9,14 @@ import {
 } from 'react';
 import { Store } from 't-state';
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
-import { shouldApplyOfflineOverlay } from '../persistentStorage/offline/entityMetadata';
-import type { InternalGlobalOfflineEntity } from '../persistentStorage/offline/types';
+import {
+  buildItemOfflineState,
+  shouldApplyOfflineOverlay,
+} from '../persistentStorage/offline/entityMetadata';
+import type {
+  InternalGlobalOfflineEntity,
+  ItemOfflineState,
+} from '../persistentStorage/offline/types';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
   ItemLoadedFields,
@@ -24,8 +30,20 @@ export type UsePendingOfflineItemsOptions<
   ItemPayload extends ValidPayload,
   SelectedItem,
 > = {
-  /** Maps each visible pending item before it is returned from the hook. */
-  selector?: (data: ItemState, payload: ItemPayload) => SelectedItem;
+  /**
+   * Maps each visible pending item before it is returned from the hook.
+   *
+   * `offlineState` is the item's offline sync state, the same value
+   * `useItemOfflineState(payload)` returns for it (e.g. `isUnsentCreation` is
+   * `true` for an item created offline the server has not confirmed yet), so
+   * no lookup in `useOfflineEntities()` is needed to tell a new item from an
+   * edited one.
+   */
+  selector?: (
+    data: ItemState,
+    payload: ItemPayload,
+    offlineState: ItemOfflineState,
+  ) => SelectedItem;
   /** Narrows the hook output using the tracked item payload, before selection. */
   filterPayload?: (payload: ItemPayload) => boolean;
   /** Includes entities currently blocked in manual resolution. */
@@ -60,6 +78,7 @@ export function usePendingOfflineItems<
         | undefined)
     | undefined,
   offlineEntities: readonly InternalGlobalOfflineEntity[],
+  attemptedCreationEntityIds: readonly string[],
   offlineOverlays: Readonly<
     Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
   >,
@@ -221,7 +240,11 @@ export function usePendingOfflineItems<
 
         items.push(
           selector
-            ? selector(item, itemPayload)
+            ? selector(
+                item,
+                itemPayload,
+                buildItemOfflineState(entity, attemptedCreationEntityIds),
+              )
             : // WORKAROUND: When no selector is provided, the public API
               // guarantees `SelectedItem` defaults to `ItemState`, but that
               // defaulted generic relationship is not expressible to TS here.
@@ -232,6 +255,7 @@ export function usePendingOfflineItems<
       return { items, deletedItems };
     },
     [
+      attemptedCreationEntityIds,
       eligibleEntities,
       filterPayload,
       offlineOverlays,
