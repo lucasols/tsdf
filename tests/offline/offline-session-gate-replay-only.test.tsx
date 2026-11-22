@@ -254,3 +254,128 @@ test('replay-only gate: queued changes are still sent, but new changes are no lo
     "
   `);
 });
+
+test('replay-only gate: an edit made while the outage is not yet known to be over waits for the older queued edit of the same item', async () => {
+  const sessionKey = 'gate-replay-only-outage';
+  const storeName = 'gate-replay-only-outage-store';
+  const replayedInputs: { id: string; name: string }[] = [];
+  let isServerDown = false;
+  // The workspace setting the app reads
+  let workspaceHasOfflineMode = true;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => (workspaceHasOfflineMode ? true : 'replay-only'),
+      network: network.config,
+      classifyFailure: (error) =>
+        error instanceof Error && error.message === 'server error'
+          ? 'outage'
+          : 'ignore',
+      // The server is asked again 30s after the outage was detected
+      outage: { enabled: true, recoveryCheck: () => !isServerDown },
+    },
+  });
+
+  const env: ReturnType<
+    typeof createCollectionStoreTestEnv<{ name: string }, RenameItemOperations>
+  > = createCollectionStoreTestEnv<{ name: string }, RenameItemOperations>(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            renameItem: {
+              inputSchema: rc_object({ id: rc_string, name: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.id],
+              execute: ({ input }) => {
+                replayedInputs.push(input);
+                if (isServerDown) throw new Error('server error');
+                return env.serverTable
+                  .delayedUpdateItem(input.id, { name: input.name })
+                  .then(() => ({ value: { name: input.name } }));
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.id, () => ({
+                  value: { name: input.name },
+                }));
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // The direct request of a rename: it fails while the server is down
+  function renameItem(id: string, name: string) {
+    return env.apiStore.performMutation(id, {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState(id, () => ({ value: { name } }));
+      },
+      mutation: async () => {
+        if (isServerDown) throw new Error('server error');
+        await env.serverTable.delayedUpdateItem(id, { name });
+        return { value: { name } };
+      },
+      offline: { operation: 'renameItem', input: { id, name } },
+    });
+  }
+
+  await Promise.resolve();
+
+  // -- The server is down: the rename fails, starts the outage and is queued --
+  isServerDown = true;
+  const queuedResult = await resolveAfterAllTimers(
+    renameItem('users||1', 'Grace'),
+  );
+  expect(queuedResult.ok && queuedResult.value).toMatchInlineSnapshot(`
+    kind: 'queued'
+  `);
+  expect(storeManager.getOfflineStatus().outage.active).toMatchInlineSnapshot(
+    `"✅"`,
+  );
+
+  // -- The workspace loses offline mode while the rename is still queued --
+  workspaceHasOfflineMode = false;
+  storeManager.setOfflineRuntimeConfig({}).unwrap();
+  await Promise.resolve();
+
+  // -- The server comes back before it is asked again, and the user renames
+  // the same item --
+  isServerDown = false;
+  const newerResult = await resolveAfterAllTimers(
+    renameItem('users||1', 'Grace Hopper'),
+  );
+  // Sent on its own, it would succeed, end the outage and then be
+  // overwritten by the older queued rename: it joins the queue behind it
+  // instead, even though new offline work is no longer queued
+  expect(newerResult.ok && newerResult.value).toMatchInlineSnapshot(`
+    kind: 'queued'
+  `);
+  await flushAllTimers();
+
+  // Both renames reached the server, in the order they were made, so the
+  // newest one wins
+  expect(replayedInputs.slice(-2)).toMatchInlineSnapshot(`
+    - { id: 'users||1', name: 'Grace' }
+    - { id: 'users||1', name: 'Grace Hopper' }
+  `);
+  expect(env.serverTable.get('users||1')).toMatchInlineSnapshot(`
+    name: 'Grace Hopper'
+  `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+  expect(storeManager.getOfflineStatus().outage.active).toMatchInlineSnapshot(
+    `"❌"`,
+  );
+});

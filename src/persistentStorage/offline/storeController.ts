@@ -908,22 +908,20 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     prepared: PreparedQueuedMutation,
   ): PreparedOfflineMutation['initialAction'] {
-    const status = current.session.getStatus();
+    const cause = current.session.getStatus().isOfflineMode
+      ? getActiveMutationQueueingCause(current)
+      : null;
+    if (cause !== null && isMutationQueueingAllowed(cause)) return 'queue';
 
-    if (!status.isOfflineMode) {
-      // Sent on its own, an online mutation would reach the server before
-      // the older mutations still queued for the same entities, which would
-      // then overwrite it (or it would target an entity that does not exist
-      // there yet). It joins the queue to keep the order the user made them.
-      return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
-    }
-
-    const cause = getActiveMutationQueueingCause(current);
-    if (cause === null) return 'run';
-
-    if (isMutationQueueingAllowed(cause)) return 'queue';
-
-    return 'run';
+    // Sent on its own, a mutation would reach the server before the older
+    // mutations still queued for the same entities, which would then
+    // overwrite it (or it would target an entity that does not exist there
+    // yet). It joins the queue to keep the order the user made them, also
+    // when new offline work is not queued: in offline mode the server may
+    // already be reachable (e.g. an outage that ended before the next
+    // recovery check), and the direct run succeeding would replay the older
+    // work over it.
+    return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
   }
 
   async function clearOfflineStatusOnSuccess(

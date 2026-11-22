@@ -108,12 +108,18 @@ export type OfflineMutationQueueingConfig = {
   /**
    * Controls whether offline-enabled mutations may queue while network mode is
    * active, including browser-detected offline and classified network failures.
+   *
+   * With `'disallow'`, a mutation of an entity that already has queued work
+   * still joins the queue behind it, so that older work does not overwrite it.
    * @default 'allow'
    */
   network?: OfflineMutationQueueingPolicy;
   /**
    * Controls whether offline-enabled mutations may queue while outage mode is
    * active.
+   *
+   * With `'disallow'`, a mutation of an entity that already has queued work
+   * still joins the queue behind it, so that older work does not overwrite it.
    * @default 'allow'
    */
   outage?: OfflineMutationQueueingPolicy;
@@ -372,9 +378,9 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * status, recovery, replay and resolutions), except that mutations with an
      * `offline` descriptor are never queued because the session is offline,
      * as with `mutationQueueing` `'disallow'` for both causes: they run as
-     * online mutations and fail with their normal errors. While online, a
-     * mutation of an entity with queued work still joins the queue behind it,
-     * so it is not overwritten by that older work.
+     * online mutations and fail with their normal errors. A mutation of an
+     * entity with queued work still joins the queue behind it, also while the
+     * session is offline, so it is not overwritten by that older work.
      *
      * It is read before every fetch and every mutation with an `offline`
      * descriptor, on browser online/offline events, before each recovery
