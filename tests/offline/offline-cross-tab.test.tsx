@@ -1571,7 +1571,7 @@ test('a file another tab uploaded and deleted is neither uploaded again nor writ
   expect(getOpfsDirTree(opfs)).not.toContain('binary.blob');
 });
 
-test('a staged file rendered in one tab is cleared there once another tab sends its edit and deletes it', async () => {
+test('a staged file rendered in one tab is replaced there by its server ref once another tab sends its edit and deletes it', async () => {
   createMockBrowserOpfs();
   network.setOffline();
   await openTab('A', { focused: true, uploads: true });
@@ -1600,9 +1600,11 @@ test('a staged file rendered in one tab is cleared there once another tab sends 
   );
 
   // Tab B's preview no longer exposes the deleted file, and its object URL is
-  // revoked instead of leaking.
-  const { status, url } = preview.result.current;
-  expect({ status, url }).toMatchInlineSnapshot(`
+  // revoked instead of leaking. It reports the server ref tab A uploaded the
+  // photo to, so tab B renders the uploaded photo instead of uploading it.
+  const { status, url, resolvedRef } = preview.result.current;
+  expect({ status, url, resolvedRef }).toMatchInlineSnapshot(`
+    resolvedRef: 'server:photo'
     status: 'missing'
     url: null
   `);

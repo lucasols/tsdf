@@ -81,19 +81,45 @@ export type ReplaceOfflineUploadArgs = {
  *   skip this state and are returned on the first render.
  * - `success`: the file is staged; `url` and `file` are available.
  * - `missing`: no upload with this id is staged in the active session (never
- *   staged, deleted, expired, or already consumed by its mutation).
+ *   staged, deleted, expired, or already consumed by its mutation). When the
+ *   upload was sent and then deleted with the queued work that used it,
+ *   `resolvedRef` holds its server ref: render the uploaded file from it
+ *   instead of uploading the file again.
  * - `error`: reading the staged file from the upload adapter failed.
  */
-export type OfflineUploadFile =
+export type OfflineUploadFile<
+  TResolvedRef extends ValidPayload = ValidPayload,
+> =
   | {
       /** Current read status of the staged file. */
-      status: 'idle' | 'loading' | 'missing';
+      status: 'idle' | 'loading';
       /** Managed object URL of the staged file, only set on `success`. */
       url: null;
       /** Staged file, only set on `success`. */
       file: null;
       /** Read failure, only set on `error`. */
       error: null;
+      /** Server ref of an upload released after it was sent, only set on `missing`. */
+      resolvedRef: null;
+    }
+  | {
+      /** No upload with this id is staged in the active session. */
+      status: 'missing';
+      /** Managed object URL of the staged file, only set on `success`. */
+      url: null;
+      /** Staged file, only set on `success`. */
+      file: null;
+      /** Read failure, only set on `error`. */
+      error: null;
+      /**
+       * Server ref the upload resolved to, when it was sent and then deleted
+       * because the queued work that used it left the queue. It is the ref
+       * `resolveOfflineUpload(id)` returns, kept in memory for the rest of the
+       * app session in every tab open when the upload was deleted. `null` when
+       * the id is unknown: never staged, deleted before it was sent, deleted
+       * with `deleteOfflineUpload`, expired, or released before a reload.
+       */
+      resolvedRef: TResolvedRef | null;
     }
   | {
       /** The file is staged and ready to render. */
@@ -107,6 +133,8 @@ export type OfflineUploadFile =
       file: File;
       /** Read failure, only set on `error`. */
       error: null;
+      /** Server ref of an upload released after it was sent, only set on `missing`. */
+      resolvedRef: null;
     }
   | {
       /** Reading the staged file from the upload adapter failed. */
@@ -117,6 +145,8 @@ export type OfflineUploadFile =
       file: null;
       /** Failure reported by the upload adapter. */
       error: Error;
+      /** Server ref of an upload released after it was sent, only set on `missing`. */
+      resolvedRef: null;
     };
 
 /** Public metadata for a file staged for offline mutation replay. */

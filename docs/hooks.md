@@ -560,5 +560,6 @@ const { status, url, file, error } = storeManager.useOfflineUploadFile(
 - `url` - Object URL of the staged file, or `null` unless `status` is `'success'`
 - `file` - The staged `File`, or `null` unless `status` is `'success'`
 - `error` - The read failure, or `null` unless `status` is `'error'`
+- `resolvedRef` - On `'missing'`, the server ref of an upload that was sent and then deleted with the queued work that used it, otherwise `null`
 
-`'missing'` means no upload with this id is staged in the active session: it was never staged, or it was deleted, expired or already consumed by its mutation. See [Offline: Rendering staged files](./offline.md#rendering-staged-files) for the URL lifetime and the pattern for switching to the uploaded file.
+`'missing'` means no upload with this id is staged in the active session: it was never staged, or it was deleted, expired or already consumed by its mutation. When it was sent and then deleted with the queued work that used it, `resolvedRef` holds its server ref for the rest of the app session, so the component can render the uploaded file instead of uploading it again. See [Offline: Rendering staged files](./offline.md#rendering-staged-files) for the URL lifetime and the pattern for switching to the uploaded file.

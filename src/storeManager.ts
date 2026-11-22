@@ -232,10 +232,16 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
    * deleted or leaves the session. Pass a falsy id to disable the hook (status
    * `idle`), e.g. once the entity holds the uploaded server ref instead of the
    * staged upload id.
+   *
+   * Once an upload that was sent is deleted because the queued work that used
+   * it left the queue, the hook reports `missing` with the upload's server ref
+   * in `resolvedRef` (the ref `resolveOfflineUpload(id)` returns), so data
+   * that still holds the staged id can render the uploaded file instead of
+   * uploading it again.
    */
   useOfflineUploadFile: (
     id: string | false | null | undefined,
-  ) => OfflineUploadFile;
+  ) => OfflineUploadFile<TUploadRef>;
 };
 
 /** Shared coordinator passed to every TSDF store instance in an app/session. */

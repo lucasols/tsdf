@@ -18,6 +18,7 @@ import {
   type OfflineSessionConfig,
   type OfflineUpload,
   type OfflineUploadAdapter,
+  type OfflineUploadFile,
   type OfflineUploadRefSchema,
   type PersistentStorageSchema,
   type StoreManager,
@@ -133,6 +134,17 @@ test('createStoreManager infers the upload ref type from the upload transport an
   typingTest.expectTypesAreEqual<
     NonNullable<typeof firstUpload_>['resolvedRef'],
     UploadedFileRef | undefined
+  >();
+
+  // ...as does the ref the staged file hook reports once the upload was sent
+  // and released...
+  typingTest.expectTypesAreEqual<
+    ReturnType<typeof storeManager.useOfflineUploadFile>,
+    OfflineUploadFile<UploadedFileRef>
+  >();
+  typingTest.expectTypesAreEqual<
+    ReturnType<typeof storeManager.useOfflineUploadFile>['resolvedRef'],
+    UploadedFileRef | null
   >();
 
   // ...and so do both resolve APIs.
