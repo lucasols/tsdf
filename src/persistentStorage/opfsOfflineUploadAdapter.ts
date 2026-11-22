@@ -326,38 +326,52 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
 
   /**
    * Root directory for reads and removals, which must not create storage:
-   * `null` when OPFS is unavailable or nothing was ever staged, since no
-   * upload can be stored there either way.
+   * `null` when OPFS is unavailable (no `navigator.storage.getDirectory`, or
+   * it rejects, as in Firefox private windows) or nothing was ever staged,
+   * since no upload can be stored there either way. Saves still fail when
+   * OPFS is unavailable.
    */
   async #getExistingRootDir(): Promise<FileSystemDirectoryHandle | null> {
-    if (this.#rootDirPromise !== null) return this.#rootDirPromise;
+    try {
+      if (this.#rootDirPromise !== null) return await this.#rootDirPromise;
 
-    const navigatorRoot = await getNavigatorStorageDirectoryIfAvailable();
-    if (navigatorRoot === null) return null;
+      const navigatorRoot = await getNavigatorStorageDirectoryIfAvailable();
+      if (navigatorRoot === null) return null;
 
-    const root = await getDirectoryHandleIfExists(
-      navigatorRoot,
-      OPFS_UPLOADS_ROOT_DIR,
-    );
-    // An existing root is reused by later calls instead of opened again
-    if (root !== null) this.#rootDirPromise ??= Promise.resolve(root);
-    return root;
+      return await getDirectoryHandleIfExists(
+        navigatorRoot,
+        OPFS_UPLOADS_ROOT_DIR,
+      );
+    } catch {
+      return null;
+    }
   }
 
   async #getRootDir(): Promise<FileSystemDirectoryHandle> {
-    this.#rootDirPromise ??= (async () => {
+    const rootDirPromise = (this.#rootDirPromise ??= (async () => {
       const root = await getNavigatorStorageDirectory();
       return root.getDirectoryHandle(OPFS_UPLOADS_ROOT_DIR, { create: true });
-    })();
+    })());
 
-    return this.#rootDirPromise;
+    try {
+      return await rootDirPromise;
+    } catch (error) {
+      // Opening OPFS is tried again by the next save instead of failing for
+      // the rest of the page load
+      if (this.#rootDirPromise === rootDirPromise) this.#rootDirPromise = null;
+      throw error;
+    }
   }
 
   async #getSessionDir(
     sessionKey: string,
     create: boolean,
   ): Promise<FileSystemDirectoryHandle | null> {
-    const root = await this.#getRootDir();
+    const root = create
+      ? await this.#getRootDir()
+      : await this.#getExistingRootDir();
+    if (!root) return null;
+
     if (create) {
       return root.getDirectoryHandle(encodePathSegment(sessionKey), {
         create: true,

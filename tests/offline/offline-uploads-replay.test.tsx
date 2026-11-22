@@ -954,7 +954,7 @@ test('upload metadata survives an app restart and reaches the transport when upl
       'tsdf-uploads/offline-upload-metadata-restart-session/plain-file/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689600027
+    c: 1735689600028
     i: 'plain-file'
     k: 'offline-upload-metadata-restart-session'
     l: 1
@@ -962,7 +962,7 @@ test('upload metadata survives an app restart and reaches the transport when upl
     n: 'notes.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689600027
+    u: 1735689600028
     z: 16
   `);
 
@@ -1160,7 +1160,7 @@ test('replacing a staged upload keeps its metadata unless new metadata is provid
     n: 'moved.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689612024
+    u: 1735689612026
     z: 13
   `);
 

@@ -294,7 +294,7 @@ test('manual uploads expire only after one week in the current online session', 
   `);
   expect(retentionStartedMetadata).toMatchInlineSnapshot(`
     c: 1735689612000
-    g: 1736380817012
+    g: 1736380817014
     i: 'stale-manual-upload'
     k: 'offline-upload-retention-session'
     l: 1
@@ -302,7 +302,7 @@ test('manual uploads expire only after one week in the current online session', 
     n: 'retention.txt'
     o: 'manual'
     t: 'pending'
-    u: 1736380817012
+    u: 1736380817014
     z: 14
   `);
 
@@ -717,7 +717,7 @@ test('queued direct uploads keep same logical field names isolated per mutation'
         ├ offline-direct-upload-collision-doc:1735689612000:eeeeeeee:avatar (0.74 kb)
         │ ├ binary.blob (0.06 kb)
         │ └ metadata.json (0.56 kb)
-        └ offline-direct-upload-collision-doc:1735689612012:i:avatar (0.72 kb)
+        └ offline-direct-upload-collision-doc:1735689612014:i:avatar (0.72 kb)
           ├ binary.blob (0.06 kb)
           └ metadata.json (0.54 kb)"
     `);
@@ -798,6 +798,94 @@ test('clearSessionStorage removes registered offline uploads for local-sync sess
   expect(restartedSession.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
+
+test.each([
+  { browser: 'without OPFS', storage: {} },
+  {
+    // Like Firefox private windows
+    browser: 'that rejects opening OPFS',
+    storage: {
+      getDirectory: () =>
+        Promise.reject(
+          new DOMException(
+            'Security error when calling GetDirectory',
+            'SecurityError',
+          ),
+        ),
+    },
+  },
+])(
+  'in a browser $browser, the app loads with no staged uploads and no storage error, and staging a file still fails',
+  async ({ storage }) => {
+    Object.defineProperty(globalThis.navigator, 'storage', {
+      value: storage,
+      writable: true,
+      configurable: true,
+    });
+    const storageErrors: string[] = [];
+    const session = createStoreManager({
+      getSessionKey: () => 'offline-upload-opfs-unavailable-session',
+      errorNormalizer: normalizeError,
+      onPersistentStorageError: (error) => {
+        storageErrors.push(error instanceof Error ? error.message : 'unknown');
+      },
+      offlineSession: {
+        // Offline support is turned off for this user, the uploads config is
+        // still set up
+        enabled: () => false,
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id }) => Promise.resolve(`server:${id}`),
+        },
+      },
+    });
+    // A store with offline operations, as in the app
+    createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(1, {
+      id: 'offline-upload-opfs-unavailable-doc',
+      storeManager: session,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: rc_object({ value: rc_number }),
+              kind: 'update',
+              execute: ({ input }) => Promise.resolve(input),
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    });
+
+    // --- App load: a screen lists the staged uploads ---
+    const uploadsHook = renderHook(() => session.useOfflineUploads());
+    await flushAllTimers();
+
+    // Nothing can be staged without OPFS, so there is nothing to restore and
+    // nothing to report on every load.
+    expect(uploadsHook.result.current).toMatchInlineSnapshot(`[]`);
+    expect(storageErrors).toMatchInlineSnapshot(`[]`);
+
+    // --- Action: the user attaches a file anyway ---
+    const saveResult = await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'avatar',
+        file: new File(['avatar bytes'], 'avatar.png', {
+          type: 'image/png',
+          lastModified: 1,
+        }),
+      }),
+    );
+
+    // The file can't be kept, so staging it fails instead of pretending it
+    // was saved.
+    expect(saveResult.ok).toBe(false);
+  },
+);
 
 test('clearAllSessionStorage on logout removes the staged uploads of a session not opened since the page loaded', async () => {
   const mockBrowserOpfs = createMockBrowserOpfs();
@@ -1114,7 +1202,7 @@ test('replacing a file while the session is still restoring stored uploads updat
       updatedAt: new Date(upload.updatedAt).toISOString(),
     })),
   ).toMatchInlineSnapshot(`
-    - createdAt: '2025-01-01T00:00:00.003Z'
+    - createdAt: '2025-01-01T00:00:00.002Z'
       fileName: 'final.txt'
       id: 'attachment'
       state: 'pending'
