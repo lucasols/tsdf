@@ -103,7 +103,12 @@ import {
 } from '../utils/browserTabsSync';
 import { createOptimisticMutationTracker } from '../utils/optimisticMutationTracker';
 import { revertOptimisticChange } from '../utils/optimisticRollback';
-import { performMutationWithLifecycle } from '../utils/performMutation';
+import {
+  cancelPendingDebouncedMutation,
+  performMutationWithLifecycle,
+  type MutationDebounceKey,
+  type PendingDebouncedMutation,
+} from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   AbortedStoreError,
@@ -908,6 +913,18 @@ export type CollectionStore<
     ItemPayload,
     TOfflineOperations
   >;
+  /**
+   * Cancels the `performMutation` call waiting for the debounce window of the
+   * `debounce` group with this `context` and `payload`, e.g. an edit of an
+   * item deleted within the window. The call never runs its mutation (nor is
+   * queued offline) and resolves `Err(mutationSkipped)`, and the optimistic
+   * updates of the group (the call and the calls it superseded) are reverted
+   * as on a failure. Call it before starting the mutation that replaces it.
+   *
+   * Returns `false` when no call of the group is waiting, e.g. its mutation
+   * already started, which is not cancelled.
+   */
+  cancelDebouncedMutation: (debounce: MutationDebounceKey) => boolean;
   /** Notifies the store that a shared transport reconnected and should revalidate active data. */
   onTransportReconnect: () => void;
 };
@@ -2508,9 +2525,9 @@ export function createCollectionStore<
     hadPendingFetch: boolean;
   };
 
-  const pendingDebounceRollbacks = new Map<
+  const pendingDebounces = new Map<
     string,
-    CollectionItemRollback[][]
+    PendingDebouncedMutation<CollectionItemRollback[]>
   >();
   const optimisticMutations = createOptimisticMutationTracker();
 
@@ -2640,6 +2657,141 @@ export function createCollectionStore<
       ),
     });
 
+    const revertOptimisticUpdates = (rollbacks: CollectionItemRollback[][]) => {
+      const revertedItems = new Map<
+        string,
+        {
+          payload: ItemPayload;
+          item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
+        }
+      >();
+      const changedItems = new Map<string, ItemPayload>();
+      // The oldest reverted mutation of each item, older than this one when
+      // reverting superseded debounced calls
+      const oldestMutationIds = new Map<string, number>();
+
+      // Newest first, so each update is reverted on top of the state it
+      // produced. Item data changed again since is kept and revalidated.
+      for (let i = rollbacks.length - 1; i >= 0; i--) {
+        for (const rollback of rollbacks[i] ?? []) {
+          const { itemKey, before, after } = rollback;
+          oldestMutationIds.set(itemKey, rollback.mutationId);
+          const current = revertedItems.has(itemKey)
+            ? revertedItems.get(itemKey)?.item
+            : store.state[itemKey];
+          // A failed create is removed even if its metadata changed since,
+          // e.g. by an invalidation
+          const reverted =
+            !before && after && current && current.data === after.data
+              ? { value: before, changed: false }
+              : revertOptimisticChange(current, before, after);
+          revertedItems.set(itemKey, {
+            payload: rollback.payload,
+            item: reverted.value,
+          });
+          if (reverted.changed) changedItems.set(itemKey, rollback.payload);
+        }
+      }
+
+      for (const [itemKey, { item, payload: itemPayload }] of revertedItems) {
+        const current = store.state[itemKey];
+        if (item === current) {
+          revertedItems.delete(itemKey);
+          continue;
+        }
+
+        // A newer optimistic update may have left the item as it was, e.g.
+        // saving the same value, so a revert can contradict a newer
+        // mutation that succeeded
+        if (
+          !optimisticMutations.hasNewer(
+            itemKey,
+            oldestMutationIds.get(itemKey) ?? mutationId,
+            mutationId,
+          )
+        ) {
+          continue;
+        }
+
+        if (!item && current) {
+          // A removed item can't be revalidated, so it's kept until then
+          revertedItems.delete(itemKey);
+        }
+        changedItems.set(itemKey, itemPayload);
+      }
+
+      if (revertedItems.size > 0) {
+        const restoredItemKeys: string[] = [];
+        // Deleting an item drops its pending fetch work (an in-flight or
+        // delayed refetch), so restoring it must resume that work, even
+        // when no hook is mounted to react to an invalidation
+        const interruptedFetchPayloads: ItemPayload[] = [];
+
+        for (const rollbackGroup of rollbacks) {
+          for (const rollback of rollbackGroup) {
+            const { itemKey } = rollback;
+            if (
+              rollback.before &&
+              rollback.hadPendingFetch &&
+              !store.state[itemKey] &&
+              revertedItems.get(itemKey)?.item &&
+              !interruptedFetchPayloads.includes(rollback.payload)
+            ) {
+              interruptedFetchPayloads.push(rollback.payload);
+            }
+          }
+        }
+
+        runWithBroadcastConsistency('confirmed', () => {
+          store.produceState(
+            (draft) => {
+              for (const [itemKey, { item }] of revertedItems) {
+                if (item === undefined) {
+                  delete draft[itemKey];
+                  continue;
+                }
+
+                draft[itemKey] = item;
+              }
+            },
+            { action: 'rollback-mutation-error' },
+          );
+
+          for (const [
+            itemKey,
+            { item, payload: itemPayload },
+          ] of revertedItems) {
+            if (item) {
+              restoredItemKeys.push(itemKey);
+            } else {
+              cleanupItemResources(itemKey, itemPayload);
+            }
+
+            // Newer data kept until the revalidation, or still carrying
+            // another in-flight optimistic update, isn't confirmed by the
+            // server, so other tabs must not treat it as such
+            publishItemSnapshot(
+              itemKey,
+              changedItems.has(itemKey) ||
+                optimisticMutations.hasOtherInFlight(itemKey, mutationId)
+                ? 'optimistic'
+                : 'confirmed',
+            );
+          }
+        });
+
+        if (restoredItemKeys.length > 0) {
+          touchItemsAndMaybeEnforceLimits(restoredItemKeys);
+        }
+
+        if (interruptedFetchPayloads.length > 0) {
+          scheduleFetch('highPriority', interruptedFetchPayloads);
+        }
+      }
+
+      if (changedItems.size > 0) invalidateItem([...changedItems.values()]);
+    };
+
     // Whether the server accepted the mutation, even if `onSuccess` threw
     let accepted = false;
     const result = await performMutationWithLifecycle(
@@ -2664,138 +2816,7 @@ export function createCollectionStore<
       (exception, rollbacks) => {
         const error = toStoreMutationError(exception, errorNormalizer);
 
-        const revertedItems = new Map<
-          string,
-          {
-            payload: ItemPayload;
-            item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
-          }
-        >();
-        const changedItems = new Map<string, ItemPayload>();
-        // The oldest reverted mutation of each item, older than this one when
-        // reverting superseded debounced calls
-        const oldestMutationIds = new Map<string, number>();
-
-        // Newest first, so each update is reverted on top of the state it
-        // produced. Item data changed again since is kept and revalidated.
-        for (let i = rollbacks.length - 1; i >= 0; i--) {
-          for (const rollback of rollbacks[i] ?? []) {
-            const { itemKey, before, after } = rollback;
-            oldestMutationIds.set(itemKey, rollback.mutationId);
-            const current = revertedItems.has(itemKey)
-              ? revertedItems.get(itemKey)?.item
-              : store.state[itemKey];
-            // A failed create is removed even if its metadata changed since,
-            // e.g. by an invalidation
-            const reverted =
-              !before && after && current && current.data === after.data
-                ? { value: before, changed: false }
-                : revertOptimisticChange(current, before, after);
-            revertedItems.set(itemKey, {
-              payload: rollback.payload,
-              item: reverted.value,
-            });
-            if (reverted.changed) changedItems.set(itemKey, rollback.payload);
-          }
-        }
-
-        for (const [itemKey, { item, payload: itemPayload }] of revertedItems) {
-          const current = store.state[itemKey];
-          if (item === current) {
-            revertedItems.delete(itemKey);
-            continue;
-          }
-
-          // A newer optimistic update may have left the item as it was, e.g.
-          // saving the same value, so a revert can contradict a newer
-          // mutation that succeeded
-          if (
-            !optimisticMutations.hasNewer(
-              itemKey,
-              oldestMutationIds.get(itemKey) ?? mutationId,
-              mutationId,
-            )
-          ) {
-            continue;
-          }
-
-          if (!item && current) {
-            // A removed item can't be revalidated, so it's kept until then
-            revertedItems.delete(itemKey);
-          }
-          changedItems.set(itemKey, itemPayload);
-        }
-
-        if (revertedItems.size > 0) {
-          const restoredItemKeys: string[] = [];
-          // Deleting an item drops its pending fetch work (an in-flight or
-          // delayed refetch), so restoring it must resume that work, even
-          // when no hook is mounted to react to an invalidation
-          const interruptedFetchPayloads: ItemPayload[] = [];
-
-          for (const rollbackGroup of rollbacks) {
-            for (const rollback of rollbackGroup) {
-              const { itemKey } = rollback;
-              if (
-                rollback.before &&
-                rollback.hadPendingFetch &&
-                !store.state[itemKey] &&
-                revertedItems.get(itemKey)?.item &&
-                !interruptedFetchPayloads.includes(rollback.payload)
-              ) {
-                interruptedFetchPayloads.push(rollback.payload);
-              }
-            }
-          }
-
-          runWithBroadcastConsistency('confirmed', () => {
-            store.produceState(
-              (draft) => {
-                for (const [itemKey, { item }] of revertedItems) {
-                  if (item === undefined) {
-                    delete draft[itemKey];
-                    continue;
-                  }
-
-                  draft[itemKey] = item;
-                }
-              },
-              { action: 'rollback-mutation-error' },
-            );
-
-            for (const [
-              itemKey,
-              { item, payload: itemPayload },
-            ] of revertedItems) {
-              if (item) {
-                restoredItemKeys.push(itemKey);
-              } else {
-                cleanupItemResources(itemKey, itemPayload);
-              }
-
-              // Newer data kept until the revalidation, or still carrying
-              // another in-flight optimistic update, isn't confirmed by the
-              // server, so other tabs must not treat it as such
-              publishItemSnapshot(
-                itemKey,
-                changedItems.has(itemKey) ||
-                  optimisticMutations.hasOtherInFlight(itemKey, mutationId)
-                  ? 'optimistic'
-                  : 'confirmed',
-              );
-            }
-          });
-
-          if (restoredItemKeys.length > 0) {
-            touchItemsAndMaybeEnforceLimits(restoredItemKeys);
-          }
-
-          if (interruptedFetchPayloads.length > 0) {
-            scheduleFetch('highPriority', interruptedFetchPayloads);
-          }
-        }
-
-        if (changedItems.size > 0) invalidateItem([...changedItems.values()]);
+        revertOptimisticUpdates(rollbacks);
 
         if (resolvedOnMutationError) {
           resolvedOnMutationError(exception, { silentErrors });
@@ -2849,7 +2870,8 @@ export function createCollectionStore<
       },
       _debounce,
       blockWindowClose ?? undefined,
-      pendingDebounceRollbacks,
+      pendingDebounces,
+      revertOptimisticUpdates,
     ).finally(() => {
       if (!optimisticUpdate) return;
       for (const { itemKey } of affectedItemEntries) {
@@ -3251,6 +3273,8 @@ export function createCollectionStore<
     addItemToState,
     deleteItemState,
     performMutation,
+    cancelDebouncedMutation: (debounce: MutationDebounceKey) =>
+      cancelPendingDebouncedMutation(pendingDebounces, debounce),
     onTransportReconnect,
   };
 }

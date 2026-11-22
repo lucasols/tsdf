@@ -63,6 +63,7 @@ import type {
   OfflineFailureContext,
   OfflineHealthCheckConfig,
   OfflineHealthCheckResult,
+  OfflineMutationQueueingCause,
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineOutageModeConfig,
@@ -73,12 +74,14 @@ import type {
   OfflineRuntimeConfigUpdate,
   OfflineSession,
   OfflineSessionConfig,
+  OfflineStoreFailureContext,
   PersistedOfflineResolutionRecord,
 } from './types';
 import {
   COMPACT_OFFLINE_STATUS_FLAG,
   compactOfflineStatusSnapshotSchema,
   getIsOfflineModeFromStatus,
+  isModeEffectivelyActive,
 } from './types';
 
 function stripInternalEntityPayload(
@@ -1900,10 +1903,16 @@ class SessionOfflineCoordinator {
 
   async resolveUploadIds(
     uploadIds: readonly string[],
+    /** Same as in `resolveReplayUploadIds` */
+    canSendUploads?: () => boolean,
   ): Promise<Record<string, ValidPayload>> {
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
-        const resolvedRef = await this.#ensureUploadResolved(id);
+        const resolvedRef = await this.#ensureUploadResolved(
+          id,
+          false,
+          canSendUploads,
+        );
         return [id, resolvedRef] as const;
       }),
     );
@@ -1920,6 +1929,13 @@ class SessionOfflineCoordinator {
    */
   async resolveReplayUploadIds(
     uploadIds: readonly string[],
+    /**
+     * Checked before each upload that still has to be sent: `false` (the app
+     * switched to another session meanwhile) fails it without calling the
+     * transport, and the upload stays `pending` for when its session is
+     * active again.
+     */
+    canSendUploads?: () => boolean,
   ): Promise<
     | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
     | { failedUploadId: string; error: unknown }
@@ -1931,7 +1947,10 @@ class SessionOfflineCoordinator {
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
         try {
-          return [id, await this.#ensureUploadResolved(id, true)] as const;
+          return [
+            id,
+            await this.#ensureUploadResolved(id, true, canSendUploads),
+          ] as const;
         } catch (error) {
           failures.push({ failedUploadId: id, error });
           throw error;
@@ -2480,6 +2499,38 @@ class SessionOfflineCoordinator {
     this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
   }
 
+  /**
+   * Classifies the failure of a request sent while the session was online, as
+   * a failed direct mutation does before deciding whether to queue it: the
+   * network detection is read again first, and the failure is only classified
+   * when that did not put the session in an offline mode. Resolves with the
+   * mode the session's operations follow afterwards, `null` while online.
+   */
+  async classifyRequestFailure(
+    error: unknown,
+    ctx: OfflineFailureContext,
+  ): Promise<OfflineMutationQueueingCause | null> {
+    await this.refreshNetworkState();
+
+    if (this.getActiveOfflineCause() === null) {
+      await this.classifyFailure(error, ctx);
+    }
+
+    return this.getActiveOfflineCause();
+  }
+
+  /**
+   * The offline mode the session's operations follow: `network` first, then
+   * `outage`, each only while enabled and active; `null` while online.
+   */
+  getActiveOfflineCause(): OfflineMutationQueueingCause | null {
+    const { network, outage } = this.store.state.status;
+
+    if (isModeEffectivelyActive(network)) return 'network';
+    if (isModeEffectivelyActive(outage)) return 'outage';
+    return null;
+  }
+
   async classifyFailure(
     error: unknown,
     ctx: OfflineFailureContext,
@@ -2626,7 +2677,7 @@ class SessionOfflineCoordinator {
 
   async classifyRetriableFailure(
     error: unknown,
-    ctx: OfflineFailureContext,
+    ctx: OfflineStoreFailureContext,
   ): Promise<boolean> {
     if (!this.#canonicalConfig.classifyRetriableFailure) return false;
 
@@ -3255,6 +3306,7 @@ class SessionOfflineCoordinator {
      * the upload keeps waiting (`pending`) instead of becoming `failed` here.
      */
     forReplay = false,
+    canSend?: () => boolean,
   ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
@@ -3293,6 +3345,14 @@ class SessionOfflineCoordinator {
           return queuedRecord.resolvedRef;
         }
 
+        // Waiting for its turn, the upload may now belong to a session the
+        // app switched away from: it is not sent from the new one
+        const notSentError = (): Error =>
+          new Error(
+            `[tsdf] Offline upload "${id}" was not sent: session "${this.sessionKey}" is no longer active`,
+          );
+        if (canSend?.() === false) throw notSentError();
+
         const file = queuedRecord.file;
         await this.#updateUploadState({
           id,
@@ -3303,6 +3363,17 @@ class SessionOfflineCoordinator {
             progress: 0,
           },
         });
+
+        // The session can also switch while that state is written: the
+        // upload goes back to how it was, without counting a failure
+        if (canSend?.() === false) {
+          await this.#updateUploadState({
+            id,
+            state: queuedRecord.state,
+            progress: queuedRecord.progress,
+          });
+          throw notSentError();
+        }
 
         try {
           const resolvedRef = await uploadsConfig.upload({
@@ -4296,6 +4367,20 @@ export function createOfflineSession<
         getActiveCoordinator()?.getStatus() ??
         getGlobalOfflineStatus(sessionKey)
       );
+    },
+    reportOfflineFailure: async (error, options) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) return 'ignore';
+
+      const ctx: OfflineFailureContext = {
+        phase: 'app',
+        sessionKey: coordinator.sessionKey,
+      };
+      if (options?.operationName !== undefined) {
+        ctx.operationName = options.operationName;
+      }
+
+      return (await coordinator.classifyRequestFailure(error, ctx)) ?? 'ignore';
     },
     getOfflineEntities: () => {
       const sessionKey = getSessionKey();

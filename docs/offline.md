@@ -113,6 +113,8 @@ The mutation promise resolves only after the queue write has settled, so a mutat
 
 Without an active offline session — `getSessionKey()` returns `false`, or the [session gate](#session-gate) is closed — the same call runs as a plain online mutation: `mutation` is called, a success resolves with `{ kind: 'online', data }`, and a failure goes through the normal error handling (optimistic update rolled back, `onMutationError` called). Nothing is queued.
 
+Queued work belongs to the session key it was queued in. When `getSessionKey()` changes without a reload (logout, or switching to another org or tenant), the replay of the previous session stops before its next step: TSDF does not start uploads of that session, call its `getServerSnapshot` / `shouldSkipSync` / `detectConflict` hooks, or call its `execute`. The entry being replayed stays queued as it was (no failed attempt, no resolution), and it is replayed once that session key is active again. A request `execute` already sent, or an upload transport already running, cannot be recalled: an upload that finishes is kept for that session, and one that fails after the switch does not count as a failure of the operation. The upload transport receives the `sessionKey` that owns the upload, so it can send the file with that session's credentials rather than the ones of the session now active. A mutation that runs online right away stops the same way while its uploads are sent, see [Direct runs](#direct-runs).
+
 ## Health Check
 
 The session is in offline mode for one of two causes: `network` (this device cannot reach the backend) or `outage` (the backend is reached but down). Browser `online` / `offline` events only cover part of the first one. For everything else the app usually has one health endpoint that answers both "this request failed: is it the network, an outage, or just this request?" and "are we back?". Wire it once with `offlineSession.healthCheck`:
@@ -148,7 +150,7 @@ const storeManager = createStoreManager({
 
 The session uses the same function in both places:
 
-- **Failure classification.** When a fetch, a mutation or the replay of a queued mutation fails, the session runs the check and applies the answer.
+- **Failure classification.** When a fetch, a mutation or the replay of a queued mutation fails, or the app [reports the failure of its own request](#failures-of-the-apps-own-requests), the session runs the check and applies the answer.
 - **Recovery checks.** While a mode is active because of a failure, its recovery probe runs the check on that mode's `recoveryProbe` cadence (network: 5s growing to 60s, outage: 30s growing to 5min by default). `'up'` ends the offline mode — both causes at once when both are active. `'outage'` during network mode means the device reaches the backend again but the backend is down: outage mode takes over, or, when outage mode is disabled, network mode just ends and requests (including the replay of queued mutations) fail with their own errors. `'unreachable'` during outage mode activates network mode and keeps the outage, since nothing can be said about it until the backend is reachable. With a health check, `outage.recoveryCheck` is optional.
 
 In both places an answer only activates a mode that is enabled (`network.enabled` / `outage.enabled`, including runtime overrides). An answer for a disabled mode is ignored: a failed request is left to its own error.
@@ -204,6 +206,38 @@ The health check is the fallback; the more specific hooks win:
 A check that throws, rejects, or takes longer than `healthCheck.timeoutMs` (default 10s) gives no answer and changes nothing: a failure being classified is left to its request, and a recovery check counts as "not recovered yet" and is retried on the normal cadence. `ctx.signal` is aborted on timeout so the health request can be cancelled. No answer is never read as `'unreachable'`: a broken or slow health endpoint is not evidence about connectivity, and the browser going offline is already detected by network mode. Return `'unreachable'` from `check` when the request itself fails, as in the example above.
 
 The check is not called while the [session gate](#session-gate) is closed, or while both modes are disabled and neither is still active.
+
+### Failures of the app's own requests
+
+Requests the app sends outside the stores, such as a file upload made with its own API client, fail without the session seeing it. A lost connection only that request noticed then leaves the session online. `storeManager.reportOfflineFailure(error, { operationName? })` hands such a failure to the session, which handles it like the failure of an offline-enabled mutation:
+
+1. It reads the network detection again. If that puts the session in an offline mode, no hook is called.
+2. Otherwise `classifyFailure(error, ctx)` runs with `ctx.phase: 'app'`, `ctx.operationName` and no `ctx.storeType`. When it answers `'unknown'` (or is not configured), the health check runs. The health check follows the same rules as for store failures: a check in flight is shared, `reuseUpForFailuresMs` applies, and a failure while the session is already offline does not run it.
+
+It resolves to the mode the session is in afterwards: `'network'` or `'outage'` when it is offline, or `'ignore'` when it stays online and the failure belongs to the request. The app can then keep the work for later instead of failing:
+
+```ts
+async function attachFile(id: string, file: File) {
+  try {
+    return { kind: 'uploaded', ref: await api.uploadFile(file) } as const;
+  } catch (error) {
+    const mode = await storeManager.reportOfflineFailure(error, {
+      operationName: 'uploadFile',
+    });
+    const { mutationQueueing } = storeManager.getOfflineRuntimeConfig();
+    if (mode === 'ignore' || mutationQueueing[mode] === 'disallow') {
+      throw error;
+    }
+
+    // The session is offline now: stage the file for a queued mutation that
+    // depends on it (see Uploads), it is uploaded once the session recovers
+    (await storeManager.saveOfflineUpload({ id, file })).unwrap();
+    return { kind: 'staged', id } as const;
+  }
+}
+```
+
+The answer is the session's mode, whatever `mutationQueueing` says: when that mode's policy is `'disallow'`, the mutation that would use the staged file runs online and fails, so check it before staging, as above. A mode that is disabled is never entered. It rejects only when `classifyFailure` or `network.getIsOffline` throws (or returns a promise that rejects). While the session gate is closed, when there is no active session key or when no `offlineSession` is configured, it resolves to `'ignore'` without calling `classifyFailure` or `healthCheck`. There is nothing to report on success: the session leaves offline mode through its usual recovery checks. Those checks run while an offline-enabled store is in use in the tab, so a mode entered from a screen that uses none stays on until one is used.
 
 ## Reading While Offline
 
@@ -332,7 +366,7 @@ createUser: {
 ```
 
 - The entity is added to the queries when the mutation is queued, so `optimisticUpdate` does not need to call `addItemToState` for it. A mutation that runs online right away is never queued and creates no pending entity.
-- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function only matches the queries the app session already knows, so prefer query payloads.
+- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function is matched against them too: every query of the store saved in persistent storage is loaded for it, so prefer query payloads when the lists are known. The queries loaded this way, and their rows, count as recently used for storage expiry and eviction.
 - The membership is stored with the queries, so the row is still in its lists after the app restarts with the mutation queued.
 - When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. The declared queries that are only in persistent storage are loaded first: the function form of `addToQueries` runs again for this, so it should only depend on its arguments. Discarding the queued mutation removes the row from its lists.
 - While the mutation is pending, a list refetch that does not return the row keeps it rendered at its last known position. This memory does not survive an app restart.
@@ -401,6 +435,8 @@ What happens depends on whether the creation was already sent:
 - **Created together with other entities** (a `tempEntities` operation that creates several entities at once): the creation is never cancelled, since the other entities still need it. The delete is queued behind it and sent with the server id, as for a creation that was sent.
 - **Sent** (`syncing`, `needs-confirmation`, queued again after a `retry`, or, for an id the app generates, queued after its direct online request failed or sent again with `requeue` after a conflict): the server may have the entity, so the creation is kept and the delete stays queued behind it. Once the server id is known the delete is sent with it. `execute` should treat a not-found answer as success, as above: the server answers not-found when the creation never reached it, or when an earlier delete attempt did. The work of other stores declared `cancelledWith` the entity is dropped once the delete succeeds (see below).
 - **Waiting for a manual resolution**: the creation is kept too, and the delete is held behind that resolution. See [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution).
+
+An edit still waiting for its `debounce` window is not queued yet, so the delete can't drop it: it would be queued once the window ends, for an entity the server may not have. Cancel it with [`cancelDebouncedMutation`](./mutations.md#cancelling-a-debounced-mutation) before deleting.
 
 `getItemOfflineState(payload)` tells the first case apart before deleting: `isUnsentCreation && !creationAttempted` means the delete only discards local work, unless the item was created together with other entities. A temp entity whose creation was queued after its direct online request failed, or sent again with `requeue` after a conflict, is in that case too: an earlier request may have created a server item, but the temporary payload can't target it, so the delete leaves that item as is. An item whose id the app generates also reports `isUnsentCreation: true` until the server confirms its creation; since the delete can target its id, it reports `creationAttempted: true` (and the delete is sent) once the creation was sent, queued after its direct online request failed or sent again with `requeue`.
 
@@ -744,6 +780,7 @@ await userStore.performMutation(
 - With the [session gate](#session-gate) closed the uploads are resolved and released the same way. Nothing is queued then.
 - With `offline: descriptor | undefined`, `uploads` (the second argument for collection and list query stores) is optional in the `mutation` type: it is set when the descriptor is, and `undefined` when the call runs as a plain online mutation.
 - A failed upload is handled as described in [Dependency uploads of a direct run](#dependency-uploads-of-a-direct-run). `mutation` is not called.
+- When `getSessionKey()` changes while the uploads are sent (switching to another org, logout), `mutation` is not called and no upload of the previous session is started. The mutation fails with an error whose `id` is `'offline-session-unavailable'` (code 460) and goes through the normal error handling. It is not queued, because it would then be replayed in a session the user left. The uploads stay staged in the previous session: one that finished keeps its ref, so running the mutation again in that session does not upload it again.
 - Don't resolve or delete these uploads yourself with `resolveOfflineUpload(s)` / `deleteOfflineUpload`: an upload deleted before the request is sent is gone when the mutation falls back to the queue, and its replay fails.
 
 ### Upload refs
@@ -1003,7 +1040,7 @@ With the session gate closed, the failure is not classified: the mutation fails 
 
 #### `resolveOfflineUpload(s)`
 
-When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again.
+When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again. To let the session classify the failure (and possibly enter offline mode), pass the error to `storeManager.reportOfflineFailure(error)`; see [Failures of the app's own requests](#failures-of-the-apps-own-requests).
 
 #### Upload states
 

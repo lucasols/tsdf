@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
+  OfflineFailureContext,
   OfflineHealthCheckContext,
   OfflineHealthCheckResult,
 } from '../../src/main';
@@ -51,15 +52,7 @@ afterEach(() => {
 test('async outage classification promotes the session into outage mode after a failed fetch', async () => {
   const sessionKey = 'outage-session';
   const classifyFailure = vi.fn(
-    async (
-      _error: unknown,
-      ctx: {
-        phase: 'fetch' | 'mutation' | 'sync';
-        storeType: 'document' | 'collection' | 'listQuery';
-        operationName?: string;
-        sessionKey: string;
-      },
-    ) => {
+    async (_error: unknown, ctx: OfflineFailureContext) => {
       expect(ctx).toMatchInlineSnapshot(`
         phase: 'fetch'
         sessionKey: 'outage-session'
@@ -554,12 +547,7 @@ test('stale async outage classifications are ignored after a newer failure settl
     .fn<
       (
         error: unknown,
-        ctx: {
-          phase: 'fetch' | 'mutation' | 'sync';
-          storeType: 'document' | 'collection' | 'listQuery';
-          operationName?: string;
-          sessionKey: string;
-        },
+        ctx: OfflineFailureContext,
       ) => Promise<'outage' | 'network' | 'ignore'>
     >()
     .mockImplementationOnce(
@@ -1608,4 +1596,129 @@ test('a health check that throws or never answers during recovery keeps the outa
   `);
 
   session.unmount();
+});
+
+/** A loaded document store attached to a session using `health` as its health check. */
+function createHealthCheckedDocEnv(
+  sessionKey: string,
+  health: ReturnType<typeof createHealthCheckMock>,
+  reuseUpForFailuresMs?: number,
+) {
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      healthCheck: {
+        check: health.check,
+        ...(reuseUpForFailuresMs !== undefined
+          ? { reuseUpForFailuresMs }
+          : undefined),
+      },
+      outage: { enabled: true },
+    },
+  });
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+
+  return { storeManager, env };
+}
+
+test('a failure the app reports shares the health check of failing store requests and resolves to the mode they enter', async () => {
+  const sessionKey = 'health-check-app-failure-burst-session';
+  const health = createHealthCheckMock();
+  const { storeManager, env } = createHealthCheckedDocEnv(sessionKey, health);
+
+  // -- The backend goes down: a store fetch fails right away, and while its
+  // health request is in flight a request the app sends itself (an upload)
+  // fails too --
+  health.setBackend('outage');
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(10);
+  expect(health.check).toHaveBeenCalledTimes(1);
+  const reported = storeManager.reportOfflineFailure(
+    new Error('upload failed: 502'),
+  );
+  await advanceTime(HEALTH_CHECK_DURATION_MS + 50);
+
+  // Both failures waited for the same health request, and the app is told the
+  // mode the session entered
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(await reported).toBe('outage');
+  expect(getGlobalOfflineStatusSummary(sessionKey).outage)
+    .toMatchInlineSnapshot(`
+      active: '✅'
+      enabled: '✅'
+    `);
+
+  // -- Another upload fails while the outage is known --
+  // The active mode explains it: no new health request
+  expect(
+    await storeManager.reportOfflineFailure(new Error('upload failed: 502')),
+  ).toBe('outage');
+  expect(health.check).toHaveBeenCalledTimes(1);
+});
+
+test('a failure the app reports while the backend is up stays a failure of its request, and with reuseUpForFailuresMs explains the next failures', async () => {
+  const sessionKey = 'health-check-app-failure-up-session';
+  const health = createHealthCheckMock();
+  const { storeManager, env } = createHealthCheckedDocEnv(
+    sessionKey,
+    health,
+    30_000,
+  );
+  const failures = createLoggerStore();
+
+  // -- An upload the app sends itself is rejected while the backend is up --
+  failures.addMark('the app reports a rejected upload');
+  const reported = storeManager.reportOfflineFailure(
+    new Error('upload failed: 413'),
+  );
+  await advanceTime(HEALTH_CHECK_DURATION_MS);
+  failures.add({
+    reported: await reported,
+    healthChecks: health.check.mock.calls.length,
+  });
+
+  // -- Inside the 30s window, a store fetch and another upload fail --
+  failures.addMark('failures inside the window reuse the "up" answer');
+  await advanceTime(10_000);
+  env.serverMock.setNextFetchError('internal error');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(1_000);
+  failures.add({
+    fetchError: env.store.state.error?.message ?? null,
+    healthChecks: health.check.mock.calls.length,
+  });
+  failures.add({
+    reported: await storeManager.reportOfflineFailure(
+      new Error('upload failed: 413'),
+    ),
+    healthChecks: health.check.mock.calls.length,
+  });
+
+  // The session never goes offline: each failure belongs to its request, and
+  // only the first one asked the health endpoint
+  expect(failures.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> the app reports a rejected upload
+
+    -> reported: ignore ⋅ healthChecks: 1
+
+    >>> failures inside the window reuse the "up" answer
+
+    -> fetchError: internal error ⋅ healthChecks: 1
+    -> reported: ignore ⋅ healthChecks: 1
+    "
+  `);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
 });

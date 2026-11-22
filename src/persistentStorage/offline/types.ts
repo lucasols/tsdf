@@ -30,8 +30,12 @@ import type { SchemaValidationError } from '../validateWithSchema';
 
 /** Store kinds supported by offline replay and sync state tracking. */
 export type OfflineStoreType = 'document' | 'collection' | 'listQuery';
-/** Phase where a failure occurred during offline-enabled operation flow. */
-export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync';
+/**
+ * Phase where a failure occurred during offline-enabled operation flow.
+ * `'app'` is a request the app ran outside the stores, reported with
+ * `storeManager.reportOfflineFailure(...)`.
+ */
+export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync' | 'app';
 /** High-level classification used by outage detection. */
 export type OfflineFailureClassification = 'outage' | 'network' | 'ignore';
 /**
@@ -167,10 +171,10 @@ export type OfflineRuntimeConfigUpdate = {
   };
 };
 
-/** Context passed into offline failure classification hooks. */
-export type OfflineFailureContext = {
+/** Context of a failure of a fetch, mutation or replay run by a store. */
+export type OfflineStoreFailureContext = {
   /** Phase in which the failure was detected. */
-  phase: OfflineFailurePhase;
+  phase: Exclude<OfflineFailurePhase, 'app'>;
   /** Store type affected by the failure. */
   storeType: OfflineStoreType;
   /** Optional operation name associated with the failure. */
@@ -187,6 +191,41 @@ export type OfflineFailureContext = {
    * from a dependency upload.
    */
   uploadId?: string;
+};
+
+/**
+ * Context of a failure the app reported with
+ * `storeManager.reportOfflineFailure(...)`: a request no store ran. Only
+ * `classifyFailure` receives it.
+ */
+export type OfflineAppFailureContext = {
+  /** A request the app ran outside the stores. */
+  phase: 'app';
+  /** No store ran the request. */
+  storeType?: undefined;
+  /** The `operationName` passed to `reportOfflineFailure`, if any. */
+  operationName?: string;
+  /** Session key used by browser tab and persistence scoping. */
+  sessionKey: string;
+  /** Not set: the failure did not come from a dependency upload. */
+  uploadId?: undefined;
+};
+
+/**
+ * Context passed into offline failure classification hooks. Narrow on `phase`:
+ * a failure reported by the app (`phase: 'app'`) has no `storeType`.
+ */
+export type OfflineFailureContext =
+  | OfflineStoreFailureContext
+  | OfflineAppFailureContext;
+
+/** Options of `storeManager.reportOfflineFailure(error, options)`. */
+export type ReportOfflineFailureOptions = {
+  /**
+   * Name of the request that failed (e.g. `'uploadFile'`), passed to
+   * `classifyFailure` as `ctx.operationName`.
+   */
+  operationName?: string;
 };
 
 /** Re-check strategy for recovery probing. Omitted fields use built-in defaults (which differ between network and outage modes). */
@@ -412,6 +451,10 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * Failures of the `uploads.upload` transport during replay are classified
      * here too, with `ctx.uploadId` set: `outage` / `network` keep the upload
      * `pending` and the dependent operation queued until the session recovers.
+     *
+     * So are failures of the app's own requests passed to
+     * `storeManager.reportOfflineFailure(...)`, with `ctx.phase: 'app'` and no
+     * `ctx.storeType`.
      */
     classifyFailure?: (
       error: unknown,
@@ -438,7 +481,7 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      */
     classifyRetryableFailure?: (
       error: unknown,
-      ctx: OfflineFailureContext,
+      ctx: OfflineStoreFailureContext,
     ) => Promise<boolean> | boolean;
     /** Network detection strategy and browser integration. */
     network?: OfflineNetworkModeConfig;
@@ -469,8 +512,10 @@ export type OfflineSessionConfig<
          * Single health check answering both "this request failed: is it the
          * network, an outage, or just this request?" and "are we back?".
          *
-         * - Failure classification: a failed fetch, mutation or queued
-         *   mutation replay that `classifyFailure` did not settle (it is not
+         * - Failure classification: a failed fetch, mutation, queued
+         *   mutation replay or request reported with
+         *   `storeManager.reportOfflineFailure(...)` that `classifyFailure`
+         *   did not settle (it is not
          *   configured, or returned `'unknown'`) runs the check, unless the
          *   session is already in offline mode. `'unreachable'` activates
          *   network mode, `'outage'` activates outage mode (each only when
@@ -824,6 +869,16 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   setForcedOfflineMode: (forced: boolean) => Promise<void>;
   /** Returns the latest global offline status for the session. */
   getOfflineStatus: () => GlobalOfflineStatus;
+  /**
+   * Classifies the failure of a request the app ran outside the stores like a
+   * failed store mutation, and resolves to the offline mode the session is in
+   * afterwards (`'ignore'` when it stays online). See
+   * `storeManager.reportOfflineFailure`.
+   */
+  reportOfflineFailure: (
+    error: unknown,
+    options?: ReportOfflineFailureOptions,
+  ) => Promise<OfflineFailureClassification>;
   /** Returns the latest aggregated offline entities for the session. */
   getOfflineEntities: () => readonly GlobalOfflineEntity[];
   /** Returns the latest aggregated conflict/retry resolutions for the session. */

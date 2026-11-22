@@ -85,6 +85,7 @@ export type {
 export type {
   BlockWindowCloseHandler,
   MutationDebounce,
+  MutationDebounceKey,
 } from './utils/performMutation';
 
 // Persistent Storage types
@@ -145,8 +146,11 @@ export type {
   OfflineConflictResolutionAction,
   OfflineEntityMutationKind,
   OfflineFailureClassification,
+  OfflineAppFailureContext,
   OfflineFailureContext,
   OfflineFailurePhase,
+  OfflineStoreFailureContext,
+  ReportOfflineFailureOptions,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
   ItemOfflineState,

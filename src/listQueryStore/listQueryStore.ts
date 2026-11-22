@@ -99,6 +99,7 @@ import {
   type BrowserTabsTransportFactory,
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
+import type { MutationDebounceKey } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   DEFAULT_BATCH_KEY,
@@ -1096,6 +1097,18 @@ export type ListQueryStore<
     ItemPayload,
     TOfflineOperations
   >;
+  /**
+   * Cancels the `performMutation` call waiting for the debounce window of the
+   * `debounce` group with this `context` and `payload`, e.g. an edit of an
+   * item deleted within the window. The call never runs its mutation (nor is
+   * queued offline) and resolves `Err(mutationSkipped)`, and the optimistic
+   * updates of the group (the call and the calls it superseded) are reverted
+   * as on a failure. Call it before starting the mutation that replaces it.
+   *
+   * Returns `false` when no call of the group is waiting, e.g. its mutation
+   * already started, which is not cancelled.
+   */
+  cancelDebouncedMutation: (debounce: MutationDebounceKey) => boolean;
   /** React hook for subscribing to many list queries at once. */
   useMultipleListQueries: ListQueryUseMultipleListQueriesApi<
     ItemState,
@@ -2057,7 +2070,19 @@ export function createListQueryStore<
       }));
     }
 
-    const queryKeys = payloads.map((queryPayload) => getQueryKey(queryPayload));
+    const results = await preloadQueriesFromPersistentStorage(
+      payloads.map((queryPayload) => getQueryKey(queryPayload)),
+    );
+    return payloads.map((queryPayload, index) => ({
+      payload: queryPayload,
+      preloaded: results[index] ?? false,
+    }));
+  }
+
+  async function preloadQueriesFromPersistentStorage(
+    queryKeys: string[],
+  ): Promise<boolean[]> {
+    if (!persistence) return queryKeys.map(() => false);
     const results = await persistence.preloadQueries(queryKeys);
     const preloadedQueryKeys = queryKeys.filter(
       (_key, index) => results[index],
@@ -2073,10 +2098,7 @@ export function createListQueryStore<
         scheduleCacheLimitEnforcement();
       }
     }
-    return payloads.map((queryPayload, index) => ({
-      payload: queryPayload,
-      preloaded: results[index] ?? false,
-    }));
+    return results;
   }
 
   /**
@@ -2295,6 +2317,7 @@ export function createListQueryStore<
     deleteItemState: deleteItemStateBase,
     resetInvalidationTracking,
     performMutation: performMutationBase,
+    cancelDebouncedMutation,
   } = createMutationApi<
     ItemState,
     QueryPayload,
@@ -2719,22 +2742,57 @@ export function createListQueryStore<
       const itemKey = getItemKey(tempPayload);
       return store.state.items[itemKey] === undefined ? itemKey : false;
     });
-    const unloadedQueries = new Map<string, QueryPayload>();
+    const unloadedQueryKeys = new Set<string>();
+    let isDeclaredWithFilter = false;
     for (const { queries } of addToQueries) {
-      for (const { key, payload } of getQueriesKeyArray(queries)) {
-        if (store.state.queries[key] === undefined) {
-          unloadedQueries.set(key, payload);
-        }
+      // A filter needs each query's state, so it runs once they are loaded
+      if (typeof queries === 'function') {
+        isDeclaredWithFilter = true;
+        continue;
+      }
+      for (const { key } of getQueriesKeyArray(queries)) {
+        if (store.state.queries[key] === undefined) unloadedQueryKeys.add(key);
       }
     }
-    if (unloadedItemKeys.length === 0 && unloadedQueries.size === 0) {
+    // A filter can match any saved query, so all the ones that are only in
+    // persistent storage are loaded for it
+    const addUnloadedPersistedQueryKeys = (
+      persistedQueryKeys: ReadonlySet<string>,
+    ): void => {
+      for (const queryKey of persistedQueryKeys) {
+        if (store.state.queries[queryKey] === undefined) {
+          unloadedQueryKeys.add(queryKey);
+        }
+      }
+    };
+    let persistedQueryKeysLoad: Promise<ReadonlySet<string>> | undefined;
+    if (isDeclaredWithFilter) {
+      const persistedQueryKeys = persistence.getPersistedQueryKeys();
+      if (persistedQueryKeys instanceof Promise) {
+        persistedQueryKeysLoad = persistedQueryKeys;
+      } else {
+        addUnloadedPersistedQueryKeys(persistedQueryKeys);
+      }
+    }
+    if (
+      unloadedItemKeys.length === 0 &&
+      unloadedQueryKeys.size === 0 &&
+      !persistedQueryKeysLoad
+    ) {
       return undefined;
     }
 
+    const loadQueries = async (): Promise<void> => {
+      if (persistedQueryKeysLoad) {
+        addUnloadedPersistedQueryKeys(await persistedQueryKeysLoad);
+      }
+      if (unloadedQueryKeys.size === 0) return;
+      await preloadQueriesFromPersistentStorage([...unloadedQueryKeys]);
+    };
+
     return Promise.all([
       unloadedItemKeys.length > 0 && persistence.preloadItems(unloadedItemKeys),
-      unloadedQueries.size > 0 &&
-        preloadQueryFromPersistentStorage([...unloadedQueries.values()]),
+      loadQueries(),
     ]);
   }
 
@@ -4142,6 +4200,7 @@ export function createListQueryStore<
     addItemToState,
     deleteItemState,
     performMutation: performMutationBase,
+    cancelDebouncedMutation,
     useMultipleListQueries,
     useListQuery,
     useMultipleItems,

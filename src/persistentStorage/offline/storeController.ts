@@ -52,13 +52,12 @@ import {
   getOrCreateSessionOfflineCoordinator,
 } from './sessionCoordinator';
 import {
-  isModeEffectivelyActive,
   OfflineResolutionConflictParseError,
   offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
-  type OfflineFailureContext,
+  type OfflineStoreFailureContext,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
   type ItemOfflineState,
@@ -740,22 +739,10 @@ export function createOfflineStoreController<
     return sessionConfig.enabled?.() !== false;
   }
 
-  function getActiveMutationQueueingCause(
-    current: ActiveSessionState,
-  ): OfflineMutationQueueingCause | null {
-    const status = current.session.getStatus();
-
-    if (isModeEffectivelyActive(status.network)) return 'network';
-
-    if (isModeEffectivelyActive(status.outage)) return 'outage';
-
-    return null;
-  }
-
   function shouldTreatFutureOperationsAsOffline(
     current: ActiveSessionState,
   ): boolean {
-    return getActiveMutationQueueingCause(current) !== null;
+    return current.session.getActiveOfflineCause() !== null;
   }
 
   function isMutationQueueingAllowed(
@@ -909,7 +896,7 @@ export function createOfflineStoreController<
     prepared: PreparedQueuedMutation,
   ): PreparedOfflineMutation['initialAction'] {
     const cause = current.session.getStatus().isOfflineMode
-      ? getActiveMutationQueueingCause(current)
+      ? current.session.getActiveOfflineCause()
       : null;
     if (cause !== null && isMutationQueueingAllowed(cause)) return 'queue';
 
@@ -1042,6 +1029,15 @@ export function createOfflineStoreController<
 
   function isActiveSessionState(current: ActiveSessionState): boolean {
     return activeSession?.sessionKey === current.sessionKey;
+  }
+
+  /**
+   * Whether the app still uses the session of `current`. Unlike
+   * `isActiveSessionState`, it reads the session key again, so it notices an
+   * in-place switch (e.g. to another org) that nothing reported yet.
+   */
+  function isSessionStillActive(current: ActiveSessionState): boolean {
+    return ensureActiveSession()?.sessionKey === current.sessionKey;
   }
 
   function teardownActiveSession(): void {
@@ -5009,8 +5005,18 @@ export function createOfflineStoreController<
       // Set when the replay failed while resolving a dependency upload, which
       // means `execute` was never called for this attempt.
       let failedUploadId: string | undefined;
+      let executeStarted = false;
+      // The app can switch to another session (e.g. another org) without a
+      // reload while the replay awaits: the work of the old session must not
+      // be sent, nor judged by app callbacks, from the new one.
+      const throwIfSessionChanged = (): void => {
+        if (!isSessionStillActive(current)) {
+          throw new OfflineSessionUnavailableError();
+        }
+      };
 
       try {
+        throwIfSessionChanged();
         const shouldPrepareReplayCheckCtx = Boolean(
           (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) ||
           conflictHandling,
@@ -5024,11 +5030,14 @@ export function createOfflineStoreController<
             }
           : null;
 
+        if (replayCheckCtx) throwIfSessionChanged();
+
         if (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) {
           if (!replayCheckCtx) {
             throw new Error('Replay check context was not prepared');
           }
           const shouldSkip = await operation.shouldSkipSync(replayCheckCtx);
+          throwIfSessionChanged();
 
           if (shouldSkip) {
             // The server already has the change: a delete is done.
@@ -5047,6 +5056,7 @@ export function createOfflineStoreController<
                 ({ ...replayCheckBaseCtx, serverSnapshot: undefined } as const),
             )
           : false;
+        if (conflictHandling) throwIfSessionChanged();
 
         if (conflict) {
           if (!conflictHandling) {
@@ -5084,6 +5094,7 @@ export function createOfflineStoreController<
 
         const dependencyUploads = await current.session.resolveReplayUploadIds(
           entryToUse.dependencyUploadIds ?? [],
+          () => isSessionStillActive(current),
         );
         if (dependencyUploads.failedUploadId !== undefined) {
           failedUploadId = dependencyUploads.failedUploadId;
@@ -5103,6 +5114,8 @@ export function createOfflineStoreController<
             resolvedRefsById: dependencyUploads.refs,
           }),
         );
+        throwIfSessionChanged();
+        executeStarted = true;
         const result = await operation.execute(executeContext);
 
         if (entryToUse.tempIds) {
@@ -5137,8 +5150,17 @@ export function createOfflineStoreController<
         // the files does not hold back the next queued entry.
         void deleteOrphanedDependencyUploads(current, [entryToUse]);
       } catch (error) {
+        // The session changed before the entry was sent: whatever failed
+        // (the check above, or an upload sent before the switch) says nothing
+        // about the entry, so it stays queued for its session as it was, to
+        // be replayed once that session is active again.
+        if (!executeStarted && !isSessionStillActive(current)) {
+          await persistEntry(nextEntry, current, true);
+          return;
+        }
+
         const lastError = { message: unknownToError(error).message };
-        const failureCtx: OfflineFailureContext = {
+        const failureCtx: OfflineStoreFailureContext = {
           phase: 'sync',
           storeType,
           operationName: entryToUse.operation,
@@ -5283,7 +5305,21 @@ export function createOfflineStoreController<
       // failure is classified, since it is retried if the mutation is queued.
       resolveDirectUploads:
         dependencyUploadIds.length > 0
-          ? () => current.session.resolveReplayUploadIds(dependencyUploadIds)
+          ? async () => {
+              const resolution = await current.session.resolveReplayUploadIds(
+                dependencyUploadIds,
+                () => isSessionStillActive(current),
+              );
+              // The app switched to another session while the uploads were
+              // sent: the request is not sent from the new session. Thrown
+              // here, the run fails with this error (`classifyError` rejects
+              // for a session that is no longer active), nothing is queued
+              // and the uploads stay staged in their session.
+              if (!isSessionStillActive(current)) {
+                throw new OfflineSessionUnavailableError();
+              }
+              return resolution;
+            }
           : null,
       // Like replay: the uploads that did not fail are left untouched.
       markUploadsFailed: () =>
@@ -5319,28 +5355,20 @@ export function createOfflineStoreController<
           throw new OfflineSessionUnavailableError();
         }
 
-        await preparedCurrent.session.refreshNetworkState();
-        const activeCauseAfterRefresh =
-          getActiveMutationQueueingCause(preparedCurrent);
-        if (activeCauseAfterRefresh) {
-          return isMutationQueueingAllowed(activeCauseAfterRefresh);
-        }
-
-        const failureCtx: OfflineFailureContext = {
+        const failureCtx: OfflineStoreFailureContext = {
           phase: 'mutation',
           storeType,
           operationName: prepared.operationName,
           sessionKey: preparedCurrent.sessionKey,
         };
         if (uploadId !== undefined) failureCtx.uploadId = uploadId;
-        await preparedCurrent.session.classifyFailure(error, failureCtx);
+        const activeCause =
+          await preparedCurrent.session.classifyRequestFailure(
+            error,
+            failureCtx,
+          );
 
-        const activeCauseAfterClassification =
-          getActiveMutationQueueingCause(preparedCurrent);
-
-        return activeCauseAfterClassification
-          ? isMutationQueueingAllowed(activeCauseAfterClassification)
-          : false;
+        return activeCause ? isMutationQueueingAllowed(activeCause) : false;
       },
     };
   }
@@ -5368,10 +5396,25 @@ export function createOfflineStoreController<
 
     // Nothing is queued, so a failed upload is `failed` right away, as with
     // `resolveOfflineUploads`.
+    let resolvedRefsById: Record<string, ValidPayload>;
+    try {
+      resolvedRefsById = await current.session.resolveUploadIds(
+        dependencyUploadIds,
+        () => isSessionStillActive(current),
+      );
+    } catch (error) {
+      if (!isSessionStillActive(current)) {
+        throw new OfflineSessionUnavailableError();
+      }
+      throw error;
+    }
+    // As with a direct run that can be queued: the request is not sent from
+    // a session the app switched to while the uploads were sent.
+    if (!isSessionStillActive(current)) {
+      throw new OfflineSessionUnavailableError();
+    }
     const result = await directMutation(
-      createDirectMutationContext(
-        await current.session.resolveUploadIds(dependencyUploadIds),
-      ),
+      createDirectMutationContext(resolvedRefsById),
     );
     void deleteOrphanedDependencyUploads(current, [{ dependencyUploadIds }]);
     return result;

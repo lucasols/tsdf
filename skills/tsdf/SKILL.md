@@ -146,6 +146,7 @@ if (result.ok) {
 
 - Result is `Result<T, StoreMutationError | MutationSkipped>` (`t-result`).
 - On error: the optimistic update is reverted; data changed again while in flight (e.g. by a concurrent mutation) is kept and revalidated instead. Debounced calls roll back to the state before the first superseded call.
+- `store.cancelDebouncedMutation({ context, payload })` cancels a pending debounced call and reverts its optimistic updates.
 - `silentErrors: true` still calls `onMutationError(error, { silentErrors: true })`; handlers should use the flag to suppress user-facing noise while preserving logging/recovery.
 - `revalidateOnSuccess`: `true | false | 'queries' | (queryPayload) => boolean | { queries, items }` (List Query).
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).
@@ -237,7 +238,7 @@ Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOffli
 
 Recovery: each attached store revalidates by itself once the session is back online and its queued mutations replayed — no manual invalidation needed on reconnect. See `docs/offline.md#revalidation-after-recovering`.
 
-Health check: `offlineSession.healthCheck: { check: ({ sessionKey, signal }) => 'up' | 'outage' | 'unreachable', timeoutMs?, reuseUpForFailuresMs? }` both classifies failed requests and checks recovery (making `outage.recoveryCheck` optional): `'unreachable'` enters network mode, `'outage'` enters outage mode, and `'up'` keeps the session online (or ends offline mode), leaving a failed request to its own error handling. Session `classifyFailure` / `classifyRetryableFailure` hooks refine per-error classification. See `docs/offline.md#health-check`.
+Health check: `offlineSession.healthCheck: { check: ({ sessionKey, signal }) => 'up' | 'outage' | 'unreachable', timeoutMs?, reuseUpForFailuresMs? }` both classifies failed requests and checks recovery (making `outage.recoveryCheck` optional): `'unreachable'` enters network mode, `'outage'` enters outage mode, and `'up'` keeps the session online (or ends offline mode), leaving a failed request to its own error handling. Session `classifyFailure` / `classifyRetryableFailure` hooks refine per-error classification. `await storeManager.reportOfflineFailure(error)` classifies the failure of a request the app sends itself (e.g. an upload) and resolves to `'network' | 'outage' | 'ignore'` (`docs/offline.md#failures-of-the-apps-own-requests`). See `docs/offline.md#health-check`.
 
 Session gate: `offlineSession.enabled: () => boolean | 'replay-only'` turns the whole offline layer on/off at runtime (feature flag, per-workspace setting). While it returns `false` — or `getSessionKey()` returns `false` — the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations (`{ kind: 'online', data }`, normal errors); `status.isNetworkDetectedOffline` still reports the detected connectivity (`docs/offline.md#connection-state`). Already-queued work is kept and replayed after the gate reopens. Return `'replay-only'` to keep replaying queued work while no new work is queued (e.g. a workspace losing offline mode). See `docs/offline.md#session-gate`.
 
