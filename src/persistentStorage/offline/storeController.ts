@@ -5261,7 +5261,21 @@ export function createOfflineStoreController<
       // failure is classified, since it is retried if the mutation is queued.
       resolveDirectUploads:
         dependencyUploadIds.length > 0
-          ? () => current.session.resolveReplayUploadIds(dependencyUploadIds)
+          ? async () => {
+              const resolution = await current.session.resolveReplayUploadIds(
+                dependencyUploadIds,
+                () => isSessionStillActive(current),
+              );
+              // The app switched to another session while the uploads were
+              // sent: the request is not sent from the new session. Thrown
+              // here, the run fails with this error (`classifyError` rejects
+              // for a session that is no longer active), nothing is queued
+              // and the uploads stay staged in their session.
+              if (!isSessionStillActive(current)) {
+                throw new OfflineSessionUnavailableError();
+              }
+              return resolution;
+            }
           : null,
       // Like replay: the uploads that did not fail are left untouched.
       markUploadsFailed: () =>
@@ -5338,10 +5352,25 @@ export function createOfflineStoreController<
 
     // Nothing is queued, so a failed upload is `failed` right away, as with
     // `resolveOfflineUploads`.
+    let resolvedRefsById: Record<string, ValidPayload>;
+    try {
+      resolvedRefsById = await current.session.resolveUploadIds(
+        dependencyUploadIds,
+        () => isSessionStillActive(current),
+      );
+    } catch (error) {
+      if (!isSessionStillActive(current)) {
+        throw new OfflineSessionUnavailableError();
+      }
+      throw error;
+    }
+    // As with a direct run that can be queued: the request is not sent from
+    // a session the app switched to while the uploads were sent.
+    if (!isSessionStillActive(current)) {
+      throw new OfflineSessionUnavailableError();
+    }
     const result = await directMutation(
-      createDirectMutationContext(
-        await current.session.resolveUploadIds(dependencyUploadIds),
-      ),
+      createDirectMutationContext(resolvedRefsById),
     );
     void deleteOrphanedDependencyUploads(current, [{ dependencyUploadIds }]);
     return result;

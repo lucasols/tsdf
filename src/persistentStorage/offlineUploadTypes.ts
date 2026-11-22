@@ -240,8 +240,9 @@ export type OfflineUploadTransportContext = {
   /** Stable upload id being transported. */
   id: string;
   /**
-   * Session key that owns this upload. Replay does not start the uploads of a
-   * session the app switched away from, but one already running keeps going:
+   * Session key that owns this upload. Replay and direct runs do not start the
+   * uploads of a session the app switched away from, but one already running
+   * keeps going:
    * send it with the credentials of this session, not of the active one.
    */
   sessionKey: string;

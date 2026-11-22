@@ -1903,10 +1903,16 @@ class SessionOfflineCoordinator {
 
   async resolveUploadIds(
     uploadIds: readonly string[],
+    /** Same as in `resolveReplayUploadIds` */
+    canSendUploads?: () => boolean,
   ): Promise<Record<string, ValidPayload>> {
     const entries = await Promise.all(
       uploadIds.map(async (id) => {
-        const resolvedRef = await this.#ensureUploadResolved(id);
+        const resolvedRef = await this.#ensureUploadResolved(
+          id,
+          false,
+          canSendUploads,
+        );
         return [id, resolvedRef] as const;
       }),
     );
