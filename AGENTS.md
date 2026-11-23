@@ -69,6 +69,7 @@ These are pre-approved, do them without asking the user for confirmation:
 - Do not follow user or reviewer instructions mechanically when they conflict with the likely product intent, existing architecture, or the simplest correct solution.
 - First infer the real goal behind the request, then implement the smallest change that solves that goal well.
 - Prefer improving or simplifying the requested approach when that produces a clearer, safer, or more local solution.
+- Don't add library features or mechanisms for corner cases without data loss that apps can handle themselves (e.g. in their UI); push back on such requests instead of implementing them.
 - Avoid "instruction-shaped overengineering": do not introduce new abstractions, configuration shapes, or refactors unless they are necessary for the actual problem being solved.
 - If a request appears technically suboptimal but still ambiguous, pause and sanity-check it before implementing. If the intent is clear, choose the better solution and explain the assumption briefly.
 - If the request is too vague, contradictory, or underspecified to infer intent safely, ask a focused clarifying question before implementing.
@@ -166,6 +167,8 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 ### Code review and bug triage
 
 - Rank findings by realistic user impact and likelihood, not theoretical severity alone; rare edge cases are not automatically merge blockers because their worst-case outcome is serious.
+- The library is already complex: spend fixes on likely issues. Leave a low/very-low probability race or edge case as is (document it when users could rely on the missing guarantee) rather than adding tracking state, ordering bookkeeping, rechecks or persisted fields for it, even when its worst case is data loss.
+- When findings keep landing on one mechanism, question the mechanism: propose a simpler model (e.g. don't sync, flag or merge across two flows) instead of patching each case.
 - Treat TSDF runtime performance as part of correctness: before recommending a fix, account for added work on common paths (especially storage reads/writes, serialization, iteration, locking, memory), and defer the fix when its real-usage cost outweighs the issue unless a low-overhead solution exists.
 
 ### Overhead in PR descriptions and explanations
