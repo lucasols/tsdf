@@ -166,6 +166,8 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 ### Code review and bug triage
 
 - Rank findings by realistic user impact and likelihood, not theoretical severity alone; rare edge cases are not automatically merge blockers because their worst-case outcome is serious.
+- The library is already complex: spend fixes on likely issues. Leave a low/very-low probability race or edge case as is (document it when users could rely on the missing guarantee) rather than adding tracking state, ordering bookkeeping, rechecks or persisted fields for it, even when its worst case is data loss.
+- When findings keep landing on one mechanism, question the mechanism: propose a simpler model (e.g. don't sync, flag or merge across two flows) instead of patching each case.
 - Treat TSDF runtime performance as part of correctness: before recommending a fix, account for added work on common paths (especially storage reads/writes, serialization, iteration, locking, memory), and defer the fix when its real-usage cost outweighs the issue unless a low-overhead solution exists.
 
 ### Overhead in PR descriptions and explanations
