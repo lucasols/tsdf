@@ -3076,7 +3076,7 @@ export function createListQueryStore<
           store.state.itemQueries[nextItemKey]?.payload ??
           existingOverlay.itemPayload,
         queryMemberships: existingOverlay.queryMemberships,
-        keepVisibleWhileResolutionRequired: true,
+        keepDataOnNextCapture: true,
       }),
     );
   }

@@ -6587,9 +6587,42 @@ export function createOfflineStoreController<
           result: committedResult,
         });
       }
+      // Read again: the reconciliation rewrote its temp refs to the final ones.
+      const committedResolution =
+        resolutions.get(resolutionId) ?? resolutionRecord;
       const requeuedDescendants = await requeueHeldDescendants(resolutionId);
       await removeResolution(resolutionId, current);
       await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
+      // The change was completed outside the queue, and its entities show the
+      // server version from before it: they are refetched, lists included.
+      // With held work queued again, the revalidation after it replays does it.
+      if (requeuedDescendants.length === 0) {
+        const skippedEntityKeys = new Set(
+          getTempLifecycleEntityKeys(committedResolution),
+        );
+        for (const waitingResolution of resolutions.values()) {
+          for (const entityKey of getCreatedEntityKeys(waitingResolution)) {
+            skippedEntityKeys.add(entityKey);
+          }
+        }
+        // The temp entities it created are refetched under their final ids.
+        const finalEntityRefs = resolveNormalizedRefs(
+          (committedResolution.tempIds ?? []).map(resolveEntityRef),
+        );
+        revalidateDiscardedWorkInEveryTab(
+          current,
+          [
+            {
+              ...committedResolution,
+              entityRefs: [
+                ...committedResolution.entityRefs,
+                ...finalEntityRefs,
+              ],
+            },
+          ],
+          skippedEntityKeys,
+        );
+      }
       // The work other stores held behind these creations follows them. It
       // stays held while this resolution exists, so it is released after.
       await notifyCreationsReleased(current, [

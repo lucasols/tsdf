@@ -1,11 +1,9 @@
 import { Store } from 't-state';
 
-type OverlayWithVisibilityFlag = {
-  keepVisibleWhileResolutionRequired?: boolean;
-};
+type OverlayWithKeepDataFlag = { keepDataOnNextCapture?: boolean };
 
 export function rebindOfflineOverlayEntries<
-  TOverlay extends OverlayWithVisibilityFlag,
+  TOverlay extends OverlayWithKeepDataFlag,
 >(
   overlayStore: Store<Record<string, TOverlay>>,
   itemKeyRewrites: readonly { nextItemKey: string; previousItemKey: string }[],
@@ -29,7 +27,7 @@ export function rebindOfflineOverlayEntries<
           nextItemKey,
         });
       } else {
-        draft[nextItemKey].keepVisibleWhileResolutionRequired = true;
+        draft[nextItemKey].keepDataOnNextCapture = true;
       }
 
       delete draft[previousItemKey];
@@ -46,14 +44,14 @@ export function rebindOfflineOverlayEntries<
  * a mutation is queued (see `captureOfflineOverlayEntries`).
  */
 export function getRecapturableOfflineOverlayKeys(
-  overlays: Readonly<Record<string, OverlayWithVisibilityFlag>>,
+  overlays: Readonly<Record<string, OverlayWithKeepDataFlag>>,
   itemKeys: Iterable<string>,
 ): string[] {
   const result: string[] = [];
 
   for (const itemKey of itemKeys) {
     const overlay = overlays[itemKey];
-    if (overlay && !overlay.keepVisibleWhileResolutionRequired) {
+    if (overlay && !overlay.keepDataOnNextCapture) {
       result.push(itemKey);
     }
   }
@@ -62,7 +60,7 @@ export function getRecapturableOfflineOverlayKeys(
 }
 
 export function captureOfflineOverlayEntries<
-  TOverlay extends OverlayWithVisibilityFlag,
+  TOverlay extends OverlayWithKeepDataFlag,
 >(
   overlayStore: Store<Record<string, TOverlay>>,
   itemKeys: readonly string[],
@@ -74,8 +72,8 @@ export function captureOfflineOverlayEntries<
   overlayStore.produceState((draft) => {
     for (const itemKey of targetItemKeys) {
       const existingOverlay = draft[itemKey];
-      if (existingOverlay?.keepVisibleWhileResolutionRequired) {
-        existingOverlay.keepVisibleWhileResolutionRequired = false;
+      if (existingOverlay?.keepDataOnNextCapture) {
+        existingOverlay.keepDataOnNextCapture = false;
         continue;
       }
 

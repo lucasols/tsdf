@@ -1269,7 +1269,7 @@ describe('tasks whose creation waits for a conflict decision', () => {
     );
   });
 
-  test('a subtask held behind the creation of its task stays in the list while it is sent after the user keeps the server task', async () => {
+  test('a subtask held behind the creation of its task is sent after the user keeps the server task, and shows once the list is refetched', async () => {
     // Offline, the user creates a task and a subtask under it, then
     // reconnects while the server reports that a task with that name already
     // exists: the subtask waits for the decision about its task.
@@ -1310,9 +1310,8 @@ describe('tasks whose creation waits for a conflict decision', () => {
     );
     // The subtask is queued again as the decision is made, so the list is not
     // refetched before the subtask is sent: a list fetched then would not
-    // have it, and the subtask would disappear once its creation is sent,
-    // until the list is fetched again. It is fetched once the subtask is
-    // created, and "Pack bags" never leaves the list.
+    // have it. It is fetched once the subtask is created, and shows the kept
+    // task and "Pack bags".
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | tasks                                             |
@@ -1494,5 +1493,48 @@ describe('tasks whose creation waits for a conflict decision', () => {
       - 'renameTask tasks||5 to "Book cheap flights"'
     `);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a task created offline whose creation conflicts shows in the list again once the user keeps the task the server created', async () => {
+    network.setOffline();
+    const env = createTasksEnv('commit-conflicted-task', 'commit-tasks');
+    const list = env.renderTaskList();
+    await flushAllTimers();
+    await env.createTask('Plan trip');
+
+    // On reconnect the creation reports a conflict: it waits for a decision,
+    // and the list shows what the server has, without the task.
+    env.conflicts.createTask = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.conflicts.createTask = false;
+    const conflict = env.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the task creation conflict');
+    }
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
+
+    // The task was created on the server after all: the user keeps it. The
+    // creation is completed outside the queue, so the list is refetched and
+    // shows it.
+    env.serverTable.setItem('tasks||9', { id: 9, name: 'Plan trip' });
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(conflict.id, 'createTask', {
+        action: 'commit',
+        result: { id: 9, name: 'Plan trip' },
+      });
+    });
+    await flushAllTimers();
+
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget', 'Plan trip']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
   });
 });

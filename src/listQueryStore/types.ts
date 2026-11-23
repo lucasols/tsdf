@@ -105,7 +105,7 @@ export type ListQueryOfflineOverlay<
    * Set on an overlay moved from a temp item to its final item: the next
    * capture keeps its data instead of capturing the item again.
    */
-  keepVisibleWhileResolutionRequired?: boolean;
+  keepDataOnNextCapture?: boolean;
 };
 
 /**

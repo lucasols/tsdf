@@ -1035,7 +1035,7 @@ export function createCollectionStore<
   type CollectionOfflineOverlay = {
     data: ItemState | null;
     payload?: ItemPayload;
-    keepVisibleWhileResolutionRequired?: boolean;
+    keepDataOnNextCapture?: boolean;
   };
   type ResolvedOfflineOperations = TOfflineOperations extends null
     ? Record<never, never>
@@ -1223,7 +1223,7 @@ export function createCollectionStore<
       ({ existingOverlay, nextItemKey }) => ({
         data: existingOverlay.data ?? null,
         payload: store.state[nextItemKey]?.payload ?? existingOverlay.payload,
-        keepVisibleWhileResolutionRequired: true,
+        keepDataOnNextCapture: true,
       }),
     );
   }
