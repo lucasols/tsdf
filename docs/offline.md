@@ -512,7 +512,7 @@ Supported resolution actions include:
 - `commit` - Accept an externally completed resolution result.
 - `retry` - Retry a retry-exhausted record.
 
-A mutation that exhausted its replay retries leaves the queue when it becomes a resolution record, so the mutations queued behind it keep replaying; only the ones that depend on it (queued on top of the entity it creates) wait with it.
+A mutation that exhausted its replay retries leaves the queue when it becomes a resolution record, so the mutations queued behind it keep replaying; only the ones that depend on it (queued on top of the entity it creates) wait with it. Later mutations of its entity are not held behind it either, see [Changes made after a change that waits for a decision](#changes-made-after-a-change-that-waits-for-a-decision).
 
 Use `parseOfflineResolutionConflict(resolution)` to narrow a persisted resolution back to the operation-specific conflict/input type before rendering a manual resolution UI.
 
@@ -527,6 +527,27 @@ A blocked mutation was never sent, so a later mutation of the same entity treats
 When the merged input still depends on the waiting entity, the changes merged into it go with the decision about the creation too: discarding the creation also drops them, e.g. a rename of a server task merged into its held move under the waiting entity.
 
 The work of other stores declared as `cancelledWith` the waiting entity is held the same way, in its own store: it is a blocked resolution of that store, sent after the creation on `retry` (default scope), `requeue` or `commit`, and dropped with it on `discard`. See [Deleting entities created offline](#deleting-entities-created-offline) for its limits.
+
+### Changes made after a change that waits for a decision
+
+A change that waits for a decision (`retry-exhausted` or `conflict`) does not hold back the later mutations of its entity: they run directly or are queued as usual (e.g. the user opens the doc from the failed change and keeps writing). Sending the waiting change again after them would overwrite them, so it follows each later mutation of its entity, when that mutation is queued, when it succeeds as a direct run, or, for mutations queued behind the change while it was still being retried, when the change starts waiting for a decision:
+
+- `accumulation`, same operation and entity refs: the later input is merged into the waiting change's input with `mergeInput` (`existingInput` is the waiting change). The later mutation is still sent on its own, and `retry` (or a `requeue` built from `resolution.input`) sends the merged input, so the fields the later mutation changed keep their newer values and the fields only the waiting change touched are still sent. With an operation whose `mergeInput` keeps the incoming input, this resends the newer content.
+- `supersedes` matching the waiting change's operation and entity: the waiting change is dropped, as an older queued mutation would be. The later mutation replaces it, so nothing is left to decide.
+- Otherwise (another operation of the entity, an operation with neither option, a merge refused by `canMerge`, or a `mergeInput` that fails): the waiting change is flagged `hasNewerChanges: true`. `retry` still sends it as it is, after the later mutation, which it may overwrite: a UI can warn before offering it, or offer only `discard`.
+
+```tsx
+<SyncProblemRow
+  resolution={resolution}
+  warning={
+    resolution.hasNewerChanges
+      ? 'This document changed after this edit failed: retrying may overwrite those changes'
+      : undefined
+  }
+/>
+```
+
+Creations that wait for a decision are not concerned: the later work of their entity is held behind them (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)), and neither is that held work, which a later mutation merges into or supersedes when it is queued. A `requeue` does not count as a later mutation of the other waiting changes. `discard` and `commit` behave as before: discarding a change that followed later mutations drops it and refetches the entity.
 
 ### Resolving From A Session-Wide UI
 

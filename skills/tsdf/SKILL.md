@@ -235,7 +235,7 @@ Deleting something created offline: give the delete operation `supersedes: { sco
 
 Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.
 
-Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied). See `docs/offline.md#conflict-resolution`.
+Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied). A waiting change follows later mutations of its entity (merged with `accumulation`, dropped by `supersedes`, otherwise flagged `hasNewerChanges: true` so the UI can warn that retrying may overwrite them); see `docs/offline.md#changes-made-after-a-change-that-waits-for-a-decision`. See `docs/offline.md#conflict-resolution`.
 
 Recovery: each attached store revalidates by itself once the session is back online and its queued mutations replayed — no manual invalidation needed on reconnect. Items with a change waiting for a manual resolution are left out (list fetches keep their local version) until it is handled; background refetches (mount, focus, non-`highPriority` invalidations) keep showing their local version too, while explicit fetches replace it. See `docs/offline.md#revalidation-after-recovering`.
 

@@ -813,6 +813,14 @@ type OfflineConflictResolutionRecordBase<
    * resolve after a reload. Written by TSDF.
    */
   dependencyUploadRefs?: Record<string, ValidPayload>;
+  /**
+   * `true` once a newer change of the same entity was queued or sent that
+   * neither merged into this one (`accumulation`) nor replaced it
+   * (`supersedes`). Sending this change again (`retry`, or a `requeue` of its
+   * input) sends it after that newer change, which it may overwrite: a UI can
+   * warn before offering it. Written by TSDF (see `docs/offline.md`).
+   */
+  hasNewerChanges?: boolean;
 };
 
 /** Derived dependency metadata exposed for offline manual resolutions. */
@@ -886,6 +894,14 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
    * resolve after a reload. Written by TSDF.
    */
   dependencyUploadRefs?: Record<string, ValidPayload>;
+  /**
+   * `true` once a newer change of the same entity was queued or sent that
+   * neither merged into this one (`accumulation`) nor replaced it
+   * (`supersedes`). Sending this change again (`retry`, or a `requeue` of its
+   * input) sends it after that newer change, which it may overwrite: a UI can
+   * warn before offering it. Written by TSDF (see `docs/offline.md`).
+   */
+  hasNewerChanges?: boolean;
 };
 
 /**
@@ -1339,7 +1355,14 @@ export type OfflineAccumulationMergeContext<TInput> = {
  * @typeParam TInput - Input type that will be merged and revalidated before persisting.
  */
 export type OfflineAccumulationConfig<TInput> = {
-  /** Merge function for combining existing and incoming mutation inputs. */
+  /**
+   * Merge function for combining existing and incoming mutation inputs.
+   *
+   * Also merges a later mutation into a change of the same operation and
+   * entity that waits for a manual resolution (`existingInput`), so that
+   * retrying it does not overwrite the later one. The later mutation is
+   * still sent on its own.
+   */
   mergeInput: (
     ctx: OfflineAccumulationMergeContext<TInput>,
   ) => Promise<TInput> | TInput;
@@ -1378,7 +1401,11 @@ export type OfflineAccumulationConfig<TInput> = {
  * new operation is queued behind them instead.
  */
 export type OfflineSupersedeConfig = {
-  /** Drop earlier unattempted pending entries for the same single entity. */
+  /**
+   * Drop earlier unattempted pending entries for the same single entity.
+   * A change of the entity that waits for a manual resolution is dropped
+   * too, once the newer operation is queued or sent directly.
+   */
   scope: 'same-entity';
   /**
    * Limits which earlier operations may be pruned for that entity.

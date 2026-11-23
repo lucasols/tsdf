@@ -775,6 +775,18 @@ export function createOfflineStoreController<
     accumulatedResolution?: PersistedOfflineResolutionRecord;
   };
 
+  /** A change made after the change a resolution holds */
+  type NewerWork = Pick<
+    OfflineQueueEntry,
+    'operation' | 'input' | 'entityRefs' | 'dependencyUploadRefs'
+  >;
+
+  type ResolutionRebase = {
+    previous: PersistedOfflineResolutionRecord;
+    /** The record that replaces it, or `null` when it is dropped */
+    next: PersistedOfflineResolutionRecord | null;
+  };
+
   type AppliedQueuedMutation = PlannedQueuedMutation & {
     removedEntriesApplied: OfflineQueueEntry[];
     removedResolutionsApplied: PersistedOfflineResolutionRecord[];
@@ -3798,6 +3810,211 @@ export function createOfflineStoreController<
   }
 
   /**
+   * How a resolution follows `work`, a change of its entity made after its
+   * own: merged into (same operation with `accumulation`), dropped (an
+   * operation that `supersedes` it) or flagged `hasNewerChanges`, so that
+   * sending it again does not silently overwrite the newer change. Resolves
+   * to the record that replaces it, `null` when it is dropped, or the same
+   * record when nothing changes.
+   */
+  async function rebaseResolutionOnNewerWork(
+    current: ActiveSessionState,
+    resolution: PersistedOfflineResolutionRecord,
+    work: NewerWork,
+  ): Promise<PersistedOfflineResolutionRecord | null> {
+    const operation = operations[work.operation];
+    if (
+      !operation ||
+      !resolution.entityRefs.some((ref) =>
+        work.entityRefs.some((workRef) => isSameEntityRef(ref, workRef)),
+      )
+    ) {
+      return resolution;
+    }
+
+    const { accumulation, supersedes } = operation;
+    if (
+      accumulation &&
+      resolution.operation === work.operation &&
+      normalizeEntityRefs(resolution.entityRefs) ===
+        normalizeEntityRefs(work.entityRefs)
+    ) {
+      const mergeContext = {
+        sessionKey: current.sessionKey,
+        existingInput: resolution.input,
+        incomingInput: work.input,
+      };
+      if (accumulation.canMerge?.(mergeContext) !== false) {
+        let mergedInput: unknown = null;
+        try {
+          const merging = accumulation.mergeInput(mergeContext);
+          mergedInput = isPromise(merging) ? await merging : merging;
+        } catch {
+          // Flagged below instead: the newer change was made and must not
+          // fail because an older one cannot follow it.
+        }
+        const validatedMergedInput = validateWithSchema(
+          operation.inputSchema,
+          mergedInput,
+        );
+        if (validatedMergedInput !== null) {
+          const dependencyUploadIds = getDependencyUploadIds({
+            operationName: work.operation,
+            input: validatedMergedInput,
+          });
+          return {
+            ...resolution,
+            input: validatedMergedInput,
+            dependencyUploadIds:
+              dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
+            dependencyUploadRefs: getDependencyUploadRefs(
+              current,
+              dependencyUploadIds,
+              resolution.dependencyUploadRefs,
+              work.dependencyUploadRefs,
+            ),
+            updatedAt: Date.now(),
+          };
+        }
+      }
+    } else if (
+      supersedes &&
+      work.entityRefs.length === 1 &&
+      resolution.entityRefs.length === 1 &&
+      isSameEntityRef(resolution.entityRefs[0], work.entityRefs[0]) &&
+      matchesSupersededOperation({
+        candidateOperationName: resolution.operation,
+        operationName: work.operation,
+        supersedes,
+      })
+    ) {
+      return null;
+    }
+
+    return resolution.hasNewerChanges
+      ? resolution
+      : { ...resolution, hasNewerChanges: true, updatedAt: Date.now() };
+  }
+
+  /**
+   * Plans how the resolutions of the entities of `work`, a change made after
+   * theirs, follow it (see `rebaseResolutionOnNewerWork`). Only the changes
+   * the user can send again on their own follow it: not the work held behind
+   * a creation that waits for a decision (merged into or superseded when the
+   * newer change is queued, see `findHeldWorkResolutions`), nor creations
+   * (the newer work of their entity is held behind them).
+   */
+  async function planResolutionRebases(
+    current: ActiveSessionState,
+    work: NewerWork,
+    isOlder?: (resolution: PersistedOfflineResolutionRecord) => boolean,
+  ): Promise<ResolutionRebase[]> {
+    if (resolutions.size === 0) return [];
+
+    const followingResolutions: PersistedOfflineResolutionRecord[] = [];
+    for (const resolution of resolutions.values()) {
+      if (
+        resolution.entityRefs.some((ref) =>
+          work.entityRefs.some((workRef) => isSameEntityRef(ref, workRef)),
+        ) &&
+        !requeuingResolutionIds.has(resolution.id) &&
+        (isOlder === undefined || isOlder(resolution)) &&
+        getCreatedEntityKeys(resolution).length === 0 &&
+        !isHeldWorkResolution(resolution)
+      ) {
+        followingResolutions.push(resolution);
+      }
+    }
+
+    const rebases: ResolutionRebase[] = [];
+    for (const resolution of followingResolutions.sort(
+      compareResolutionRecords,
+    )) {
+      const next = await rebaseResolutionOnNewerWork(current, resolution, work);
+      if (next !== resolution) rebases.push({ previous: resolution, next });
+    }
+
+    return rebases;
+  }
+
+  /**
+   * Applies the planned rebases whose resolution was not decided or changed
+   * meanwhile (e.g. retried from another tab), adding them to `applied`.
+   */
+  async function applyResolutionRebases(
+    current: ActiveSessionState,
+    rebases: readonly ResolutionRebase[],
+    applied: ResolutionRebase[] = [],
+  ): Promise<ResolutionRebase[]> {
+    for (const rebase of rebases) {
+      // Checked with no `await` before the write, which updates the record
+      // in memory right away
+      if (resolutions.get(rebase.previous.id) !== rebase.previous) continue;
+
+      applied.push(rebase);
+      if (rebase.next) {
+        await persistResolution(rebase.next, current, true);
+      } else {
+        await removeResolution(rebase.previous.id, current, true);
+      }
+    }
+    return applied;
+  }
+
+  /** The records whose uploads a rebase may have left unused */
+  function getRebasedWorkWithDroppedUploads(
+    rebases: readonly ResolutionRebase[],
+  ): PersistedOfflineResolutionRecord[] {
+    return rebases
+      .filter(
+        ({ previous, next }) =>
+          next === null ||
+          next.dependencyUploadIds !== previous.dependencyUploadIds,
+      )
+      .map(({ previous }) => previous);
+  }
+
+  /**
+   * The changes of the entities of the resolution created from `parentEntry`
+   * that were queued after that entry and never sent (made while it was
+   * being retried). The resolution follows them like the resolutions that
+   * exist when a change is queued. A creation has none: the work of its
+   * entity is held behind it.
+   */
+  function getUnsentWorkQueuedAfter(
+    parentEntry: OfflineQueueEntry,
+    resolution: PersistedOfflineResolutionRecord,
+  ): OfflineQueueEntry[] {
+    if (queueEntries.size < 2 || getCreatedEntityKeys(resolution).length > 0) {
+      return [];
+    }
+
+    return getSortedEntries().filter(
+      (entry) =>
+        entry.id !== parentEntry.id &&
+        getQueueOrder(entry) > getQueueOrder(parentEntry) &&
+        isUnsentQueueEntry(entry) &&
+        entry.entityRefs.some((entryRef) =>
+          resolution.entityRefs.some((ref) => isSameEntityRef(ref, entryRef)),
+        ),
+    );
+  }
+
+  /** `rebaseResolutionOnNewerWork` over each of `newerWork`, in order */
+  async function rebaseResolutionOnNewerWorkItems(
+    current: ActiveSessionState,
+    resolution: PersistedOfflineResolutionRecord,
+    newerWork: readonly NewerWork[],
+  ): Promise<PersistedOfflineResolutionRecord | null> {
+    let rebased: PersistedOfflineResolutionRecord | null = resolution;
+    for (const work of newerWork) {
+      if (!rebased) break;
+      rebased = await rebaseResolutionOnNewerWork(current, rebased, work);
+    }
+    return rebased;
+  }
+
+  /**
    * Removes the items a discarded `create` without temp entity (the app
    * generated the id on the client) added to the store, like the rollback of a
    * temp create, and adds their keys to `removedEntityKeys`. Like removed temp
@@ -3912,21 +4129,63 @@ export function createOfflineStoreController<
     parentEntry: OfflineQueueEntry;
     parentResolution: PersistedOfflineResolutionRecord;
   }): Promise<void> {
-    // Replay will not upload these again on its own, so an upload left waiting
-    // on an earlier failure must not keep reporting an automatic retry.
-    await args.current.session.markUploadsFailed(
-      args.parentEntry.dependencyUploadIds ?? [],
-    );
+    let parentResolution: PersistedOfflineResolutionRecord | null =
+      args.parentResolution;
+    let uploadsMarkedFailed = false;
+    for (;;) {
+      const newerWork = getUnsentWorkQueuedAfter(
+        args.parentEntry,
+        args.parentResolution,
+      );
+      parentResolution = await rebaseResolutionOnNewerWorkItems(
+        args.current,
+        args.parentResolution,
+        newerWork,
+      );
+      // A newer change queued behind it supersedes it: nothing is left to
+      // decide, and the newer change is sent instead.
+      if (!parentResolution) {
+        await removeEntry(args.parentEntry.id, args.current, true);
+        refreshDerivedState(args.current);
+        await deleteOrphanedDependencyUploads(args.current, [args.parentEntry]);
+        return;
+      }
+
+      if (!uploadsMarkedFailed) {
+        uploadsMarkedFailed = true;
+        // Replay will not upload these again on its own, so an upload left
+        // waiting on an earlier failure must not keep reporting an automatic
+        // retry.
+        await args.current.session.markUploadsFailed(
+          args.parentEntry.dependencyUploadIds ?? [],
+        );
+      }
+
+      // Checked with no `await` before the resolution is saved, which makes
+      // it visible to the changes queued after: one queued or merged
+      // meanwhile is followed too.
+      const workNow = getUnsentWorkQueuedAfter(
+        args.parentEntry,
+        args.parentResolution,
+      );
+      if (
+        workNow.length === newerWork.length &&
+        workNow.every((entry, index) => entry === newerWork[index])
+      ) {
+        break;
+      }
+    }
+
     // The resolution is saved before the entry is removed: the other tabs
     // apply each change as it arrives, and in between they would see the
     // store with nothing left to replay or decide on, and revalidate it over
     // the change that now waits for the user's decision.
-    await persistResolution(args.parentResolution, args.current, true);
+    await persistResolution(parentResolution, args.current, true);
     await removeEntry(args.parentEntry.id, args.current, true);
     await promoteBlockedTempCreateDescendants({
       current: args.current,
       parentEntry: args.parentEntry,
-      parentResolutionId: args.parentResolution.id,
+      parentResolutionId: parentResolution.id,
     });
     refreshDerivedState(args.current);
   }
@@ -5189,6 +5448,7 @@ export function createOfflineStoreController<
     // already taken when the mutation was called.
     if (nextQueueOrderValue !== null) nextQueueOrder = nextQueueOrderValue;
     let plannedMutation: PlannedQueuedMutation;
+    let resolutionRebases: ResolutionRebase[];
     let pendingEntityQueriesLoaded = false;
     let plannedAtTempReconciliationCount: number;
     for (;;) {
@@ -5216,6 +5476,21 @@ export function createOfflineStoreController<
           continue;
         }
       }
+      // The changes of the entity that wait for a decision follow this newer
+      // one, unless it is held itself or replaces one of them (`requeue`)
+      const { nextEntry: plannedEntry } = plannedMutation;
+      resolutionRebases =
+        replacedResolutionId === undefined &&
+        plannedEntry &&
+        resolutions.size > 0 &&
+        !isHeldBehindTempCreateResolution(plannedEntry)
+          ? await planResolutionRebases(current, {
+              operation: plannedMutation.operationName,
+              input: plannedMutation.validatedInput,
+              entityRefs: plannedEntry.entityRefs,
+              dependencyUploadRefs: plannedEntry.dependencyUploadRefs,
+            })
+          : [];
       // An async accumulation merge lets the replay pick up or send the entry
       // being merged into before it is committed. Merging into it then would
       // drop the incoming input or send the existing one twice, so the
@@ -5234,7 +5509,10 @@ export function createOfflineStoreController<
           }) === plannedMutation.accumulatedEntry) &&
         (!plannedMutation.accumulatedResolution ||
           resolutions.get(plannedMutation.accumulatedResolution.id) ===
-            plannedMutation.accumulatedResolution)
+            plannedMutation.accumulatedResolution) &&
+        resolutionRebases.every(
+          ({ previous }) => resolutions.get(previous.id) === previous,
+        )
       ) {
         break;
       }
@@ -5254,6 +5532,7 @@ export function createOfflineStoreController<
         : undefined;
 
     const persistedMutations: AppliedQueuedMutation[] = [];
+    const appliedRebases: ResolutionRebase[] = [];
     const persistedUploadIds: string[] = [];
     const appliedPendingMutations: Array<{
       operationName: string;
@@ -5347,6 +5626,8 @@ export function createOfflineStoreController<
           true,
         );
       }
+
+      await applyResolutionRebases(current, resolutionRebases, appliedRebases);
 
       // Removed after the merged work is queued, for the other tabs (see
       // `persistManualResolutionChain`).
@@ -5444,6 +5725,9 @@ export function createOfflineStoreController<
           await persistResolution(removedResolution, current, true);
         }
       }
+      for (const { previous } of appliedRebases.reverse()) {
+        await persistResolution(previous, current, true);
+      }
 
       refreshDerivedState(current);
 
@@ -5465,6 +5749,7 @@ export function createOfflineStoreController<
     ) {
       supersededWork.push(plannedMutation.accumulatedResolution);
     }
+    supersededWork.push(...getRebasedWorkWithDroppedUploads(appliedRebases));
     if (cancelledTempCreates) {
       // Also deletes the uploads the cancelled creations depended on.
       await discardTempLifecycles(current, cancelledTempCreates);
@@ -6034,6 +6319,7 @@ export function createOfflineStoreController<
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;
   }): Promise<PreparedOfflineMutation> {
+    const calledAt = Date.now();
     await hydrateIfNeeded();
     const current = await ensureSessionForUploadDependencies(
       args.offline.operation,
@@ -6176,15 +6462,25 @@ export function createOfflineStoreController<
       markUploadsFailed: () =>
         current.session.markUploadsFailed(dependencyUploadIds),
       handleDirectSuccess: async () => {
-        // Before the offline status is cleared, which resumes the replay, so
-        // that the other stores drop their work for the deleted entities
-        // before sending it.
-        if (prepared.operation.kind === 'delete') {
-          const successCurrent = ensureActiveSession();
-          if (successCurrent?.sessionKey === prepared.currentSessionKey) {
+        const successCurrent = ensureActiveSession();
+        if (successCurrent?.sessionKey === prepared.currentSessionKey) {
+          // Before the offline status is cleared, which resumes the replay, so
+          // that the other stores drop their work for the deleted entities
+          // before sending it.
+          if (prepared.operation.kind === 'delete') {
             await notifyEntitiesDeleted(
               successCurrent,
               getPreparedEntityRefs(prepared),
+            );
+          }
+          // The changes of the entity that wait for a decision follow this
+          // newer one, now that the server has it. Before its uploads are
+          // deleted, which a change merged with it may need.
+          if (resolutions.size > 0) {
+            await followDirectRunWithResolutions(
+              successCurrent,
+              prepared,
+              calledAt,
             );
           }
         }
@@ -6208,6 +6504,38 @@ export function createOfflineStoreController<
           : false;
       },
     };
+  }
+
+  /**
+   * Makes the resolutions of the entities of a mutation that ran directly
+   * follow it (see `rebaseResolutionOnNewerWork`): only the ones of changes
+   * made before it was called.
+   */
+  async function followDirectRunWithResolutions(
+    current: ActiveSessionState,
+    prepared: PreparedQueuedMutation,
+    calledAt: number,
+  ): Promise<void> {
+    const rebases = await applyResolutionRebases(
+      current,
+      await planResolutionRebases(
+        current,
+        {
+          operation: prepared.operationName,
+          input: prepared.validatedInput,
+          entityRefs: getPreparedEntityRefs(prepared),
+          dependencyUploadRefs: prepared.dependencyUploadRefs,
+        },
+        (resolution) => resolution.enqueuedAt <= calledAt,
+      ),
+    );
+    if (rebases.length === 0) return;
+
+    refreshDerivedState(current);
+    await deleteOrphanedDependencyUploads(
+      current,
+      getRebasedWorkWithDroppedUploads(rebases),
+    );
   }
 
   async function runUnqueuedMutation<
