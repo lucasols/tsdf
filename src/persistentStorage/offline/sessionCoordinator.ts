@@ -189,12 +189,6 @@ type SessionWorkDiscardedMessage = BrowserTabsMessageMeta & {
    * tabs running another version of the app still read it.
    */
   removedTempEntityKeys: string[];
-  /**
-   * The lists are not refetched: the work started waiting for a decision
-   * during a replay, and the recovery revalidation that follows refreshes
-   * them. Tabs running an older version refetch them anyway.
-   */
-  keepLists?: true;
 };
 
 /**
@@ -329,7 +323,6 @@ type SessionRegistration = {
   onRemoteWorkDiscarded?: (
     discardedWork: DiscardedOfflineWork[],
     removedEntityKeys: string[],
-    refetchLists: boolean,
   ) => void;
 };
 
@@ -1154,7 +1147,6 @@ class SessionOfflineCoordinator {
               ?.onRemoteWorkDiscarded?.(
                 message.discardedWork,
                 message.removedTempEntityKeys,
-                message.keepLists !== true,
               );
             return;
           }
@@ -1600,7 +1592,6 @@ class SessionOfflineCoordinator {
     storeName: string,
     discardedWork: DiscardedOfflineWork[],
     removedEntityKeys: string[],
-    refetchLists: boolean,
   ): void {
     if (this.#disposed) return;
 
@@ -1609,7 +1600,6 @@ class SessionOfflineCoordinator {
       storeName,
       discardedWork,
       removedTempEntityKeys: removedEntityKeys,
-      ...(refetchLists ? {} : { keepLists: true }),
     });
   }
 

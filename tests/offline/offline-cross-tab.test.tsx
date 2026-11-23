@@ -19,7 +19,6 @@ import {
   sharedUserRowsServer,
   sharedUsersServer,
   type Tab,
-  usersServerRules,
 } from './offlineCrossTabTestShared';
 
 test('a conflict created by another tab can be discarded after switching to this tab', async () => {
@@ -1182,52 +1181,6 @@ test('renames another tab turned into conflicts are refetched in the tab that ma
     ⋅ adaMarkedForRefetch: ✅
     ⋅ bob: Bob local
     ⋅ bobMarkedForRefetch: ✅
-    └─
-    "
-  `);
-});
-
-test('a user deleted offline in a tab comes back there once the leader tab, which never loaded it, cannot send the delete', async () => {
-  seedSharedUsersServer({ 'users||Ada': { name: 'Ada' } });
-  network.setOffline();
-  // Tab A keeps the focus and leads, but never loaded Ada
-  await openUsersTab('A', { focused: true });
-  const tabB = await openUsersTab('B', {
-    focused: false,
-    loadedUsers: ['users||Ada'],
-  });
-  setDocumentHidden(false);
-
-  const tabBUsers = createLoggerStore();
-  function logTabB(label: string) {
-    tabBUsers.add({
-      label,
-      ada: tabB.getUserName('users||Ada'),
-      resolutions: describeTabs(tabB)['tab B']?.resolutions.join(', '),
-    });
-  }
-
-  // The user deletes Ada in tab B while offline: she leaves the screen right
-  // away. The server will reject the delete on every attempt.
-  usersServerRules.rejectDeletes = true;
-  await tabB.queueDelete('users||Ada');
-  logTabB('deleted offline in tab B');
-
-  // On reconnect tab A replays the delete until it needs a decision. The
-  // delete then only lives in its resolution record, also for tab B: Ada is
-  // fetched again there instead of staying deleted.
-  network.goOnline();
-  await advanceTime(30_000);
-  logTabB('the delete needs a decision');
-
-  expect(serverCalls).toMatchInlineSnapshot(`['tab A sent delete users||Ada']`);
-  expect(tabBUsers.changesSnapshot).toMatchInlineSnapshot(`
-    "
-    -> label: deleted offline in tab B ⋅ ada: null ⋅ resolutions: ''
-    ┌─
-    ⋅ label: the delete needs a decision
-    ⋅ ada: Ada
-    ⋅ resolutions: users: retry-exhausted
     └─
     "
   `);
