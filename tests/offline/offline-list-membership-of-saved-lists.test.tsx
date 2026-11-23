@@ -15,6 +15,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
+  advanceTime,
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
@@ -442,6 +443,68 @@ describe('optimisticListUpdates', () => {
       ['loading: ', 'success: Pay invoice, Write report']
     `);
   });
+
+  test.each(storages)(
+    'a move cancelled while it waits for its debounce leaves the card in the column of its queued move ($storage)',
+    async ({ adapter }) => {
+      const board = await restartOfflineWithSavedColumns(adapter, 'filter');
+
+      // Offline, the user moves "Write report" to done. The move is queued.
+      await board.moveTask('tasks||1', 'done');
+
+      // On the card's screen, the user starts moving it back to todo. The
+      // move waits for its debounce before it is queued.
+      const cardScreen = renderHook(() =>
+        board.env.apiStore.useItem('tasks||1'),
+      );
+      await flushAllTimers();
+      const moveBackDebounce = { context: 'move-task', payload: 'tasks||1' };
+      act(() => {
+        void board.env.apiStore.performMutation('tasks||1', {
+          debounce: { ...moveBackDebounce, ms: 5_000 },
+          optimisticUpdate: () => {
+            board.env.apiStore.updateItemState('tasks||1', (task) => ({
+              ...task,
+              status: 'todo',
+            }));
+          },
+          mutation: () => Promise.reject(new Error('unreachable offline')),
+          offline: {
+            operation: 'moveTask',
+            input: { itemId: 'tasks||1', status: 'todo' },
+          },
+        });
+      });
+
+      // The board opens meanwhile: its columns are read back from storage
+      // and show the move waiting for its debounce.
+      const todo = board.renderColumn(todoColumn);
+      const done = board.renderColumn(doneColumn);
+      await advanceTime(1_000);
+      expect({
+        todo: todo.result.current.items,
+        done: done.result.current.items,
+      }).toMatchInlineSnapshot(`
+        done: ['Pay invoice']
+        todo: ['Write report']
+      `);
+
+      // The user cancels the move back: the card returns to the done column
+      // of its queued move.
+      act(() => {
+        board.env.apiStore.cancelDebouncedMutation(moveBackDebounce);
+      });
+      await flushAllTimers();
+      expect({
+        todo: todo.result.current.items,
+        done: done.result.current.items,
+      }).toMatchInlineSnapshot(`
+        done: ['Pay invoice', 'Write report']
+        todo: []
+      `);
+      expect(cardScreen.result.current.data?.status).toBe('done');
+    },
+  );
 
   test.each(storages)(
     'a board open while the app restarts shows a card moved offline before the restart ($storage)',

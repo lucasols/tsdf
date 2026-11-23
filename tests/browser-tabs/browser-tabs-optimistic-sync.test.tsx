@@ -596,9 +596,8 @@ test('list query rollbacks sync restored lists as optimistic while a listed item
     "
     time  | users||2 |
     0     | Bob      | [users||2] ui-initialized
-    .     | Bob      | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Bob      | [users||2] <optimistic-item-snapshot-received (value: {"id":2,"name":"Bobby"})
     .     | Bobby    | [users||2] ui-changed
-    .     | Bobby    | [users||2] <optimistic-item-snapshot-received (value: {"id":2,"name":"Bobby"})
     .     | Bobby    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     100ms | Bobby    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Bobby    | [users||1] <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})

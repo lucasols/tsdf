@@ -2453,6 +2453,7 @@ export function createListQueryStore<
       );
     },
     persistence?.restoredItemKeys,
+    persistence?.restoredQueryKeys,
     skipsBackgroundItemRefetch,
   );
 
@@ -4436,20 +4437,29 @@ export function createListQueryStore<
   }
 
   /** See `applyOfflineChangesToRestoredQueries`. */
-  function applyOfflineChangesToRestoredQuery(queryKey: string): void {
+  function applyOfflineChangesToRestoredQuery(
+    queryKey: string,
+    itemKeysReadBack?: ReadonlySet<string>,
+  ): void {
     if (offlineItemKeys.size === 0) return;
-    applyOfflineChangesToRestoredQueries([queryKey], offlineItemKeys);
+    applyOfflineChangesToRestoredQueries(
+      [queryKey],
+      offlineItemKeys,
+      itemKeysReadBack,
+    );
   }
 
   /**
    * Runs the `optimisticListUpdates` rules for the items with offline work on
    * queries read back from persistent storage: a saved list can predate the
    * items' local changes, and it can't be refetched while offline. Items not
-   * in memory are read back first.
+   * in memory are read back first, except `itemKeysReadBack`: they were read
+   * back with the queries, so the ones still missing aren't in storage.
    */
   function applyOfflineChangesToRestoredQueries(
     queryKeys: string[],
     itemKeys: Iterable<string>,
+    itemKeysReadBack?: ReadonlySet<string>,
   ): void {
     if (!optimisticListUpdates || !persistence || queryKeys.length === 0) {
       return;
@@ -4471,7 +4481,9 @@ export function createListQueryStore<
     };
 
     const unloadedItemKeys = offlineItemKeysToApply.filter(
-      (itemKey) => store.state.itemQueries[itemKey] === undefined,
+      (itemKey) =>
+        store.state.itemQueries[itemKey] === undefined &&
+        !itemKeysReadBack?.has(itemKey),
     );
     if (unloadedItemKeys.length === 0) {
       apply();

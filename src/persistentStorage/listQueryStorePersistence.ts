@@ -326,8 +326,14 @@ export function setupListQueryPersistence<
       itemKey: string,
       loadedFields: ItemLoadedFields | undefined,
     ) => ItemLoadedFields | undefined;
-    /** Called after a query read back from storage is put in the state. */
-    onQueryRestored?: (queryKey: string) => void;
+    /**
+     * Called after a query read back from storage is put in the state, with
+     * the items of `getItemKeysToRestoreWithQueries` read back with it.
+     */
+    onQueryRestored?: (
+      queryKey: string,
+      itemKeysReadBack: ReadonlySet<string> | undefined,
+    ) => void;
     /**
      * Items that `onQueryRestored` reads, read back with the rows of a query
      * from async storage so the query is put in the state with them.
@@ -1502,7 +1508,7 @@ export function setupListQueryPersistence<
     storeRef.produceState((draft) => {
       draft.queries[queryKey] = query;
     });
-    options.onQueryRestored?.(queryKey);
+    options.onQueryRestored?.(queryKey, undefined);
   }
 
   function parseHydratedItemSnapshot(
@@ -2178,8 +2184,8 @@ export function setupListQueryPersistence<
 
         rememberHydratedQuery(queryKey, cached);
 
-        const itemKeysToRestoreWith =
-          options.getItemKeysToRestoreWithQueries?.();
+        const restoreWith = options.getItemKeysToRestoreWithQueries?.();
+        const itemKeysToRestoreWith = restoreWith && new Set(restoreWith);
         await preloadItems(
           itemKeysToRestoreWith
             ? [...persistedQuery.items, ...itemKeysToRestoreWith]
@@ -2211,7 +2217,7 @@ export function setupListQueryPersistence<
             ),
           },
         });
-        options.onQueryRestored?.(queryKey);
+        options.onQueryRestored?.(queryKey, itemKeysToRestoreWith);
 
         return true;
       })

@@ -8,7 +8,10 @@ import {
   ValidStoreState,
   invalidPayloadError,
 } from '../utils/storeShared';
-import { endsFetch, useRequireFreshData } from '../utils/useRequireFreshData';
+import {
+  settlesRefresh,
+  useRequireFreshData,
+} from '../utils/useRequireFreshData';
 import type {
   FieldsInput,
   ListQueryUseMultipleItemsQuery,
@@ -202,7 +205,13 @@ export function useItem<
         return state.itemQueries[result.itemStateKey]?.status;
       })
       .change.then(({ prev, current }) => {
-        if (endsFetch(prev, current)) {
+        if (
+          settlesRefresh(
+            prev,
+            current,
+            () => !!isItemRestoredFromStorage?.(result.itemStateKey),
+          )
+        ) {
           markRefreshSettled();
         }
       });

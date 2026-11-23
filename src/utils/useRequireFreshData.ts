@@ -77,18 +77,23 @@ export function useRequireFreshData(
 }
 
 /**
- * Whether a status change ends a fetch, so it can settle the `requireFreshData`
- * refresh. Data read back from storage also becomes `success`, but from no
- * state or `idle`, and isn't fresh, e.g. while the refresh waits for the
- * queued offline work to be read.
+ * Whether a status change settles the `requireFreshData` refresh: a fetch
+ * ending, or fresh data received from another tab. Data read back from storage
+ * also becomes `success`, but from no state or `idle`, and isn't fresh, e.g.
+ * while the refresh waits for the queued offline work to be read.
  */
-export function endsFetch(
+export function settlesRefresh(
   prev: string | undefined,
   current: string | undefined,
+  isRestoredFromStorage: () => boolean,
 ): boolean {
+  if (current !== 'success' && current !== 'error') return false;
+
   return (
-    (current === 'success' || current === 'error') &&
-    (prev === 'loading' || prev === 'refetching' || prev === 'loadingMore')
+    prev === 'loading' ||
+    prev === 'refetching' ||
+    prev === 'loadingMore' ||
+    !isRestoredFromStorage()
   );
 }
 
