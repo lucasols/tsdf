@@ -10,7 +10,7 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import {
   type CreateListQueryUserOperations,
   deleteItemInputSchema,
@@ -1117,6 +1117,684 @@ describe('list-query replay', () => {
       5.02s | Ada, Grace, Linus offline | success      | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
+
+    hook.unmount();
+  });
+});
+
+describe('an edit of a row created offline that is not queued yet when the creation is saved', () => {
+  /**
+   * A users list where Linus was created offline under a temp id and the
+   * creation is still queued. Renaming a user is a cell edit that waits 1.5s
+   * for more typing before it is saved.
+   */
+  async function setupQueuedTempCreate(args: {
+    sessionKey: string;
+    storeName: string;
+  }) {
+    const usersQuery = { tableId: 'users' } as const;
+    const replayedOperations: Array<{
+      operation: 'createUser' | 'patchUserName';
+      input: { itemId: string; name: string } | { name: string };
+    }> = [];
+    // The ids the renames sent directly (not replayed) were sent for
+    const directRenames: Array<{ itemId: string; name: string }> = [];
+    // The ids the `onSuccess` of the renames was called with
+    const onSuccessPayloads: unknown[] = [];
+    // The app checks the connection with a ping. A latency pushed here is
+    // used by the next check, the other checks answer right away.
+    const connectionCheckLatencies: number[] = [];
+    // The id the server gives the next user it creates
+    let nextServerUserId = 3;
+    // The app's offline session gate (`offlineSession.enabled`)
+    let offlineEnabled = true;
+
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        CreateAndPatchListQueryUserOperations
+      >
+    > = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateAndPatchListQueryUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: args.storeName,
+        getSessionKey: () => args.sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => args.sessionKey,
+          offlineSession: {
+            enabled: () => offlineEnabled,
+            network: {
+              enabled: true,
+              getIsOffline: () => {
+                const latency = connectionCheckLatencies.shift();
+                if (latency === undefined) return network.isOffline();
+                return new Promise((resolve) => {
+                  setTimeout(() => resolve(network.isOffline()), latency);
+                });
+              },
+            },
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: async ({ input }) => {
+                  replayedOperations.push({ operation: 'createUser', input });
+                  const result = { id: nextServerUserId, name: input.name };
+                  nextServerUserId += 1;
+                  await env.serverTable.delayedSetItem(
+                    `users||${result.id}`,
+                    result,
+                  );
+                  return result;
+                },
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                kind: 'update',
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: async ({ input }) => {
+                  replayedOperations.push({
+                    operation: 'patchUserName',
+                    input,
+                  });
+                  await env.serverTable.delayedUpdateItem(input.itemId, {
+                    name: input.name,
+                  });
+                  return { name: input.name };
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(
+                    input.itemId,
+                    (item: { id: number; name: string }) => ({
+                      ...item,
+                      name: input.name,
+                    }),
+                  );
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      const query = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item: { id: number; name: string }) => item.name,
+      });
+
+      env.trackItemUI('query-items', query.items.join(', '));
+      return query;
+    });
+    await flushAllTimers();
+
+    /** Creates the user Linus offline, under the temp id `temp:Linus` */
+    async function createLinus() {
+      await act(async () => {
+        await env.apiStore.performMutation('temp:Linus', {
+          optimisticUpdate: () => {
+            env.apiStore.addItemToState(
+              'temp:Linus',
+              { id: -1, name: 'Linus' },
+              { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+            );
+          },
+          mutation: () => Promise.reject(new Error('never sent directly')),
+          offline: { operation: 'createUser', input: { name: 'Linus' } },
+        });
+      });
+    }
+
+    env.addTimelineComments('beforeNextAction', ['create Linus offline']);
+    await createLinus();
+
+    // The results of the renames, in the order they settled
+    const renameResults: unknown[] = [];
+
+    /** Renames Linus in its cell, with the temp id the cell was rendered with */
+    function renameLinus(name: string) {
+      act(() => {
+        void env.apiStore
+          .performMutation('temp:Linus', {
+            debounce: {
+              context: 'rename-user',
+              payload: 'temp:Linus',
+              ms: 1500,
+            },
+            optimisticUpdate: () => {
+              env.apiStore.updateItemState(
+                'temp:Linus',
+                (item: { id: number; name: string }) => ({ ...item, name }),
+              );
+            },
+            // Applies the saved name to the row it is called with
+            onSuccess: (_data, itemId) => {
+              onSuccessPayloads.push(itemId);
+              if (typeof itemId !== 'string') return;
+              env.apiStore.updateItemState(
+                itemId,
+                (item: { id: number; name: string }) => ({ ...item, name }),
+              );
+            },
+            // Sends the rename for the row it is called with
+            mutation: async (itemId) => {
+              if (typeof itemId !== 'string') throw new Error('expected an id');
+              directRenames.push({ itemId, name });
+              await new Promise((resolve) => {
+                setTimeout(resolve, 1200);
+              });
+              // Fails when the connection dropped while it was sent
+              if (network.isOffline()) throw new Error('Failed to fetch');
+              env.serverTable.updateItem(itemId, { name });
+              return { name };
+            },
+            offline: {
+              operation: 'patchUserName',
+              input: { itemId: 'temp:Linus', name },
+            },
+          })
+          .then((result) => {
+            renameResults.push(result.ok ? result.value : result.error);
+          });
+      });
+    }
+
+    return {
+      env,
+      hook,
+      replayedOperations,
+      directRenames,
+      onSuccessPayloads,
+      renameResults,
+      renameLinus,
+      createLinus,
+      connectionCheckLatencies,
+      setOfflineEnabled: (enabled: boolean) => {
+        offlineEnabled = enabled;
+      },
+    };
+  }
+
+  test('a rename whose debounce ends after the creation is saved is sent for the saved user', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-debounced-online-session';
+    const storeName = 'temp-edit-debounced-online-store';
+    const {
+      env,
+      hook,
+      replayedOperations,
+      directRenames,
+      onSuccessPayloads,
+      renameResults,
+      renameLinus,
+    } = await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The user reconnects and renames Linus right away: the creation is sent
+    // (1.2s) and saved while the rename still waits for its debounce (1.5s)
+    env.addTimelineComments('beforeNextAction', [
+      'rename Linus and reconnect: Linus is saved during the debounce',
+    ]);
+    renameLinus('Linus edited');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is left to replay, so the rename is sent directly, and for the
+    // saved user instead of the temp id the server does not know
+    expect(renameResults).toMatchInlineSnapshot(`
+      - data: { name: 'Linus edited' }
+        kind: 'online'
+    `);
+    expect(directRenames).toMatchInlineSnapshot(`
+      - { itemId: 'users||3', name: 'Linus edited' }
+    `);
+    // `onSuccess` gets the saved user too, so the name it applies shows
+    expect(onSuccessPayloads).toMatchInlineSnapshot(`['users||3']`);
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+    `);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus edited'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus edited']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    // Known gap: the saved user's data replaces the temp row, which hides the
+    // rename still waiting for its debounce until the rename is saved
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | query-items              |
+      0     | Ada, Grace               | [query-items] ui-initialized
+      3.01s | Ada, Grace               | -- create Linus offline
+      .     | Ada, Grace, Linus        | [query-items] ui-changed
+      .     | Ada, Grace, Linus        | offline:createUser queued
+      .     | Ada, Grace, Linus        | -- rename Linus and reconnect: Linus is saved during the debounce
+      .     | Ada, Grace, Linus edited | [query-items] ui-changed
+      .     | Ada, Grace, Linus edited | offline:createUser replay-started
+      4.21s | Ada, Grace, Linus edited | [users||3] server-data-changed (value: {"id":3,"name":"Linus"})
+      .     | Ada, Grace, Linus edited | offline:createUser replay-finished
+      .     | Ada, Grace, Linus        | [query-items, query-items] ui-changed
+      5.71s | Ada, Grace, Linus        | [users||3] server-data-changed (value: {"name":"Linus edited"})
+      .     | Ada, Grace, Linus edited | [query-items] ui-changed
+      5.72s | Ada, Grace, Linus edited | 🔴 >list-fetch-started
+      6.52s | Ada, Grace, Linus edited | 🔴 <list-fetch-finished (value: {"count":3})
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('a rename whose debounce ends after the creation is saved and the connection dropped again is queued for the saved user', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-debounced-queued-session';
+    const storeName = 'temp-edit-debounced-queued-store';
+    const {
+      env,
+      hook,
+      replayedOperations,
+      directRenames,
+      renameResults,
+      renameLinus,
+    } = await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The user reconnects and renames Linus right away. The creation is saved
+    // during the debounce, then the connection drops before the debounce ends
+    env.addTimelineComments('beforeNextAction', [
+      'rename Linus and reconnect: Linus is saved during the debounce',
+    ]);
+    renameLinus('Linus edited');
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(1300);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+    env.addTimelineComments('beforeNextAction', [
+      'the connection drops before the debounce ends',
+    ]);
+    act(() => {
+      network.goOffline();
+    });
+    await advanceTime(500);
+
+    // The rename is queued, for the saved user
+    expect(renameResults).toMatchInlineSnapshot(`
+      - kind: 'queued'
+    `);
+    expect(
+      getOfflineQueueEntries(sessionKey, storeName).map((entry) =>
+        pick(getOfflineQueueEntryData(entry), ['operation', 'input']),
+      ),
+    ).toMatchInlineSnapshot(`
+      - input: { itemId: 'users||3', name: 'Linus edited' }
+        operation: 'patchUserName'
+    `);
+
+    // Once back online, the queued rename is replayed and saved
+    env.addTimelineComments('beforeNextAction', ['reconnect']);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(directRenames).toMatchInlineSnapshot(`[]`);
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { itemId: 'users||3', name: 'Linus edited' }
+        operation: 'patchUserName'
+    `);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus edited'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus edited']`,
+    );
+    // Nothing was left for the user to resolve
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+    // Known gap: the saved user's data replaces the temp row, which hides the
+    // rename still waiting for its debounce until the rename is replayed
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | query-items              |
+      0     | Ada, Grace               | [query-items] ui-initialized
+      3.01s | Ada, Grace               | -- create Linus offline
+      .     | Ada, Grace, Linus        | [query-items] ui-changed
+      .     | Ada, Grace, Linus        | offline:createUser queued
+      .     | Ada, Grace, Linus        | -- rename Linus and reconnect: Linus is saved during the debounce
+      .     | Ada, Grace, Linus edited | [query-items] ui-changed
+      .     | Ada, Grace, Linus edited | offline:createUser replay-started
+      4.21s | Ada, Grace, Linus edited | [users||3] server-data-changed (value: {"id":3,"name":"Linus"})
+      .     | Ada, Grace, Linus edited | offline:createUser replay-finished
+      .     | Ada, Grace, Linus        | [query-items, query-items] ui-changed
+      4.51s | Ada, Grace, Linus        | -- the connection drops before the debounce ends
+      .     | Ada, Grace, Linus        | offline:patchUserName queued
+      4.81s | Ada, Grace, Linus        | -- reconnect
+      .     | Ada, Grace, Linus        | offline:patchUserName replay-started
+      6.01s | Ada, Grace, Linus        | [users||3] server-data-changed (value: {"name":"Linus edited"})
+      .     | Ada, Grace, Linus        | offline:patchUserName replay-finished
+      .     | Ada, Grace, Linus edited | [query-items] ui-changed
+      6.02s | Ada, Grace, Linus edited | 🔴 >list-fetch-started
+      6.82s | Ada, Grace, Linus edited | 🔴 <list-fetch-finished (value: {"count":3})
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('a rename whose connection check ends after the creation is saved is sent for the saved user, and queued for it when the request fails', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-connection-check-session';
+    const storeName = 'temp-edit-connection-check-store';
+    const {
+      env,
+      hook,
+      replayedOperations,
+      directRenames,
+      renameResults,
+      renameLinus,
+      connectionCheckLatencies,
+    } = await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // Still offline, the user renames Linus. The rename's debounce ends 1s
+    // after reconnecting, while the creation (1.2s) is still being sent
+    env.addTimelineComments('beforeNextAction', ['rename Linus offline']);
+    renameLinus('Linus edited');
+    await advanceTime(500);
+    env.addTimelineComments('beforeNextAction', ['reconnect']);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(900);
+    // The rename's connection check, when its debounce ends, takes 300ms:
+    // Linus is saved while it runs
+    connectionCheckLatencies.push(300);
+    await advanceTime(400);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+
+    // The rename was sent for the saved user
+    expect(directRenames).toMatchInlineSnapshot(`
+      - { itemId: 'users||3', name: 'Linus edited' }
+    `);
+
+    // The connection drops while the rename is sent, so its request fails
+    // and the rename is queued, for the saved user too
+    env.addTimelineComments('beforeNextAction', [
+      'the connection dropped while the rename was sent: its request failed',
+    ]);
+    act(() => {
+      network.goOffline();
+    });
+    await advanceTime(1200);
+    expect(renameResults).toMatchInlineSnapshot(`- kind: 'queued'`);
+    expect(
+      getOfflineQueueEntries(sessionKey, storeName).map((entry) =>
+        pick(getOfflineQueueEntryData(entry), ['operation', 'input']),
+      ),
+    ).toMatchInlineSnapshot(`
+      - input: { itemId: 'users||3', name: 'Linus edited' }
+        operation: 'patchUserName'
+    `);
+
+    // Once back online, the queued rename is replayed and saved
+    env.addTimelineComments('beforeNextAction', ['reconnect']);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { itemId: 'users||3', name: 'Linus edited' }
+        operation: 'patchUserName'
+    `);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus edited'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus edited']`,
+    );
+    // Nothing was left for the user to resolve
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    // Known gap: the saved user's data replaces the temp row, which hides the
+    // rename not queued yet until the rename is replayed
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | query-items              |
+      0     | Ada, Grace               | [query-items] ui-initialized
+      3.01s | Ada, Grace               | -- create Linus offline
+      .     | Ada, Grace, Linus        | [query-items] ui-changed
+      .     | Ada, Grace, Linus        | offline:createUser queued
+      .     | Ada, Grace, Linus        | -- rename Linus offline
+      .     | Ada, Grace, Linus edited | [query-items] ui-changed
+      3.51s | Ada, Grace, Linus edited | -- reconnect
+      .     | Ada, Grace, Linus edited | offline:createUser replay-started
+      4.71s | Ada, Grace, Linus edited | [users||3] server-data-changed (value: {"id":3,"name":"Linus"})
+      .     | Ada, Grace, Linus edited | offline:createUser replay-finished
+      .     | Ada, Grace, Linus        | [query-items, query-items] ui-changed
+      6.01s | Ada, Grace, Linus        | -- the connection dropped while the rename was sent: its request failed
+      .     | Ada, Grace, Linus        | offline:patchUserName queued
+      .     | Ada, Grace, Linus        | -- reconnect
+      .     | Ada, Grace, Linus        | offline:patchUserName replay-started
+      6.02s | Ada, Grace, Linus        | 🔴 >list-fetch-started
+      6.82s | Ada, Grace, Linus        | 🔴 <list-fetch-finished (value: {"count":3})
+      7.21s | Ada, Grace, Linus        | [users||3] server-data-changed (value: {"name":"Linus edited"})
+      .     | Ada, Grace, Linus        | offline:patchUserName replay-finished
+      .     | Ada, Grace, Linus edited | [query-items] ui-changed
+      7.22s | Ada, Grace, Linus edited | 🟠 >list-fetch-started
+      8.02s | Ada, Grace, Linus edited | 🟠 <list-fetch-finished (value: {"count":3})
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('a rename sent for the saved user while its temp id is reused for another user applies its result to the saved user', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-reused-during-request-session';
+    const storeName = 'temp-edit-reused-during-request-store';
+    const {
+      env,
+      hook,
+      directRenames,
+      onSuccessPayloads,
+      renameResults,
+      renameLinus,
+      createLinus,
+    } = await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The user reconnects and renames Linus: Linus is saved as users||3
+    // during the debounce, and the rename is then sent for users||3 (1.2s)
+    renameLinus('Linus edited');
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(1600);
+    expect(directRenames).toMatchInlineSnapshot(
+      `- { itemId: 'users||3', name: 'Linus edited' }`,
+    );
+
+    // While the rename request is in flight, the app creates another Linus
+    // with the same temp id, which now stands for the new user. (This test's
+    // creation can only be replayed, so being online it fails and is undone,
+    // but the temp id stopped standing for users||3 when it was prepared.)
+    await createLinus();
+    await flushAllTimers();
+
+    // The rename result is applied to the user it was sent for, not to the
+    // new temp user or to a user saved since
+    expect(renameResults).toMatchInlineSnapshot(`
+      - data: { name: 'Linus edited' }
+        kind: 'online'
+    `);
+    expect(onSuccessPayloads).toMatchInlineSnapshot(`['users||3']`);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus edited'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus edited']`,
+    );
+
+    hook.unmount();
+  });
+
+  test('a temp id reused after its creation was saved creates another user, whose rename is not sent for the first one', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-reused-temp-id-session';
+    const storeName = 'temp-edit-reused-temp-id-store';
+    const { env, hook, replayedOperations, renameLinus, createLinus } =
+      await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The first Linus is saved as users||3
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+
+    // Offline again, the app creates another Linus with the same temp id
+    // (e.g. a temp id derived from the name), and the user renames it
+    act(() => {
+      network.goOffline();
+    });
+    await createLinus();
+    renameLinus('Linus the second');
+    await advanceTime(1600);
+
+    // The rename is queued for the new Linus, not for the saved one
+    expect(
+      getOfflineQueueEntries(sessionKey, storeName).map((entry) =>
+        pick(getOfflineQueueEntryData(entry), ['operation', 'input']),
+      ),
+    ).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { itemId: 'temp:Linus', name: 'Linus the second' }
+        operation: 'patchUserName'
+    `);
+
+    // Once back online, the new Linus is created and renamed, and the first
+    // one keeps its name
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+      - input: { itemId: 'users||4', name: 'Linus the second' }
+        operation: 'patchUserName'
+    `);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+    expect(env.serverTable.get('users||4')).toMatchInlineSnapshot(`
+      id: 4
+      name: 'Linus the second'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus', 'Linus the second']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    hook.unmount();
+  });
+  test('a temp id reused for an online creation while the offline gate is closed is not sent for the saved user', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-id-reused-gate-closed-session';
+    const storeName = 'temp-id-reused-gate-closed-store';
+    const { env, hook, setOfflineEnabled } = await setupQueuedTempCreate({
+      sessionKey,
+      storeName,
+    });
+
+    // The first Linus is saved as users||3
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+
+    // The app closes its offline gate, so offline-enabled mutations run as
+    // plain online mutations, and creates another Linus with the same temp id
+    setOfflineEnabled(false);
+    const creationPayloads: unknown[] = [];
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus', {
+        mutation: (itemId) => {
+          creationPayloads.push(itemId);
+          return Promise.resolve({ id: 4 });
+        },
+        onSuccess: (_data, itemId) => {
+          creationPayloads.push(itemId);
+        },
+        offline: { operation: 'createUser', input: { name: 'Linus' } },
+      });
+    });
+
+    // The creation's `mutation` and `onSuccess` get its own temp id, not the
+    // saved user's id that temp id stood for before
+    expect(creationPayloads).toMatchInlineSnapshot(
+      `['temp:Linus', 'temp:Linus']`,
+    );
 
     hook.unmount();
   });

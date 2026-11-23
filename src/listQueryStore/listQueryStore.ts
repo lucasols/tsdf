@@ -555,7 +555,14 @@ type ListQueryMutationArgsBase<
   optimisticUpdate?: (
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
   ) => void | boolean;
-  /** Performs the server mutation for the affected item payloads. */
+  /**
+   * Performs the server mutation for the affected item payloads. With an
+   * `offline` descriptor, an item created offline whose creation was saved
+   * since the call (e.g. during the `debounce` window) is passed with its
+   * final payload, so build the request from this argument. Temp payloads of
+   * other items the request references are not rewritten: resolve them with
+   * `resolveTempItemPayload` of their store.
+   */
   mutation: (
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     ...args: TMutationExtraArgs
@@ -568,7 +575,10 @@ type ListQueryMutationArgsBase<
    * matching queries, or `{ queries, items }` to choose both explicitly.
    */
   revalidateOnSuccess?: ListQueryRevalidateOnSuccessOption<QueryPayload>;
-  /** Called after a successful online mutation. */
+  /**
+   * Called after a successful online mutation, with the same final payload as
+   * `mutation` for an item whose creation was saved since the call.
+   */
   onSuccess?: (
     response: UnwrapTSDFResult<Awaited<T>>,
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
@@ -1819,6 +1829,8 @@ export function createListQueryStore<
   };
   const offlineMutationController = {
     canQueueMutation: () => offlineController?.canQueueMutation() ?? false,
+    resolveEntityRef: <TRef extends ValidPayload>(entityRef: TRef): TRef =>
+      offlineController?.resolveEntityRef(entityRef) ?? entityRef,
     prepareForMutation: <
       TName extends keyof Exclude<TOfflineOperations, null> & string,
     >(args: {

@@ -98,6 +98,8 @@ export type OfflineAwareMutationController<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {
   canQueueMutation: () => boolean;
+  /** The final payload of a temp entity whose creation was saved */
+  resolveEntityRef: <TRef extends ValidPayload>(entityRef: TRef) => TRef;
   prepareForMutation: <TName extends keyof TOperations & string>(args: {
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;

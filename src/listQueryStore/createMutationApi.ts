@@ -1870,6 +1870,18 @@ export function createMutationApi<
     upload?: OfflineMutationUploadsInput;
   };
 
+  /** Replaces the temp payloads of saved creations by their final payloads */
+  function resolveSavedTempPayloads(
+    payload: MutationPayloadToUse,
+  ): MutationPayloadToUse {
+    if (!offlineController || typeof payload === 'function') return payload;
+    return Array.isArray(payload)
+      ? payload.map((itemPayload) =>
+          offlineController.resolveEntityRef(itemPayload),
+        )
+      : offlineController.resolveEntityRef(payload);
+  }
+
   /**
    * Runs a list-query mutation for one or more existing item payloads, or for a
    * mutation with no current item target.
@@ -1973,11 +1985,15 @@ export function createMutationApi<
       ) => Promise<T>,
       unknown
     >(mutation);
-    // A plain online mutation is called with the payload only
-    const directMutation = async (ctx?: OfflineDirectMutationContext) =>
-      unwrapTSDFResult(
-        await (ctx ? mutationFn(payloadToUse, ctx) : mutationFn(payloadToUse)),
-      );
+    // A plain online mutation is called with the payload only. An
+    // offline-enabled one is called with the final payload of an item whose
+    // creation was saved since the call (e.g. during the debounce window).
+    let sentPayload = payloadToUse;
+    const directMutation = async (ctx?: OfflineDirectMutationContext) => {
+      if (!ctx) return unwrapTSDFResult(await mutationFn(payloadToUse));
+      sentPayload = resolveSavedTempPayloads(payloadToUse);
+      return unwrapTSDFResult(await mutationFn(sentPayload, ctx));
+    };
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
       // An offline-enabled mutation always gets its uploads context
@@ -2125,7 +2141,9 @@ export function createMutationApi<
               !normalizedRevalidateOnSuccess.includeItems ||
               affectedItems.length === 0
                 ? false
-                : payloadToUse,
+                : // The items the request was sent for, even if their temp
+                  // ids were reused since
+                  sentPayload,
             queryPayload:
               successInvalidationQueryPayloads.length > 0
                 ? successInvalidationQueryPayloads
@@ -2134,7 +2152,7 @@ export function createMutationApi<
         }
 
         if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, payloadToUse);
+          onSuccess(result.data, sentPayload);
         }
       },
       debounce,
