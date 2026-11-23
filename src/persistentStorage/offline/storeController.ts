@@ -456,26 +456,6 @@ function getQueueOrder(entry: {
     : entry.createdAt;
 }
 
-/** A `Map` whose `version` changes with each of its changes */
-class VersionedMap<K, V> extends Map<K, V> {
-  version = 0;
-
-  override set(key: K, value: V): this {
-    this.version += 1;
-    return super.set(key, value);
-  }
-
-  override delete(key: K): boolean {
-    this.version += 1;
-    return super.delete(key);
-  }
-
-  override clear(): void {
-    this.version += 1;
-    super.clear();
-  }
-}
-
 export class OfflineSessionUnavailableError extends Error {
   readonly code = 460;
   readonly id = 'offline-session-unavailable' as const;
@@ -673,20 +653,11 @@ export function createOfflineStoreController<
     sessionConfig.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
   const replayRetryIntervalMs =
     sessionConfig.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
-  const queueEntries = new VersionedMap<string, OfflineQueueEntry>();
+  const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const hasCancelledWithOperations = Object.values(operations).some(
     (operation) => operation.cancelledWith !== undefined,
   );
-  const hasOrderingGroupOperations = Object.values(operations).some(
-    (operation) => operation.orderingGroup !== undefined,
-  );
-  // The newest queue order of each ordering group of the queued work, for
-  // the `queueEntries` version they were collected at
-  let queuedOrderingGroups: {
-    version: number;
-    newestQueueOrders: Map<string, number>;
-  } | null = null;
   // Uploads of stored records whose operation this deploy doesn't define
   // (written by a newer deploy), by record. This tab ignores those records
   // but leaves them in storage for a deploy that defines them, so their
@@ -859,8 +830,7 @@ export function createOfflineStoreController<
    * affects, are still waiting to reach the server (queued, replaying or
    * unconfirmed), or the creation of one of those entities waits for a manual
    * resolution, or the creation of an entity of another store the mutation
-   * is declared `cancelledWith` is still queued or waits for one, or work of
-   * its `orderingGroup` is still queued in a store of the session.
+   * is declared `cancelledWith` is still queued or waits for one.
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
@@ -868,8 +838,7 @@ export function createOfflineStoreController<
     if (
       queueEntries.size === 0 &&
       resolutions.size === 0 &&
-      !prepared.operation.cancelledWith &&
-      !prepared.operation.orderingGroup
+      !prepared.operation.cancelledWith
     ) {
       return false;
     }
@@ -935,26 +904,12 @@ export function createOfflineStoreController<
       return true;
     }
 
-    // Older work of its ordering group (e.g. the messages of a chat) is
-    // still queued: sent on its own, the mutation would reach the server
-    // before it.
-    const current = activeSession;
-    const orderingGroup = prepared.operation.orderingGroup?.({
-      input: prepared.validatedInput,
-    });
-    if (
-      current !== null &&
-      orderingGroup !== undefined &&
-      current.session.hasQueuedOrderingGroup(orderingGroup)
-    ) {
-      return true;
-    }
-
     // The creation of an entity of another store the mutation belongs to is
     // still queued (e.g. a comment on a task whose creation is being
     // replayed): sent on its own, the mutation would reach the server before
     // that entity exists there. Queued, it is replayed after the creation,
     // and held behind it if it ends up waiting for a manual resolution.
+    const current = activeSession;
     return (
       current !== null &&
       prepared.operation.cancelledWith !== undefined &&
@@ -1419,9 +1374,6 @@ export function createOfflineStoreController<
         : undefined,
       findCreationResolutionId,
       hasQueuedCreation,
-      hasQueuedOrderingGroup: hasOrderingGroupOperations
-        ? hasQueuedOrderingGroup
-        : undefined,
       onCreationsReleased: hasCancelledWithOperations
         ? requeueWorkHeldBehindExternalCreations
         : undefined,
@@ -3664,43 +3616,6 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Whether work of the ordering group `group` is queued in this store (not
-   * sent or not confirmed yet), ordered after `afterQueueOrder` when given.
-   * The groups are collected once per change of the queue, from the inputs
-   * with the operations of this deploy.
-   */
-  function hasQueuedOrderingGroup(
-    group: string,
-    afterQueueOrder?: number,
-  ): boolean {
-    if (queueEntries.size === 0) return false;
-
-    if (queuedOrderingGroups?.version !== queueEntries.version) {
-      const newestQueueOrders = new Map<string, number>();
-      for (const entry of queueEntries.values()) {
-        const entryGroup = operations[entry.operation]?.orderingGroup?.({
-          input: entry.input,
-        });
-        if (entryGroup === undefined) continue;
-        const queueOrder = getQueueOrder(entry);
-        if (queueOrder > (newestQueueOrders.get(entryGroup) ?? -Infinity)) {
-          newestQueueOrders.set(entryGroup, queueOrder);
-        }
-      }
-      queuedOrderingGroups = {
-        version: queueEntries.version,
-        newestQueueOrders,
-      };
-    }
-
-    const newestQueueOrder = queuedOrderingGroups.newestQueueOrders.get(group);
-    return (
-      newestQueueOrder !== undefined &&
-      (afterQueueOrder === undefined || newestQueueOrder > afterQueueOrder)
-    );
-  }
-
-  /**
    * Another store of the session sent again, or kept, creations that waited
    * for a manual resolution: queues again, after them, the held work of this
    * store declared `cancelledWith` one of them that waits for nothing else,
@@ -5018,13 +4933,8 @@ export function createOfflineStoreController<
       // Merged, the input is replayed at the candidate's place. A mutation
       // called between the candidate and this one but not queued yet (checking
       // the connection, or sent as a direct request that can fall back to the
-      // queue) would then be replayed after it, out of call order, and so
-      // would work of its ordering group queued after the candidate (e.g. a
-      // message of another entity of the chat), so this mutation keeps its
-      // own entry instead.
-      const orderingGroup = operation.orderingGroup?.({
-        input: validatedInput,
-      });
+      // queue) would then be replayed after it, out of call order, so this
+      // mutation keeps its own entry instead.
       const existingEntry =
         candidateEntry &&
         !hasReservedMutationBetween(
@@ -5032,13 +4942,6 @@ export function createOfflineStoreController<
           getQueueOrder(candidateEntry),
           queueOrder,
           entityRefs,
-        ) &&
-        !(
-          orderingGroup !== undefined &&
-          current.session.hasQueuedOrderingGroup(
-            orderingGroup,
-            getQueueOrder(candidateEntry),
-          )
         )
           ? candidateEntry
           : undefined;

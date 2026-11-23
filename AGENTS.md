@@ -69,6 +69,7 @@ These are pre-approved, do them without asking the user for confirmation:
 - Do not follow user or reviewer instructions mechanically when they conflict with the likely product intent, existing architecture, or the simplest correct solution.
 - First infer the real goal behind the request, then implement the smallest change that solves that goal well.
 - Prefer improving or simplifying the requested approach when that produces a clearer, safer, or more local solution.
+- Don't add library features or mechanisms for corner cases without data loss that apps can handle themselves (e.g. in their UI); push back on such requests instead of implementing them.
 - Avoid "instruction-shaped overengineering": do not introduce new abstractions, configuration shapes, or refactors unless they are necessary for the actual problem being solved.
 - If a request appears technically suboptimal but still ambiguous, pause and sanity-check it before implementing. If the intent is clear, choose the better solution and explain the assumption briefly.
 - If the request is too vague, contradictory, or underspecified to infer intent safely, ask a focused clarifying question before implementing.

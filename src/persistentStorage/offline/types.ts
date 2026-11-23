@@ -129,9 +129,8 @@ export type OfflineMutationQueueingConfig = {
    * Controls whether offline-enabled mutations may queue while network mode is
    * active, including browser-detected offline and classified network failures.
    *
-   * With `'disallow'`, a mutation of an entity that already has queued work,
-   * or whose `orderingGroup` has queued work, still joins the queue behind it,
-   * so that older work does not overwrite it or reach the server after it.
+   * With `'disallow'`, a mutation of an entity that already has queued work
+   * still joins the queue behind it, so that older work does not overwrite it.
    * @default 'allow'
    */
   network?: OfflineMutationQueueingPolicy;
@@ -139,9 +138,8 @@ export type OfflineMutationQueueingConfig = {
    * Controls whether offline-enabled mutations may queue while outage mode is
    * active.
    *
-   * With `'disallow'`, a mutation of an entity that already has queued work,
-   * or whose `orderingGroup` has queued work, still joins the queue behind it,
-   * so that older work does not overwrite it or reach the server after it.
+   * With `'disallow'`, a mutation of an entity that already has queued work
+   * still joins the queue behind it, so that older work does not overwrite it.
    * @default 'allow'
    */
   outage?: OfflineMutationQueueingPolicy;
@@ -1817,12 +1815,6 @@ type ConfiguredTempEntityFields<
       >;
     };
 
-/** Context used to resolve which entities a queued mutation affects. */
-type OperationEntityRefsContext<TInput> = {
-  /** Input payload for the queued mutation. */
-  input: TInput;
-};
-
 /**
  * Shape used by `persistentStorage.offline.operations` for each operation name.
  *
@@ -1867,32 +1859,6 @@ export type OfflineOperationDefinition<
    * This is mutually exclusive with `accumulation`.
    */
   supersedes?: OfflineSupersedeConfig;
-  /**
-   * Optional key of the group whose mutations reach the server in the order
-   * they were made, e.g. the messages of a chat whose server sets their
-   * creation time on insert: `` ({ input }) => `chat:${input.chatId}` ``.
-   * The key is shared by all the stores of the session, so prefix it with what
-   * it groups, and build it from an id that doesn't change when its entity is
-   * saved (an app-generated or server id, not another store's temp payload):
-   * queued inputs keep the temp id, so later mutations would get another key.
-   *
-   * A mutation whose group has queued work that was not sent or confirmed yet
-   * (in any store of the session that uses the same key) is queued behind
-   * it, also while online or when `mutationQueueing` disallows queueing,
-   * instead of running directly. Mutations of other
-   * groups, or without a group, are not delayed. Return `undefined` for a
-   * mutation that belongs to no group.
-   *
-   * The group only orders the mutations: it adds no dependency between them.
-   * Discarding or cancelling one does not drop the others, and one that waits
-   * for a manual resolution leaves the queue, so the rest of its group is
-   * sent without it. Only the stores attached in this tab are checked, and
-   * only their queued work: a mutation of the group still running directly
-   * does not hold the next ones.
-   */
-  orderingGroup?: (
-    ctx: OperationEntityRefsContext<TInput>,
-  ) => string | undefined;
   /**
    * Executes the queued mutation against the remote source during replay.
    * This may run multiple times when transient failures occur.
@@ -1957,6 +1923,12 @@ type WithoutTempEntity<
   tempEntities?: never;
 };
 
+/** Context used to resolve which entities a queued mutation affects. */
+type OperationEntityRefsContext<TInput> = {
+  /** Input payload for the queued mutation. */
+  input: TInput;
+};
+
 /**
  * Temp-entity list-query options as seen by the non-store-specific alias.
  *
@@ -1980,9 +1952,6 @@ export type AnyOfflineOperationDefinition<
   };
   accumulation?: OfflineAccumulationConfig<__LEGIT_ANY__>;
   supersedes?: OfflineSupersedeConfig;
-  orderingGroup?: (
-    ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
-  ) => string | undefined;
   tempEntity?: Omit<
     OfflineTempEntityConfig<__LEGIT_ANY__, __LEGIT_ANY__, __LEGIT_ANY__>,
     keyof AnyTempEntityListQueryOptions
