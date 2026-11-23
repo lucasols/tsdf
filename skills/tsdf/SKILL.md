@@ -233,7 +233,7 @@ Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOf
 
 Deleting something created offline: give the delete operation `supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true }` and treat not-found as success in its `execute`. A creation never sent (`isUnsentCreation && !creationAttempted`) is cancelled locally with the work queued on it; an attempted one is kept and the delete replays after it. See `docs/offline.md#deleting-entities-created-offline`.
 
-Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.
+Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`. List query lists restored from storage get the membership of items with queued work (`optimisticListUpdates` rules run again on them, and an offline `addItemToQueries` reads its lists back first).
 
 Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied). See `docs/offline.md#conflict-resolution`.
 

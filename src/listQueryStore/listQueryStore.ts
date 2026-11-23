@@ -1574,6 +1574,11 @@ export function createListQueryStore<
   // them (see `skipsBackgroundItemRefetch`), and list fetches keep their local
   // version.
   const resolutionItemKeys = new Set<string>();
+  // Items with queued offline work, or with a change waiting for a manual
+  // resolution. A list read back from storage can predate their local
+  // changes, so the `optimisticListUpdates` rules run again for them on it
+  // (see `applyOfflineChangesToRestoredQueries`).
+  let offlineItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
 
@@ -1743,6 +1748,10 @@ export function createListQueryStore<
           ? getItemLoadedFieldsToPersist
           : undefined,
         getQueryKey,
+        onQueryRestored: (queryKey) => {
+          if (offlineItemKeys.size === 0) return;
+          applyOfflineChangesToRestoredQueries([queryKey], offlineItemKeys);
+        },
       })
     : null;
   const persistentStorageErrorReporter = resolvedPersistentStorageConfig
@@ -2386,6 +2395,8 @@ export function createListQueryStore<
     startItemMutation,
     updateItemState: updateItemStateBase,
     addItemToState: addItemToStateBase,
+    addStateItemToQueries,
+    applyOptimisticListUpdatesToQueries,
     deleteItemState: deleteItemStateBase,
     resetInvalidationTracking,
     performMutation: performMutationBase,
@@ -2522,7 +2533,7 @@ export function createListQueryStore<
           loadOfflineTempEntities(
             // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when loading queued temp entities.
             __LEGIT_CAST__<ItemPayload[], ValidPayload[]>(tempIds),
-            addToQueries,
+            addToQueries.map(({ queries }) => queries),
           ),
         applyTempReconciliationFromAnotherTab: (
           tempId,
@@ -2625,9 +2636,15 @@ export function createListQueryStore<
             clearOfflineOverlays(sessionKey);
           unsentCreationItemKeys.clear();
           resolutionItemKeys.clear();
+          const nextOfflineItemKeys = new Set<string>();
+          const newOfflineItemKeys: string[] = [];
           for (const entity of entities) {
             if (entity.entityKind !== 'item') continue;
 
+            nextOfflineItemKeys.add(entity.entityKey);
+            if (!offlineItemKeys.has(entity.entityKey)) {
+              newOfflineItemKeys.push(entity.entityKey);
+            }
             if (
               entity.tempId !== undefined ||
               entity.isClientIdCreation === true
@@ -2638,19 +2655,30 @@ export function createListQueryStore<
               resolutionItemKeys.add(entity.entityKey);
             }
           }
-          const activeItemKeys = new Set(
-            entities
-              .filter((entity) => entity.entityKind === 'item')
-              .map((entity) => entity.entityKey),
-          );
+
+          offlineItemKeys = nextOfflineItemKeys;
 
           offlineOverlayStore.produceState((draft) => {
             for (const itemKey of Object.keys(draft)) {
-              if (!activeItemKeys.has(itemKey)) {
+              if (!offlineItemKeys.has(itemKey)) {
                 delete draft[itemKey];
               }
             }
           });
+
+          // Lists read back before the queued work was known (e.g. at
+          // startup), or before another tab queued it
+          if (
+            newOfflineItemKeys.length > 0 &&
+            optimisticListUpdates &&
+            persistence &&
+            persistence.restoredQueryKeys.size > 0
+          ) {
+            applyOfflineChangesToRestoredQueries(
+              [...persistence.restoredQueryKeys],
+              newOfflineItemKeys,
+            );
+          }
         },
         confirmClientIdCreations: (entityKeys) => {
           for (const entityKey of entityKeys) {
@@ -2874,11 +2902,15 @@ export function createListQueryStore<
    * Loads offline temp items, and the queries they are declared into, that are
    * only in persistent storage: the queries then receive the pending items,
    * and reconciliation reads the items' data and loaded fields from memory.
-   * Returns `undefined` when there is nothing to load.
+   * Also loads the queries of an `addItemToQueries` made offline (no temp
+   * payloads). Returns `undefined` when there is nothing to load.
    */
   function loadOfflineTempEntities(
     tempPayloads: ItemPayload[],
-    addToQueries: ListQueryAddItemToQueries<QueryPayload, ValidPayload>[],
+    addToQueries: ListQueryAddItemToQueries<
+      QueryPayload,
+      ValidPayload
+    >['queries'][],
   ): Promise<unknown> | undefined {
     if (!persistence) return undefined;
     const unloadedItemKeys = filterAndMap(tempPayloads, (tempPayload) => {
@@ -2887,7 +2919,7 @@ export function createListQueryStore<
     });
     const unloadedQueryKeys = new Set<string>();
     const filters: FilterQueryFn<QueryPayload>[] = [];
-    for (const { queries } of addToQueries) {
+    for (const queries of addToQueries) {
       if (typeof queries === 'function') {
         filters.push(queries);
         continue;
@@ -3072,6 +3104,7 @@ export function createListQueryStore<
     offlineOverlayStore.setState({});
     unsentCreationItemKeys.clear();
     resolutionItemKeys.clear();
+    offlineItemKeys = new Set();
   }
 
   function rebindOfflineOverlays(
@@ -4400,6 +4433,79 @@ export function createListQueryStore<
     return wasUpdated;
   }
 
+  /**
+   * Runs the `optimisticListUpdates` rules for the items with offline work on
+   * queries read back from persistent storage: a saved list can predate the
+   * items' local changes, and it can't be refetched while offline. Items not
+   * in memory are read back first.
+   */
+  function applyOfflineChangesToRestoredQueries(
+    queryKeys: string[],
+    itemKeys: Iterable<string>,
+  ): void {
+    if (!optimisticListUpdates || !persistence || queryKeys.length === 0) {
+      return;
+    }
+    const offlineItemKeysToApply = [...itemKeys];
+    if (offlineItemKeysToApply.length === 0) return;
+
+    const apply = () => {
+      if (isDisposed) return;
+      applyOptimisticListUpdatesToQueries(
+        filterAndMap(offlineItemKeysToApply, (itemKey) => {
+          const payload = store.state.itemQueries[itemKey]?.payload;
+          return store.state.items[itemKey] && payload !== undefined
+            ? { itemKey, payload }
+            : false;
+        }),
+        queryKeys.filter((queryKey) => store.state.queries[queryKey]),
+      );
+    };
+
+    const unloadedItemKeys = offlineItemKeysToApply.filter(
+      (itemKey) => store.state.itemQueries[itemKey] === undefined,
+    );
+    if (unloadedItemKeys.length === 0) {
+      apply();
+      return;
+    }
+
+    const loading = persistence.preloadItems(unloadedItemKeys);
+    // Local storage reads the items back right away
+    if (!persistence.hasAsyncPreload) {
+      apply();
+      return;
+    }
+    void loading.then(apply, apply);
+  }
+
+  /**
+   * `addItemToState` of the store's API. Offline, a list only in persistent
+   * storage can't be refetched to get the new item, so the lists
+   * `addItemToQueries` declares are read back first, as for offline temp
+   * entities, and receive the item once they are in memory.
+   */
+  function addItemToStateApi(
+    itemPayload: Parameters<typeof addItemToStateBase>[0],
+    data: Parameters<typeof addItemToStateBase>[1],
+    options?: Parameters<typeof addItemToStateBase>[2],
+  ): void {
+    const addItemToQueries = options?.addItemToQueries;
+    const loadingQueries =
+      addItemToQueries && isOfflineFetchModeActive()
+        ? loadOfflineTempEntities([], [addItemToQueries.queries])
+        : undefined;
+
+    addItemToState(itemPayload, data, options);
+
+    if (!loadingQueries || !addItemToQueries) return;
+    const addToLoadedQueries = () => {
+      if (isDisposed) return;
+      addStateItemToQueries(itemPayload, addItemToQueries);
+    };
+    void loadingQueries.then(addToLoadedQueries, addToLoadedQueries);
+  }
+
   function addItemToState(
     itemPayload: Parameters<typeof addItemToStateBase>[0],
     data: Parameters<typeof addItemToStateBase>[1],
@@ -4537,7 +4643,7 @@ export function createListQueryStore<
     invalidateItem,
     startItemMutation,
     updateItemState,
-    addItemToState,
+    addItemToState: addItemToStateApi,
     deleteItemState,
     performMutation: performMutationBase,
     cancelDebouncedMutation,

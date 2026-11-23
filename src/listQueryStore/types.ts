@@ -40,8 +40,8 @@ export type ListQueryAddItemToQueries<
   /**
    * Queries that receive the item: one query payload, a list of payloads, or
    * a filter over the queries currently in the store. Queries that are not in
-   * the store are skipped (offline temp entities first load the ones that are
-   * only in persistent storage).
+   * the store are skipped. Offline temp entities, and `addItemToState` while
+   * offline, first load the ones that are only in persistent storage.
    */
   queries:
     | QueryPayload[]
@@ -333,7 +333,9 @@ export type OptimisticListUpdate<
    *
    * - `true`: the item should be in the query (added if missing). A query
    *   that is not in memory is created with only the item, unless the store
-   *   has persistent storage, where it may have a saved copy and is left as is
+   *   has persistent storage, where it may have a saved copy and is left as
+   *   is. The rules run again on a query restored from storage for the items
+   *   with queued offline work, with the item itself as `previousItem`
    * - `false`: the item should not be in the query (removed if present)
    * - `null`: keep the membership as is and skip this rule for the query
    */

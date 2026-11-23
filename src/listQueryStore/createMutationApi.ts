@@ -1351,10 +1351,14 @@ export function createMutationApi<
    * `previousState` is the store state before the `updateItemState` /
    * `addItemToState` call, which immer leaves untouched, so the `filterItem`
    * context can read the previous item and query membership without copies.
+   *
+   * With `onlyQueryKeys`, the rules only update those queries of the state
+   * (see `applyOptimisticListUpdatesToQueries`).
    */
   function applyOptimisticListUpdates(
     items: { itemKey: string; payload: ItemPayload }[],
     previousState: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+    onlyQueryKeys?: readonly string[],
   ) {
     if (!optimisticListUpdates) return;
 
@@ -1369,7 +1373,9 @@ export function createMutationApi<
     // state, so the draft must already include them
     const rulesWithQueries = optimisticListUpdates.map((rule) => ({
       rule,
-      relatedFilterQueries: getQueriesKeyArray(rule.queries),
+      relatedFilterQueries: onlyQueryKeys
+        ? getRuleQueriesAmong(rule.queries, onlyQueryKeys)
+        : getQueriesKeyArray(rule.queries),
     }));
 
     store.produceState((draftState) => {
@@ -1530,7 +1536,9 @@ export function createMutationApi<
       publishQuerySnapshot(queryKey);
     }
 
-    if (queriesToInvalidate.size === 0) return;
+    // Queries updated by `onlyQueryKeys` were read back from storage: they
+    // are refetched when used, and can't be while offline
+    if (queriesToInvalidate.size === 0 || onlyQueryKeys) return;
 
     if (deferredOptimisticQueryInvalidations) {
       for (const [queryKey, queryPayload] of queriesToInvalidate) {
@@ -1544,6 +1552,43 @@ export function createMutationApi<
       queryPayload: [...queriesToInvalidate.values()],
       itemPayload: false,
     });
+  }
+
+  function getRuleQueriesAmong(
+    queries: OptimisticListUpdate<
+      ItemState,
+      QueryPayload,
+      ItemPayload
+    >['queries'],
+    queryKeys: readonly string[],
+  ): { key: string; payload: QueryPayload }[] {
+    if (typeof queries !== 'function') {
+      return getQueriesKeyArray(queries).filter(({ key }) =>
+        queryKeys.includes(key),
+      );
+    }
+
+    return filterAndMap(queryKeys, (key) => {
+      const query = store.state.queries[key];
+      return query && queries(query.payload)
+        ? { key, payload: query.payload }
+        : false;
+    });
+  }
+
+  /**
+   * Runs the `optimisticListUpdates` rules for `items` on the `queryKeys`
+   * queries only, as if the items had just been updated with no change: the
+   * `filterItem` context gets the current item as `previousItem`. Used for
+   * queries read back from storage, which can predate local changes of the
+   * items. Queries are not invalidated.
+   */
+  function applyOptimisticListUpdatesToQueries(
+    items: { itemKey: string; payload: ItemPayload }[],
+    queryKeys: readonly string[],
+  ): void {
+    if (items.length === 0 || queryKeys.length === 0) return;
+    applyOptimisticListUpdates(items, store.state, queryKeys);
   }
 
   function getSuccessInvalidationQueryPayloads(
@@ -1708,29 +1753,12 @@ export function createMutationApi<
           };
 
           if (options.addItemToQueries && queriesToAddTo) {
-            for (const { key } of queriesToAddTo) {
-              const queryState = draftState.queries[key];
-              if (!queryState) continue;
-
-              if (queryState.items.includes(itemKey)) continue;
-
-              captureAndLockOptimisticMutationQuery(key);
-
-              if (options.addItemToQueries.appendTo === 'start') {
-                queryState.items.unshift(itemKey);
-              } else if (options.addItemToQueries.appendTo === 'end') {
-                queryState.items.push(itemKey);
-              } else {
-                const index = options.addItemToQueries.appendTo(
-                  filterAndMap(queryState.items, (itemKey2) => {
-                    const payload = draftState.itemQueries[itemKey2]?.payload;
-                    return payload ?? false;
-                  }),
-                );
-
-                queryState.items.splice(index, 0, itemKey);
-              }
-            }
+            insertItemInQueries(
+              draftState,
+              itemKey,
+              options.addItemToQueries.appendTo,
+              queriesToAddTo,
+            );
           }
         },
         { action: 'create-item-state' },
@@ -1745,6 +1773,74 @@ export function createMutationApi<
     publishItemSnapshot(itemKey);
     for (const { key } of getQueriesRelatedToItem(itemPayload)) {
       publishQuerySnapshot(key);
+    }
+  }
+
+  /** Inserts the item in the queries of the state that don't list it yet. */
+  function insertItemInQueries(
+    draftState: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+    itemKey: string,
+    appendTo: ListQueryAddItemToQueries<QueryPayload, ItemPayload>['appendTo'],
+    queryKeys: { key: string }[],
+  ): string[] {
+    const changedQueryKeys: string[] = [];
+
+    for (const { key } of queryKeys) {
+      const queryState = draftState.queries[key];
+      if (!queryState) continue;
+
+      if (queryState.items.includes(itemKey)) continue;
+
+      captureAndLockOptimisticMutationQuery(key);
+      changedQueryKeys.push(key);
+
+      if (appendTo === 'start') {
+        queryState.items.unshift(itemKey);
+      } else if (appendTo === 'end') {
+        queryState.items.push(itemKey);
+      } else {
+        const index = appendTo(
+          filterAndMap(queryState.items, (itemKey2) => {
+            const payload = draftState.itemQueries[itemKey2]?.payload;
+            return payload ?? false;
+          }),
+        );
+
+        queryState.items.splice(index, 0, itemKey);
+      }
+    }
+
+    return changedQueryKeys;
+  }
+
+  /**
+   * Adds an item already in the state to the `addItemToQueries` queries of
+   * the state that don't list it yet, e.g. queries read back from storage
+   * after the item was added.
+   */
+  function addStateItemToQueries(
+    itemPayload: ItemPayload,
+    addItemToQueries: ListQueryAddItemToQueries<QueryPayload, ItemPayload>,
+  ): void {
+    const itemKey = getItemKey(itemPayload);
+    if (!store.state.items[itemKey]) return;
+
+    const queriesToAddTo = getQueriesKeyArray(addItemToQueries.queries);
+    let changedQueryKeys: string[] = [];
+    store.produceState(
+      (draftState) => {
+        changedQueryKeys = insertItemInQueries(
+          draftState,
+          itemKey,
+          addItemToQueries.appendTo,
+          queriesToAddTo,
+        );
+      },
+      { action: 'add-item-to-queries' },
+    );
+
+    for (const queryKey of changedQueryKeys) {
+      publishQuerySnapshot(queryKey);
     }
   }
 
@@ -2232,6 +2328,8 @@ export function createMutationApi<
     startItemMutation,
     updateItemState,
     addItemToState,
+    addStateItemToQueries,
+    applyOptimisticListUpdatesToQueries,
     deleteItemState,
     resetInvalidationTracking,
     performMutation,

@@ -248,6 +248,11 @@ While the session is in offline mode, fetches are not sent to the server. What a
 - **Cached data** (loaded earlier, or restored from persistent storage): the cached data stays visible with `status: 'success'` and `error: null`. A refetch attempted offline leaves it that way, so there is no offline error to hide in the UI.
 - **Nothing cached**: the read fails with `status: 'error'` and the offline error `{ code: 0, id: 'offline', message: 'Offline' }`. This is the only offline state the app has to explain to the user.
 
+In a list-query store, a list restored from persistent storage can predate changes made offline, and it can't be refetched to get them. So the store keeps lists that were not open when the change was made in line with it:
+
+- `optimisticListUpdates` rules run again on a list when it is restored, for every item with queued offline work (or with a change waiting for a resolution): an item edited, moved or created offline is added to or removed from the list as the rules say. The rules also run when the queued work is read after a restart, on the lists already restored by then. The queued work is stored, so this also holds after any number of restarts until it is sent. In `filterItem`, `previousItem` is the item itself (the change that triggered it is not known anymore) and `previousQueries` the lists in memory that show it. `invalidateQueries` doesn't refetch these lists.
+- `addItemToState(..., { addItemToQueries })` called while offline first reads back the lists it declares that are only in persistent storage, like [temp entities](#temp-entities-in-list-queries) do, and adds the item to them once they are read. The membership is saved with the lists, so it survives a restart. A filter function is matched against every list saved in persistent storage, on its saved data. Online, the lists only in storage are left as is: they are refetched when used.
+
 Use `isOfflineStoreError(error)` to recognise that error instead of comparing `error.id` by hand. It matches the whole error shape, so an app error whose `errorNormalizer` also uses the `'offline'` id is not mistaken for it, and it narrows the error to the exported `OfflineStoreError` type:
 
 ```tsx

@@ -326,6 +326,8 @@ export function setupListQueryPersistence<
       itemKey: string,
       loadedFields: ItemLoadedFields | undefined,
     ) => ItemLoadedFields | undefined;
+    /** Called after a query read back from storage is put in the state. */
+    onQueryRestored?: (queryKey: string) => void;
   } = {},
 ): ListQueryPersistenceSetup<ItemState, QueryPayload, ItemPayload> {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
@@ -1495,6 +1497,7 @@ export function setupListQueryPersistence<
     storeRef.produceState((draft) => {
       draft.queries[queryKey] = query;
     });
+    options.onQueryRestored?.(queryKey);
   }
 
   function parseHydratedItemSnapshot(
@@ -2197,6 +2200,7 @@ export function setupListQueryPersistence<
             ),
           },
         });
+        options.onQueryRestored?.(queryKey);
 
         return true;
       })
