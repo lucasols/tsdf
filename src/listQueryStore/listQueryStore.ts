@@ -2501,6 +2501,30 @@ export function createListQueryStore<
           );
         },
         reconcileTempEntity: ({ tempId, reconciliation }) => {
+          // Removed when its creation started waiting for a decision (then
+          // sent again): with no data to show, fetch what the server saved
+          // for screens that show it outside of a list (the recovery
+          // revalidation refetches the lists). An item deleted by queued
+          // work (it has an overlay) stays deleted.
+          const tempItemKey = getItemKey(
+            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
+            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+          );
+          if (
+            fetchItemFn &&
+            reconciliation.finalData === undefined &&
+            store.state.itemQueries[tempItemKey] === null &&
+            !offlineOverlayStore.state[tempItemKey]
+          ) {
+            scheduleItemFetch(
+              'highPriority',
+              // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(
+                reconciliation.finalPayload,
+              ),
+              { fields: '*' },
+            );
+          }
           reconcileOfflineTempItem(
             tempId,
             reconciliation.finalPayload,
@@ -2640,9 +2664,27 @@ export function createListQueryStore<
             }
           });
         },
-        confirmClientIdCreations: (entityKeys) => {
-          for (const entityKey of entityKeys) {
+        confirmClientIdCreations: (entities) => {
+          for (const { entityKey, payload } of entities) {
             unsentCreationItemKeys.delete(entityKey);
+            // Removed when its creation started waiting for a decision, and
+            // invalidations skip deleted items: fetch what the server saved
+            // for screens that show it outside of a list (the recovery
+            // revalidation refetches the lists). An item deleted by queued
+            // work (it has an overlay) stays deleted.
+            if (
+              fetchItemFn &&
+              store.state.itemQueries[entityKey] === null &&
+              !offlineOverlayStore.state[entityKey] &&
+              payload !== undefined
+            ) {
+              scheduleItemFetch(
+                'highPriority',
+                // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+                { fields: '*' },
+              );
+            }
           }
         },
       },

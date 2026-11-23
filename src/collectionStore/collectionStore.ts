@@ -1329,6 +1329,14 @@ export function createCollectionStore<
               if (finalData !== undefined) {
                 deleteItemState(tempPayload);
                 addItemToState(finalPayload, finalData);
+              } else if (
+                currentItem === null &&
+                !offlineOverlayStore.state[getItemKey(tempPayload)]
+              ) {
+                // Removed when its creation started waiting for a decision
+                // (then sent again): fetch what the server saved. An item
+                // deleted by queued work (it has an overlay) stays deleted.
+                scheduleFetch('highPriority', finalPayload);
               }
               // Listeners are told even when this tab had no item to replace
               storeEvents.emit('tempEntityReconciled', {
@@ -1433,9 +1441,24 @@ export function createCollectionStore<
                 }
               });
             },
-            confirmClientIdCreations: (entityKeys) => {
-              for (const entityKey of entityKeys) {
+            confirmClientIdCreations: (entities) => {
+              for (const { entityKey, payload } of entities) {
                 unsentCreationItemKeys.delete(entityKey);
+                // Removed when its creation started waiting for a decision,
+                // and invalidations skip deleted items: fetch what the server
+                // saved. An item deleted by queued work (it has an overlay)
+                // stays deleted.
+                if (
+                  store.state[entityKey] === null &&
+                  !offlineOverlayStore.state[entityKey] &&
+                  payload !== undefined
+                ) {
+                  scheduleFetch(
+                    'highPriority',
+                    // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
+                    __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+                  );
+                }
               }
             },
           },

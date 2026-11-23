@@ -170,9 +170,13 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
   /**
    * The server saved these items created with a client-generated id. Called
    * before the creation's `onSuccessExecute`, so that invalidations it makes
-   * refetch them: the entities are only synced again after it.
+   * refetch them: the entities are only synced again after it. An item
+   * removed locally when its creation started waiting for a decision (then
+   * sent again) is fetched from its `payload`.
    */
-  confirmClientIdCreations?: (entityKeys: string[]) => void;
+  confirmClientIdCreations?: (
+    entities: { entityKey: string; payload: ValidPayload | undefined }[],
+  ) => void;
   /**
    * A queued mutation for these entities was discarded. Its optimistic
    * changes are still applied to the store and no baseline exists to roll
@@ -1447,11 +1451,19 @@ export function createOfflineStoreController<
           );
         });
       },
-      onRemoteWorkDiscarded: (discardedWork, removedEntityKeys) => {
-        // Sent after the removals of the discarded records, so this tab's
-        // remaining resolutions already exclude them
+      onRemoteWorkDiscarded: (
+        discardedWork,
+        removedEntityKeys,
+        refetchLists,
+      ) => {
+        // Sent after the record changes of the discarded work, so this tab's
+        // resolutions are already up to date
         applyRecordChangeFromAnotherTab(() => {
-          revalidateDiscardedWork(discardedWork, new Set(removedEntityKeys));
+          revalidateDiscardedWork(
+            discardedWork,
+            new Set(removedEntityKeys),
+            refetchLists,
+          );
         });
       },
       onRemoteTempReconciled: (tempId, finalPayload, finalData) => {
@@ -3926,7 +3938,15 @@ export function createOfflineStoreController<
     }
 
     refreshDerivedState(current);
-    revalidateDiscardedWork(heldWork, removedEntityKeys, refetchLists);
+    // In every tab: one that made the change may show it (e.g. an item it
+    // deleted, which its recovery revalidation would skip) without this tab
+    // having loaded the entity.
+    revalidateDiscardedWorkInEveryTab(
+      current,
+      heldWork,
+      removedEntityKeys,
+      refetchLists,
+    );
   }
 
   /**
@@ -4278,8 +4298,9 @@ export function createOfflineStoreController<
       'operation' | 'input' | 'entityRefs'
     >[],
     removedEntityKeys: ReadonlySet<string>,
+    refetchLists = true,
   ): void {
-    revalidateDiscardedWork(discardedWork, removedEntityKeys);
+    revalidateDiscardedWork(discardedWork, removedEntityKeys, refetchLists);
 
     if (discardedWork.length === 0) return;
     current.session.publishWorkDiscarded(
@@ -4290,6 +4311,7 @@ export function createOfflineStoreController<
         entityRefs,
       })),
       [...removedEntityKeys],
+      refetchLists,
     );
   }
 
@@ -5925,7 +5947,16 @@ export function createOfflineStoreController<
         const clientIdCreatedEntityKeys =
           getClientIdCreatedEntityKeys(entryToUse);
         if (clientIdCreatedEntityKeys.length > 0) {
-          storeAdapter.confirmClientIdCreations?.(clientIdCreatedEntityKeys);
+          storeAdapter.confirmClientIdCreations?.(
+            clientIdCreatedEntityKeys.map((entityKey) => ({
+              entityKey,
+              payload: getPayloadForEntityRef({
+                operationName: entryToUse.operation,
+                input: entryToUse.input,
+                entityKey,
+              }),
+            })),
+          );
         }
 
         const successfulExecuteSync = runSuccessfulExecuteSync({

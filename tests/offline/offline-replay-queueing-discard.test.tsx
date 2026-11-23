@@ -787,6 +787,152 @@ test('a failed offline creation with a client-generated id removes the collectio
   hook.unmount();
 });
 
+test('a failed offline creation with a client-generated id that the user sends again shows the saved item once the server has it', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-retry-client-id-collection-session';
+
+  type CreateWithClientIdOperations = {
+    createUser: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+  };
+
+  // The app generates the item id on the client, so the creation needs no
+  // temp entity. The server rejects it until the user sends it again.
+  let rejectCreation = true;
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    CreateWithClientIdOperations
+  >(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: 'offline-retry-client-id-collection-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: userPatchSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: async ({ input }) => {
+                if (rejectCreation) throw new Error('creation rejected');
+                await env.serverTable.delayedSetItem(input.itemId, {
+                  name: input.name,
+                });
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  env.addTimelineComments('beforeNextAction', ['offline: create Linus']);
+  await act(async () => {
+    await env.apiStore.performMutation('users||3', {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState('users||3', { value: { name: 'Linus' } });
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'createUser',
+        input: { itemId: 'users||3', name: 'Linus' },
+      },
+    });
+  });
+
+  // The user opens the detail screen of Linus.
+  const hook = renderHook(() => {
+    const linus = env.apiStore.useItem('users||3');
+
+    env.trackItemUI('linus', linus.data?.value.name ?? `- ${linus.status}`);
+  });
+  await flushAllTimers();
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects the creation until it needs a decision, then Linus is removed',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(15_000);
+  await flushAllTimers();
+
+  const [createResolution] = env.apiStore.getOfflineResolutions();
+  if (!createResolution) {
+    throw new Error('Expected the creation to wait for a decision');
+  }
+
+  // The server accepts the creation now, and the user sends it again.
+  rejectCreation = false;
+  env.addTimelineComments('beforeNextAction', [
+    'the user sends the creation again',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      createResolution.id,
+      'createUser',
+      { action: 'retry' },
+    );
+  });
+  await flushAllTimers();
+
+  // Removed while the creation waited, Linus is fetched once the server saved
+  // him: the screen shows him again instead of staying deleted.
+  expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
+    data:
+      value: { name: 'Linus' }
+
+    error: null
+    payload: 'users||3'
+    refetchOnMount: '❌'
+    status: 'success'
+    wasLoaded: '✅'
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | linus     |
+    0      | -         | -- offline: create Linus
+    .      | -         | offline:createUser queued
+    .      | Linus     | [linus] ui-initialized
+    1s     | Linus     | -- back online: the server rejects the creation until it needs a decision, then Linus is removed
+    .      | Linus     | offline:createUser replay-started
+    6s     | Linus     | offline:createUser replay-started
+    11s    | Linus     | offline:createUser replay-started
+    .      | Linus     | offline:createUser resolution-required
+    .      | - deleted | [linus] ui-changed
+    16s    | - deleted | -- the user sends the creation again
+    .      | - deleted | offline:createUser replay-started
+    17.2s  | - deleted | [users||3] server-data-changed (value: {"name":"Linus"})
+    .      | - deleted | offline:createUser replay-finished
+    17.21s | - loading | [linus] ui-changed
+    .      | - loading | 🔴 [users||3] >fetch-started
+    18.01s | - loading | 🔴 [users||3] <fetch-finished (value: {"name":"Linus"})
+    .      | Linus     | [linus] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('an addition made while a queued addition starts replaying is not lost', async () => {
   network.setOffline();
 

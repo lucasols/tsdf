@@ -133,6 +133,8 @@ let sharedServer = createSharedServerMockState(1);
 export let sharedUsersServer = createSharedServerTableState<{ name: string }>(
   {},
 );
+/** While `true`, the users server rejects every delete. */
+export const usersServerRules = { rejectDeletes: false };
 export let sharedUserRowsServer = createSharedServerTableState<{
   id: number;
   name: string;
@@ -161,6 +163,7 @@ beforeEach(() => {
   network = createOfflineNetworkMock();
   network.install();
   serverCalls = [];
+  usersServerRules.rejectDeletes = false;
   sharedServer = createSharedServerMockState(1);
   sharedUsersServer = createSharedServerTableState({});
   sharedUserRowsServer = createSharedServerTableState({
@@ -790,6 +793,9 @@ export async function openUsersTab(
               getEntityRefs: ({ input }) => [input.id],
               execute: async ({ input }) => {
                 serverCalls.push(`tab ${name} sent delete ${input.id}`);
+                if (usersServerRules.rejectDeletes) {
+                  throw new Error('delete rejected');
+                }
                 await env.serverTable.delayedRemoveItem(input.id);
               },
               onSuccessExecute: ({ input }) => {

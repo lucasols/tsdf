@@ -961,13 +961,15 @@ describe('tasks created with a client-generated id whose creation waits for a ma
       17.02s | Write report, Review budget                   | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
       .      | Write report, Review budget                   | offline:createTaskWithId replay-finished
       .      | Write report, Review budget                   | offline:renameTask replay-started
+      17.03s | Write report, Review budget                   | 🟠 [tasks||50] >fetch-started
+      17.83s | Write report, Review budget                   | 🟠 [tasks||50] <fetch-finished (value: {"id":50,"name":"Plan trip"})
       18.22s | Write report, Review budget                   | [tasks||50] server-data-changed (value: {"name":"Plan summer trip"})
       .      | Write report, Review budget                   | offline:renameTask replay-finished
       .      | Write report, Review budget                   | offline:renameTask replay-started
       19.42s | Write report, Review budget                   | [tasks||50] server-data-changed (value: {"name":"Plan winter trip"})
       .      | Write report, Review budget                   | offline:renameTask replay-finished
-      19.43s | Write report, Review budget                   | 🟠 >list-fetch-started
-      20.23s | Write report, Review budget                   | 🟠 <list-fetch-finished (value: {"count":3})
+      19.43s | Write report, Review budget                   | 🟡 >list-fetch-started
+      20.23s | Write report, Review budget                   | 🟡 <list-fetch-finished (value: {"count":3})
       .      | Write report, Review budget, Plan winter trip | [tasks] ui-changed
       "
     `);
