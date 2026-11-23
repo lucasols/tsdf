@@ -268,6 +268,8 @@ export function createFetchApi<
   itemsPendingFullInvalidation: Map<string, FetchType>,
   /** Items list fetches keep the local version of, see `executeQueryFetch`. */
   resolutionItemKeys: ReadonlySet<string>,
+  /** Called after a query read back from storage is put in the state. */
+  onQueryRestored: (queryKey: string) => void,
 ) {
   type Query = TSFDListQuery<QueryPayload>;
 
@@ -1305,6 +1307,8 @@ export function createFetchApi<
           },
           { action: 'persistent-storage-hydrate' },
         );
+        onQueryRestored(queryKey);
+        query = store.state.queries[queryKey] ?? hydratedQuery;
       }
     }
 

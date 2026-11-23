@@ -139,7 +139,7 @@ import {
   type UnwrapTSDFResult,
   type ValidStoreState,
 } from './utils/storeShared';
-import { useRequireFreshData } from './utils/useRequireFreshData';
+import { endsFetch, useRequireFreshData } from './utils/useRequireFreshData';
 
 /** Lifecycle status for a document store. */
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -2034,8 +2034,8 @@ export function createDocumentStore<
     useSubscribeToStore(store, ({ observe }) => {
       observe
         .ifSelector((state) => state.status)
-        .change.then(({ current }) => {
-          if (current === 'success' || current === 'error') {
+        .change.then(({ prev, current }) => {
+          if (endsFetch(prev, current)) {
             markRefreshSettled();
           }
         });

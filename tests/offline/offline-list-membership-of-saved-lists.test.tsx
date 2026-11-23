@@ -229,9 +229,16 @@ function createBoardEnv(
   /**
    * Creates a card with an id the app generates, adding it to the columns of
    * its status with a filter, like a global "quick add" that can't name the
-   * lists the board saved.
+   * lists the board saved. With `addTo: 'every column'`, the filter matches
+   * every column, like a generic helper that leaves the membership to the
+   * `optimisticListUpdates` rules.
    */
-  async function createTask(id: number, name: string, status: Status) {
+  async function createTask(
+    id: number,
+    name: string,
+    status: Status,
+    addTo: 'its column' | 'every column' = 'its column',
+  ) {
     const itemId = `tasks||${id}`;
     await act(async () => {
       await settle(
@@ -242,7 +249,10 @@ function createBoardEnv(
               { id, name, status },
               {
                 addItemToQueries: {
-                  queries: (query) => columnStatus(query) === status,
+                  queries: (query) =>
+                    addTo === 'every column'
+                      ? query.tableId === 'tasks'
+                      : columnStatus(query) === status,
                   appendTo: 'start',
                 },
               },
@@ -378,6 +388,62 @@ describe('optimisticListUpdates', () => {
   );
 
   test.each(storages)(
+    'a column loaded with awaitListQueryFetch after a restart shows a card moved offline before the restart ($storage)',
+    async ({ adapter }) => {
+      const board = await restartOfflineWithSavedColumns(adapter, 'filter');
+
+      // Offline, the user moves "Write report" to done, then the app
+      // restarts before the board is opened.
+      await board.moveTask('tasks||1', 'done');
+      const restarted = await restartOfflineAgain(board, adapter, 'filter');
+
+      // A route loader awaits the done column before showing the board. It
+      // can't be fetched offline, so it is read back from storage, with the
+      // queued move.
+      const loaded = await act(() =>
+        resolveAfterAllTimers(
+          restarted.env.apiStore.awaitListQueryFetch(doneColumn),
+        ),
+      );
+      expect(loaded.items.map(({ data }) => data.name)).toMatchInlineSnapshot(
+        `['Pay invoice', 'Write report']`,
+      );
+
+      // The board then shows the card only in the done column.
+      expect(await readColumns(restarted)).toMatchInlineSnapshot(`
+        done: ['Pay invoice', 'Write report']
+        todo: []
+      `);
+    },
+  );
+
+  test('a column read back from async storage after a restart shows a card moved offline as soon as it shows', async () => {
+    const adapter = opfsPersistentStorage;
+    const board = await restartOfflineWithSavedColumns(adapter, 'filter');
+
+    // Offline, the user moves "Write report" to done, then the app restarts
+    // before the board is opened.
+    await board.moveTask('tasks||1', 'done');
+    const restarted = await restartOfflineAgain(board, adapter, 'filter');
+
+    // Opening the done column never shows it without the queued move: the
+    // moved card is read back together with the column's own cards.
+    const doneColumnRenders: string[] = [];
+    const done = renderHook(() => {
+      const column = restarted.env.apiStore.useListQuery(doneColumn, {
+        itemSelector: (task) => task.name,
+      });
+      doneColumnRenders.push(`${column.status}: ${column.items.join(', ')}`);
+    });
+    await flushAllTimers();
+    done.unmount();
+
+    expect([...new Set(doneColumnRenders)]).toMatchInlineSnapshot(`
+      ['loading: ', 'success: Pay invoice, Write report']
+    `);
+  });
+
+  test.each(storages)(
     'a board open while the app restarts shows a card moved offline before the restart ($storage)',
     async ({ adapter }) => {
       const board = await restartOfflineWithSavedColumns(adapter, 'filter');
@@ -418,6 +484,22 @@ describe('addItemToQueries', () => {
       // column read back from storage still shows it.
       const restarted = await restartOfflineAgain(board, adapter, 'none');
       expect(await readColumns(restarted)).toMatchInlineSnapshot(`
+        done: ['Pay invoice']
+        todo: ['Book flight', 'Write report']
+      `);
+    },
+  );
+  test.each(storages)(
+    'a card created offline with a filter matching every column only shows in the columns its rules allow ($storage)',
+    async ({ adapter }) => {
+      const board = await restartOfflineWithSavedColumns(adapter, 'filter');
+
+      // Offline, the user creates the todo card "Book flight" with a
+      // generic helper that adds it to every column: the board's rules keep
+      // it out of the done column.
+      await board.createTask(3, 'Book flight', 'todo', 'every column');
+
+      expect(await readColumns(board)).toMatchInlineSnapshot(`
         done: ['Pay invoice']
         todo: ['Book flight', 'Write report']
       `);

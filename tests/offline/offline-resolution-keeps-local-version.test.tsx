@@ -412,19 +412,20 @@ test('collection: a requireFreshData view keeps the local version of an item wai
   // she waits for a decision, so the local version stays.
   expect(await reloadOnEditorOfHeldCollectionItem(true, opfsPersistentStorage))
     .toMatchInlineSnapshot(`
-    "
-    time    | ada                |
-    0       | -                  | -- the app reloads and the editor mounts
-    .       | - (loading)        | [ada] ui-initialized
-    11ms    | Ada edited         | [ada] ui-changed
-    12ms    | Ada edited         | offline:renameItem resolution-required
-    12s     | Ada edited         | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
-    12.053s | Ada edited         | -- the user keeps their rename: Ada is refetched
-    .       | Ada edited         | 🔴 [users||1] >fetch-started
-    12.853s | Ada edited         | 🔴 [users||1] <fetch-finished (value: {"name":"Ada edited (saved)"})
-    .       | Ada edited (saved) | [ada] ui-changed
-    "
-  `);
+      "
+      time    | ada                  |
+      0       | -                    | -- the app reloads and the editor mounts
+      .       | - (loading)          | [ada] ui-initialized
+      11ms    | Ada edited (loading) | [ada] ui-changed
+      12ms    | Ada edited (loading) | offline:renameItem resolution-required
+      1s      | Ada edited           | [ada] ui-changed
+      12s     | Ada edited           | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+      12.053s | Ada edited           | -- the user keeps their rename: Ada is refetched
+      .       | Ada edited           | 🔴 [users||1] >fetch-started
+      12.853s | Ada edited           | 🔴 [users||1] <fetch-finished (value: {"name":"Ada edited (saved)"})
+      .       | Ada edited (saved)   | [ada] ui-changed
+      "
+    `);
 });
 
 // -- ListQueryStore -------------------------------------------------------------
@@ -805,21 +806,21 @@ test('list query: a requireFreshData view keeps the local version of an item wai
   expect(await reloadOnScreenOfHeldListItem(true, opfsPersistentStorage))
     .toMatchInlineSnapshot(`
       "
-      time    | ada                | rows                      |
-      0       | -                  | -                         | -- the app reloads and the screen mounts
-      .       | - (loading)        |  (loading)                | [rows, ada] ui-initialized
-      11ms    | Ada edited         |  (loading)                | [ada] ui-changed
-      12ms    | Ada edited         |  (loading)                | offline:renameUser resolution-required
-      .       | Ada edited         |  (loading)                | 🔴 >list-fetch-started
-      812ms   | Ada edited         |  (loading)                | 🔴 <list-fetch-finished (value: {"count":2})
-      .       | Ada edited         | Ada edited, Grace         | [rows] ui-changed
-      12s     | Ada edited         | Ada edited, Grace         | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
-      12.053s | Ada edited         | Ada edited, Grace         | -- the user keeps their rename: Ada and the list are refetched
-      .       | Ada edited         | Ada edited, Grace         | 🟠 >list-fetch-started
-      .       | Ada edited         | Ada edited, Grace         | 🟡 [users||1] >fetch-started
-      12.853s | Ada edited         | Ada edited, Grace         | 🟠 <list-fetch-finished (value: {"count":2})
-      .       | Ada edited (saved) | Ada edited (saved), Grace | [rows, ada] ui-changed
-      .       | Ada edited (saved) | Ada edited (saved), Grace | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada edited (saved)"})
+      time    | ada                  | rows                      |
+      0       | -                    | -                         | -- the app reloads and the screen mounts
+      .       | - (loading)          |  (loading)                | [rows, ada] ui-initialized
+      11ms    | Ada edited (loading) |  (loading)                | [ada] ui-changed
+      12ms    | Ada edited (loading) |  (loading)                | offline:renameUser resolution-required
+      .       | Ada edited (loading) |  (loading)                | 🔴 >list-fetch-started
+      812ms   | Ada edited (loading) |  (loading)                | 🔴 <list-fetch-finished (value: {"count":2})
+      .       | Ada edited           | Ada edited, Grace         | [rows, ada] ui-changed
+      12s     | Ada edited           | Ada edited, Grace         | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+      12.053s | Ada edited           | Ada edited, Grace         | -- the user keeps their rename: Ada and the list are refetched
+      .       | Ada edited           | Ada edited, Grace         | 🟠 >list-fetch-started
+      .       | Ada edited           | Ada edited, Grace         | 🟡 [users||1] >fetch-started
+      12.853s | Ada edited           | Ada edited, Grace         | 🟠 <list-fetch-finished (value: {"count":2})
+      .       | Ada edited (saved)   | Ada edited (saved), Grace | [rows, ada] ui-changed
+      .       | Ada edited (saved)   | Ada edited (saved), Grace | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada edited (saved)"})
       "
     `);
 });
@@ -1362,11 +1363,139 @@ test('document: a requireFreshData view keeps the local version of a document wa
       0       | -             | -- the app reloads and the editor mounts
       .       | "- (loading)" | ui-initialized
       12ms    | "- (loading)" | offline:updateValue resolution-required
-      .       | 2             | ui-changed
+      .       | "2 (loading)" | ui-changed
+      1s      | 2             | ui-changed
       12s     | 2             | server-data-changed (value: 2)
       12.053s | 2             | -- the user keeps their change: the document is refetched
       .       | 2             | 🔴 >fetch-started
       12.853s | 2             | 🔴 <fetch-finished (value: 2)
       "
     `);
+});
+
+// -- requireFreshData with nothing waiting --------------------------------------
+
+/*
+ * With async storage, the saved data is read back while the forced refresh
+ * waits for the queued work to be read. Showing that saved data is not the
+ * refresh: with nothing waiting for a decision, the screen keeps loading until
+ * the server responds.
+ */
+
+test('document: a requireFreshData view waits for the server after the app reloads with async storage and nothing queued', async () => {
+  resetSessionForTests({ clearStorage: true });
+  createOpfsPersistentStorageTestStore();
+  const name = 'fresh-document-nothing-queued';
+
+  // The document is loaded and saved on the device with value 1
+  const before = setupDocument(name, false, undefined, opfsPersistentStorage);
+  network.goOnline();
+  const view = before.renderDocumentView();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads on the editor while the server has value 5: the saved
+  // value 1 is read back first, but the editor keeps loading until the
+  // refresh brings 5
+  resetSessionForTests();
+  const { env, renderDocumentView } = setupDocument(
+    name,
+    false,
+    5,
+    opfsPersistentStorage,
+  );
+  renderDocumentView(true);
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui            |
+    0     | "- (loading)" | ui-initialized
+    12ms  | "1 (loading)" | ui-changed
+    15ms  | "1 (loading)" | 🔴 >fetch-started
+    815ms | "1 (loading)" | 🔴 <fetch-finished (value: 5)
+    .     | 5             | ui-changed
+    "
+  `);
+});
+
+test('collection: a requireFreshData view waits for the server after the app reloads with async storage and nothing queued', async () => {
+  resetSessionForTests({ clearStorage: true });
+  createOpfsPersistentStorageTestStore();
+  const name = 'fresh-collection-nothing-queued';
+
+  // Ada is loaded and saved on the device
+  const before = setupCollection(name, false, undefined, opfsPersistentStorage);
+  network.goOnline();
+  const view = before.renderAdaView();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads on the editor while Bob renamed Ada on the server: the
+  // saved Ada is read back first, but the editor keeps loading until the
+  // refresh brings Bob's name
+  resetSessionForTests();
+  const { env, renderAdaView } = setupCollection(
+    name,
+    false,
+    'Ada by Bob',
+    opfsPersistentStorage,
+  );
+  renderAdaView(true);
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ada           |
+    0     | - (loading)   | [ada] ui-initialized
+    11ms  | Ada (loading) | [ada] ui-changed
+    15ms  | Ada (loading) | 🔴 [users||1] >fetch-started
+    815ms | Ada (loading) | 🔴 [users||1] <fetch-finished (value: {"name":"Ada by Bob"})
+    .     | Ada by Bob    | [ada] ui-changed
+    "
+  `);
+});
+
+test('list query: a requireFreshData view waits for the server after the app reloads with async storage and nothing queued', async () => {
+  resetSessionForTests({ clearStorage: true });
+  createOpfsPersistentStorageTestStore();
+  const name = 'fresh-list-nothing-queued';
+
+  // The list and Ada are loaded and saved on the device
+  const before = setupListQuery(name, false, undefined, opfsPersistentStorage);
+  network.goOnline();
+  const view = before.renderUsersView();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads on the screen while Bob renamed Ada on the server: the
+  // saved Ada is read back first, but the detail panel keeps loading until
+  // its own refresh brings Bob's name
+  resetSessionForTests();
+  const { env, renderUsersView } = setupListQuery(
+    name,
+    false,
+    'Ada by Bob',
+    opfsPersistentStorage,
+  );
+  renderUsersView(true);
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ada                  | rows              |
+    0     | - (loading)          |  (loading)        | [rows, ada] ui-initialized
+    10ms  | - (loading)          |  (loading)        | 🔴 >list-fetch-started
+    11ms  | Ada (loading)        |  (loading)        | [ada] ui-changed
+    15ms  | Ada (loading)        | Ada (loading)     | [rows] ui-changed
+    .     | Ada (loading)        | Ada (loading)     | 🟠 [users||1] >fetch-started
+    810ms | Ada (loading)        | Ada (loading)     | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Ada by Bob (loading) | Ada by Bob, Grace | [rows, ada] ui-changed
+    815ms | Ada by Bob (loading) | Ada by Bob, Grace | 🟠 [users||1] <fetch-finished (value: {"id":1,"name":"Ada by Bob"})
+    .     | Ada by Bob           | Ada by Bob, Grace | [ada] ui-changed
+    "
+  `);
 });

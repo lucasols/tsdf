@@ -76,6 +76,22 @@ export function useRequireFreshData(
   ] as const;
 }
 
+/**
+ * Whether a status change ends a fetch, so it can settle the `requireFreshData`
+ * refresh. Data read back from storage also becomes `success`, but from no
+ * state or `idle`, and isn't fresh, e.g. while the refresh waits for the
+ * queued offline work to be read.
+ */
+export function endsFetch(
+  prev: string | undefined,
+  current: string | undefined,
+): boolean {
+  return (
+    (current === 'success' || current === 'error') &&
+    (prev === 'loading' || prev === 'refetching' || prev === 'loadingMore')
+  );
+}
+
 function useGetModifyResult<T extends { isLoading: boolean; status: string }>(
   result: T,
   required: boolean,

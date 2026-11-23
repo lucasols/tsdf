@@ -1816,7 +1816,8 @@ export function createMutationApi<
   /**
    * Adds an item already in the state to the `addItemToQueries` queries of
    * the state that don't list it yet, e.g. queries read back from storage
-   * after the item was added.
+   * after the item was added. As in `addItemToState`, the
+   * `optimisticListUpdates` rules then run on those queries.
    */
   function addStateItemToQueries(
     itemPayload: ItemPayload,
@@ -1825,19 +1826,30 @@ export function createMutationApi<
     const itemKey = getItemKey(itemPayload);
     if (!store.state.items[itemKey]) return;
 
+    const previousState = store.state;
     const queriesToAddTo = getQueriesKeyArray(addItemToQueries.queries);
     let changedQueryKeys: string[] = [];
-    store.produceState(
-      (draftState) => {
-        changedQueryKeys = insertItemInQueries(
-          draftState,
-          itemKey,
-          addItemToQueries.appendTo,
-          queriesToAddTo,
+    store.batch(() => {
+      store.produceState(
+        (draftState) => {
+          changedQueryKeys = insertItemInQueries(
+            draftState,
+            itemKey,
+            addItemToQueries.appendTo,
+            queriesToAddTo,
+          );
+        },
+        { action: 'add-item-to-queries' },
+      );
+
+      if (changedQueryKeys.length > 0) {
+        applyOptimisticListUpdates(
+          [{ itemKey, payload: itemPayload }],
+          previousState,
+          changedQueryKeys,
         );
-      },
-      { action: 'add-item-to-queries' },
-    );
+      }
+    });
 
     for (const queryKey of changedQueryKeys) {
       publishQuerySnapshot(queryKey);

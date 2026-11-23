@@ -1748,10 +1748,11 @@ export function createListQueryStore<
           ? getItemLoadedFieldsToPersist
           : undefined,
         getQueryKey,
-        onQueryRestored: (queryKey) => {
-          if (offlineItemKeys.size === 0) return;
-          applyOfflineChangesToRestoredQueries([queryKey], offlineItemKeys);
-        },
+        onQueryRestored: applyOfflineChangesToRestoredQuery,
+        getItemKeysToRestoreWithQueries: () =>
+          optimisticListUpdates && offlineItemKeys.size > 0
+            ? offlineItemKeys
+            : undefined,
       })
     : null;
   const persistentStorageErrorReporter = resolvedPersistentStorageConfig
@@ -2383,6 +2384,7 @@ export function createListQueryStore<
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,
     resolutionItemKeys,
+    applyOfflineChangesToRestoredQuery,
   );
 
   const {
@@ -4431,6 +4433,12 @@ export function createListQueryStore<
     touchUpdatedItemEntries(itemEntries);
 
     return wasUpdated;
+  }
+
+  /** See `applyOfflineChangesToRestoredQueries`. */
+  function applyOfflineChangesToRestoredQuery(queryKey: string): void {
+    if (offlineItemKeys.size === 0) return;
+    applyOfflineChangesToRestoredQueries([queryKey], offlineItemKeys);
   }
 
   /**

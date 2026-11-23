@@ -328,6 +328,11 @@ export function setupListQueryPersistence<
     ) => ItemLoadedFields | undefined;
     /** Called after a query read back from storage is put in the state. */
     onQueryRestored?: (queryKey: string) => void;
+    /**
+     * Items that `onQueryRestored` reads, read back with the rows of a query
+     * from async storage so the query is put in the state with them.
+     */
+    getItemKeysToRestoreWithQueries?: () => Iterable<string> | undefined;
   } = {},
 ): ListQueryPersistenceSetup<ItemState, QueryPayload, ItemPayload> {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
@@ -2173,7 +2178,13 @@ export function setupListQueryPersistence<
 
         rememberHydratedQuery(queryKey, cached);
 
-        await preloadItems(persistedQuery.items);
+        const itemKeysToRestoreWith =
+          options.getItemKeysToRestoreWithQueries?.();
+        await preloadItems(
+          itemKeysToRestoreWith
+            ? [...persistedQuery.items, ...itemKeysToRestoreWith]
+            : persistedQuery.items,
+        );
         if (currentGeneration !== generation || activeStore !== storeRef) {
           return false;
         }

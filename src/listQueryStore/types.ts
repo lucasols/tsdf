@@ -41,7 +41,9 @@ export type ListQueryAddItemToQueries<
    * Queries that receive the item: one query payload, a list of payloads, or
    * a filter over the queries currently in the store. Queries that are not in
    * the store are skipped. Offline temp entities, and `addItemToState` while
-   * offline, first load the ones that are only in persistent storage.
+   * offline, first load the ones that are only in persistent storage. A
+   * filter then reads every query saved in persistent storage that is not in
+   * memory, on each call, so prefer query payloads when the lists are known.
    */
   queries:
     | QueryPayload[]

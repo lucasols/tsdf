@@ -8,7 +8,7 @@ import {
   ValidStoreState,
   invalidPayloadError,
 } from '../utils/storeShared';
-import { useRequireFreshData } from '../utils/useRequireFreshData';
+import { endsFetch, useRequireFreshData } from '../utils/useRequireFreshData';
 import type {
   CollectionUseMultipleItemsQuery,
   TSFDCollectionState,
@@ -173,8 +173,8 @@ export function useItem<
       .ifSelector((state) => {
         return state[result.itemStateKey]?.status;
       })
-      .change.then(({ current }) => {
-        if (current === 'success' || current === 'error') {
+      .change.then(({ prev, current }) => {
+        if (endsFetch(prev, current)) {
           markRefreshSettled();
         }
       });
