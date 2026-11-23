@@ -3040,16 +3040,16 @@ export function createCollectionStore<
         // An online run changed the items it was sent for, even if their temp
         // ids were reused since. A queued one is replayed for the saved item
         // of a creation saved since the call.
-        const finalPayload =
-          result.kind === 'online'
-            ? sentPayload
-            : resolveSavedTempPayloads(payloadToUse);
         if (revalidateOnSuccess && affectedItems.length > 0) {
-          invalidateItem(finalPayload);
+          invalidateItem(
+            result.kind === 'online'
+              ? sentPayload
+              : resolveSavedTempPayloads(payloadToUse),
+          );
         }
 
         if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, finalPayload);
+          onSuccess(result.data, sentPayload);
         }
       },
       _debounce,

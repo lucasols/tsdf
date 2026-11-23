@@ -1146,6 +1146,8 @@ describe('an edit of a row created offline that is not queued yet when the creat
     const connectionCheckLatencies: number[] = [];
     // The id the server gives the next user it creates
     let nextServerUserId = 3;
+    // The app's offline session gate (`offlineSession.enabled`)
+    let offlineEnabled = true;
 
     const env: ReturnType<
       typeof createListQueryStoreTestEnv<
@@ -1173,6 +1175,7 @@ describe('an edit of a row created offline that is not queued yet when the creat
           errorNormalizer: normalizeError,
           getSessionKey: () => args.sessionKey,
           offlineSession: {
+            enabled: () => offlineEnabled,
             network: {
               enabled: true,
               getIsOffline: () => {
@@ -1338,6 +1341,9 @@ describe('an edit of a row created offline that is not queued yet when the creat
       renameLinus,
       createLinus,
       connectionCheckLatencies,
+      setOfflineEnabled: (enabled: boolean) => {
+        offlineEnabled = enabled;
+      },
     };
   }
 
@@ -1745,6 +1751,50 @@ describe('an edit of a row created offline that is not queued yet when the creat
       `['Ada', 'Grace', 'Linus', 'Linus the second']`,
     );
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    hook.unmount();
+  });
+  test('a temp id reused for an online creation while the offline gate is closed is not sent for the saved user', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-id-reused-gate-closed-session';
+    const storeName = 'temp-id-reused-gate-closed-store';
+    const { env, hook, setOfflineEnabled } = await setupQueuedTempCreate({
+      sessionKey,
+      storeName,
+    });
+
+    // The first Linus is saved as users||3
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+
+    // The app closes its offline gate, so offline-enabled mutations run as
+    // plain online mutations, and creates another Linus with the same temp id
+    setOfflineEnabled(false);
+    const creationPayloads: unknown[] = [];
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus', {
+        mutation: (itemId) => {
+          creationPayloads.push(itemId);
+          return Promise.resolve({ id: 4 });
+        },
+        onSuccess: (_data, itemId) => {
+          creationPayloads.push(itemId);
+        },
+        offline: { operation: 'createUser', input: { name: 'Linus' } },
+      });
+    });
+
+    // The creation's `mutation` and `onSuccess` get its own temp id, not the
+    // saved user's id that temp id stood for before
+    expect(creationPayloads).toMatchInlineSnapshot(
+      `['temp:Linus', 'temp:Linus']`,
+    );
 
     hook.unmount();
   });

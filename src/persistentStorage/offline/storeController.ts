@@ -4571,25 +4571,16 @@ export function createOfflineStoreController<
    * queued. Only the payloads the operation declares (`getEntityRefs` and
    * `dependsOn`) are looked up, so this costs nothing until a creation of the
    * session was saved.
-   *
-   * A creation forgets the saved creations of its own temp payloads instead:
-   * an app that reuses a temp payload once its creation was saved creates
-   * another entity, whose edits must not be sent for the saved one.
    */
   function resolveSavedTempEntityRefs(prepared: PreparedQueuedMutation): void {
     if (resolvedEntityRefBySerializedRef.size === 0) return;
 
-    const { operation, operationName } = prepared;
-    if (operation.tempEntity || operation.tempEntities) {
-      for (const tempId of prepared.tempIds ??
-        getOperationRawEntityRefs(
-          operation,
-          operationName,
-          prepared.validatedInput,
-        )) {
-        resolvedEntityRefBySerializedRef.delete(getCompositeKey(tempId));
-      }
-    }
+    const { operationName } = prepared;
+    forgetSavedCreationsOfReusedTempIds(
+      operationName,
+      prepared.validatedInput,
+      prepared.tempIds,
+    );
 
     const rewrite = rewriteSavedTempEntityRefs(
       operationName,
@@ -4600,6 +4591,29 @@ export function createOfflineStoreController<
 
     prepared.validatedInput = rewrite.input;
     if (rewrite.entityRefs) prepared.entityRefs = rewrite.entityRefs;
+  }
+
+  /**
+   * When the mutation is a creation, forgets the saved creations of its own
+   * temp payloads: an app that reuses a temp payload once its creation was
+   * saved creates another entity, whose edits must not be sent for the saved
+   * one.
+   */
+  function forgetSavedCreationsOfReusedTempIds(
+    operationName: string,
+    input: unknown,
+    tempIds: readonly unknown[] | undefined,
+  ): void {
+    if (resolvedEntityRefBySerializedRef.size === 0) return;
+    const operation = operations[operationName];
+    if (!operation || (!operation.tempEntity && !operation.tempEntities)) {
+      return;
+    }
+
+    for (const tempId of tempIds ??
+      getOperationRawEntityRefs(operation, operationName, input)) {
+      resolvedEntityRefBySerializedRef.delete(getCompositeKey(tempId));
+    }
   }
 
   /**
@@ -6198,6 +6212,13 @@ export function createOfflineStoreController<
     directMutation: (ctx: OfflineDirectMutationContext) => Promise<T>,
   ): Promise<T> {
     const operationName: string = offline.operation;
+    // As when it is prepared: `directMutation` is called with the final
+    // payloads of saved creations, which a reused temp payload must not get
+    forgetSavedCreationsOfReusedTempIds(
+      operationName,
+      offline.input,
+      undefined,
+    );
     const current = operations[operationName]?.dependsOnUploads
       ? await ensureSessionForUploadDependencies(operationName)
       : null;
@@ -6581,6 +6602,9 @@ export function createOfflineStoreController<
     getOfflineEntities,
     getItemOfflineState,
     resolveEntityRef: (entityRef) => {
+      // Nothing to resolve, nor to drop on a session change, until a creation
+      // of the session was saved
+      if (resolvedEntityRefBySerializedRef.size === 0) return entityRef;
       // The remaps belong to the session they were recorded in: this drops
       // them when the session changed since
       ensureActiveSession();
