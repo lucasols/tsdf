@@ -456,6 +456,26 @@ function getQueueOrder(entry: {
     : entry.createdAt;
 }
 
+/** A `Map` whose `version` changes with each of its changes */
+class VersionedMap<K, V> extends Map<K, V> {
+  version = 0;
+
+  override set(key: K, value: V): this {
+    this.version += 1;
+    return super.set(key, value);
+  }
+
+  override delete(key: K): boolean {
+    this.version += 1;
+    return super.delete(key);
+  }
+
+  override clear(): void {
+    this.version += 1;
+    super.clear();
+  }
+}
+
 export class OfflineSessionUnavailableError extends Error {
   readonly code = 460;
   readonly id = 'offline-session-unavailable' as const;
@@ -653,11 +673,18 @@ export function createOfflineStoreController<
     sessionConfig.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
   const replayRetryIntervalMs =
     sessionConfig.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
-  const queueEntries = new Map<string, OfflineQueueEntry>();
+  const queueEntries = new VersionedMap<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const hasCancelledWithOperations = Object.values(operations).some(
     (operation) => operation.cancelledWith !== undefined,
   );
+  const hasOrderingGroupOperations = Object.values(operations).some(
+    (operation) => operation.orderingGroup !== undefined,
+  );
+  // The ordering groups of the queued work, for the `queueEntries` version
+  // they were collected at
+  let queuedOrderingGroups: { version: number; groups: Set<string> } | null =
+    null;
   // Uploads of stored records whose operation this deploy doesn't define
   // (written by a newer deploy), by record. This tab ignores those records
   // but leaves them in storage for a deploy that defines them, so their
@@ -842,7 +869,8 @@ export function createOfflineStoreController<
    * affects, are still waiting to reach the server (queued, replaying or
    * unconfirmed), or the creation of one of those entities waits for a manual
    * resolution, or the creation of an entity of another store the mutation
-   * is declared `cancelledWith` is still queued or waits for one.
+   * is declared `cancelledWith` is still queued or waits for one, or work of
+   * its `orderingGroup` is still queued in a store of the session.
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
@@ -850,7 +878,8 @@ export function createOfflineStoreController<
     if (
       queueEntries.size === 0 &&
       resolutions.size === 0 &&
-      !prepared.operation.cancelledWith
+      !prepared.operation.cancelledWith &&
+      !prepared.operation.orderingGroup
     ) {
       return false;
     }
@@ -916,12 +945,26 @@ export function createOfflineStoreController<
       return true;
     }
 
+    // Older work of its ordering group (e.g. the messages of a chat) is
+    // still queued: sent on its own, the mutation would reach the server
+    // before it.
+    const current = activeSession;
+    const orderingGroup = prepared.operation.orderingGroup?.({
+      input: prepared.validatedInput,
+    });
+    if (
+      current !== null &&
+      orderingGroup !== undefined &&
+      current.session.hasQueuedOrderingGroup(orderingGroup)
+    ) {
+      return true;
+    }
+
     // The creation of an entity of another store the mutation belongs to is
     // still queued (e.g. a comment on a task whose creation is being
     // replayed): sent on its own, the mutation would reach the server before
     // that entity exists there. Queued, it is replayed after the creation,
     // and held behind it if it ends up waiting for a manual resolution.
-    const current = activeSession;
     return (
       current !== null &&
       prepared.operation.cancelledWith !== undefined &&
@@ -1386,6 +1429,9 @@ export function createOfflineStoreController<
         : undefined,
       findCreationResolutionId,
       hasQueuedCreation,
+      hasQueuedOrderingGroup: hasOrderingGroupOperations
+        ? hasQueuedOrderingGroup
+        : undefined,
       onCreationsReleased: hasCancelledWithOperations
         ? requeueWorkHeldBehindExternalCreations
         : undefined,
@@ -3625,6 +3671,28 @@ export function createOfflineStoreController<
     }
 
     return false;
+  }
+
+  /**
+   * Whether work of the ordering group `group` is queued in this store (not
+   * sent or not confirmed yet). The groups are collected once per change of
+   * the queue, from the inputs with the operations of this deploy.
+   */
+  function hasQueuedOrderingGroup(group: string): boolean {
+    if (queueEntries.size === 0) return false;
+
+    if (queuedOrderingGroups?.version !== queueEntries.version) {
+      const groups = new Set<string>();
+      for (const entry of queueEntries.values()) {
+        const entryGroup = operations[entry.operation]?.orderingGroup?.({
+          input: entry.input,
+        });
+        if (entryGroup !== undefined) groups.add(entryGroup);
+      }
+      queuedOrderingGroups = { version: queueEntries.version, groups };
+    }
+
+    return queuedOrderingGroups.groups.has(group);
   }
 
   /**

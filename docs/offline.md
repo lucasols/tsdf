@@ -319,6 +319,7 @@ Optional replay behavior:
 - `conflictHandling` - Detects conflicts and creates manual resolution records.
 - `accumulation` - Merges newer queued inputs into an existing queued mutation. See [Accumulating queued mutations](#accumulating-queued-mutations).
 - `supersedes` - Prunes older queued work for the same entity.
+- `orderingGroup({ input })` - Sends the mutations of a group in the order they were made, without tying them together otherwise. See [Ordering groups](#ordering-groups).
 
 Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up and sends or resolves them. Apps are expected to reload tabs running an old deploy: TSDF doesn't coordinate the order of offline work between deploys, so an old tab can send its own edits around the work it keeps. Records of an operation removed from the app for good also stay in storage until the session's storage is cleared (`clearSessionStorage`), so keep an operation defined until its queued work is likely gone.
 
@@ -346,6 +347,31 @@ updateRecord: {
 ```
 
 Only the newest queued mutation is a merge candidate. When it is refused, the incoming mutation is not merged into an older one either, since that would send it before the newer work: a table edit, an app block edit and another table edit are sent as three requests, in that order. Later mutations can merge into the separate entry. A refused merge into a mutation held behind the creation of an entity that waits for a resolution is the exception: the incoming mutation is sent first, the held one is sent after it and overwrites the fields both changed, and later mutations keep merging into the held one (see [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution)).
+
+### Ordering groups
+
+A mutation of an entity with no queued work runs directly when online, even while older queued work of related entities is still being replayed. That is a problem when the server orders records by the time it receives them: a chat message sent right after reconnecting is a new entity, so it reaches the server before the older offline messages of the chat (e.g. while a photo of an older message uploads first), and lands before them for every member. `dependsOn` and `cancelledWith` would order it, but they also tie it to the older ones: deleting an older unsent message would drop it too.
+
+`orderingGroup` only orders. Return the key of the group the mutation belongs to, or `undefined` for none:
+
+```ts
+sendMessage: {
+  inputSchema: sendMessageInputSchema,
+  kind: 'create',
+  getEntityRefs: ({ input }) => [input.messageId],
+  orderingGroup: ({ input }) => `chat:${input.chatId}`,
+  execute: ({ input }) => api.sendMessage(input),
+},
+sendPhotoMessage: {
+  // ...
+  // The same key: a chat keeps one order across both operations
+  orderingGroup: ({ input }) => `chat:${input.chatId}`,
+},
+```
+
+A mutation whose group still has queued work (not sent yet, being sent, or waiting to be confirmed) is queued behind it, also while online, and replayed after it: the queue is replayed in the order the mutations were made. Mutations of other groups, or without one, still run directly. The key is shared by all the stores of the session, so work of different stores can share a group (only the stores attached in the tab are checked, and the work other tabs queued in them is). It is computed from the input with the operations of the running deploy, and not stored.
+
+The group adds no other coupling: discarding, cancelling or superseding one mutation of the group does not drop the others, and a mutation of the group that ends in a manual resolution leaves the queue, so the rest of the group is sent without waiting for the decision, like any other queued work. Waiting would leave the whole chat unsent behind one message the user may never retry; the failed message is sent at its retry, after the ones sent meanwhile.
 
 ### Temp Entities in List Queries
 
