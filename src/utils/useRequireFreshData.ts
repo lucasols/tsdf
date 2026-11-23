@@ -79,8 +79,8 @@ export function useRequireFreshData(
 /**
  * Whether a status change settles the `requireFreshData` refresh: a fetch
  * ending, or fresh data received from another tab. Data read back from storage
- * also becomes `success`, but from no state or `idle`, and isn't fresh, e.g.
- * while the refresh waits for the queued offline work to be read.
+ * also becomes `success`, but only from no state or `idle`, and isn't fresh,
+ * e.g. while the refresh waits for the queued offline work to be read.
  */
 export function settlesRefresh(
   prev: string | undefined,
@@ -88,13 +88,9 @@ export function settlesRefresh(
   isRestoredFromStorage: () => boolean,
 ): boolean {
   if (current !== 'success' && current !== 'error') return false;
+  if (prev !== undefined && prev !== 'idle') return true;
 
-  return (
-    prev === 'loading' ||
-    prev === 'refetching' ||
-    prev === 'loadingMore' ||
-    !isRestoredFromStorage()
-  );
+  return !isRestoredFromStorage();
 }
 
 function useGetModifyResult<T extends { isLoading: boolean; status: string }>(

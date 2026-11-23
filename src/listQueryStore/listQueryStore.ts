@@ -4515,12 +4515,13 @@ export function createListQueryStore<
         ? loadOfflineTempEntities([], [addItemToQueries.queries])
         : undefined;
 
+    const stateBeforeAdd = store.state;
     addItemToState(itemPayload, data, options);
 
     if (!loadingQueries || !addItemToQueries) return;
     const addToLoadedQueries = () => {
       if (isDisposed) return;
-      addStateItemToQueries(itemPayload, addItemToQueries);
+      addStateItemToQueries(itemPayload, addItemToQueries, stateBeforeAdd);
     };
     void loadingQueries.then(addToLoadedQueries, addToLoadedQueries);
   }

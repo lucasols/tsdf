@@ -1,4 +1,5 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
+import { rc_number, rc_object } from 'runcheck';
 import { expect, test } from 'vitest';
 import {
   createInMemoryBrowserTabsTransportFactory,
@@ -13,6 +14,7 @@ import {
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
 import { flushAllTimers } from '../utils/genericTestUtils';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 import {
   createCollectionItems,
   createFocusChangeCoordinator,
@@ -56,6 +58,58 @@ test('document: a requireFreshData hook in a background tab stops loading when t
   expect(envA.serverMock.numOfStartedFetches).toBe(1);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
   // the background tab shows the fresh data from the focused tab
+  expect(tabB.result.current).toMatchInlineSnapshot(`
+    isLoading: '❌'
+    status: 'success'
+  `);
+});
+
+test('document: a requireFreshData hook in a background tab whose last refresh failed stops loading when the focused tab fetch serves it', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('require-fresh-data-document-after-error');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerState = createSharedServerMockState(5);
+  createLocalStoragePersistentTestStore()
+    .scope(id, 'session1')
+    .document.seed({ value: 1 });
+
+  // The background tab starts with the document saved on the device, and its
+  // refresh fails.
+  const envB = createDocumentStoreTestEnv(5, {
+    id,
+    getSessionKey: () => 'session1',
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: rc_object({ value: rc_number }),
+    },
+  });
+  envB.serverMock.setNextFetchError('Request failed');
+  act(() => {
+    envB.apiStore.scheduleFetch('highPriority');
+  });
+  await flushAllTimers();
+  expect(envB.store.state.status).toBe('error');
+
+  // Both tabs then open a screen that requires fresh data
+  const envA = createDocumentStoreTestEnv(5, {
+    id,
+    getSessionKey: () => 'session1',
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+  });
+  renderHook(() => envA.apiStore.useDocument({ requireFreshData: true }));
+  const tabB = renderHook(() => {
+    const doc = envB.apiStore.useDocument({ requireFreshData: true });
+    return { status: doc.status, isLoading: doc.isLoading };
+  });
+  await flushAllTimers();
+
+  // The focused tab's fetch serves the background tab, which drops its retry:
+  // its hook shows the fresh data instead of loading until it remounts.
   expect(tabB.result.current).toMatchInlineSnapshot(`
     isLoading: '❌'
     status: 'success'

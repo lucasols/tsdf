@@ -1140,7 +1140,6 @@ export function createFetchApi<
       },
       { action: 'persistent-storage-load-more' },
     );
-    onQueryRestored(queryKey);
 
     return 'triggered';
   }

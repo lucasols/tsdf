@@ -1826,20 +1826,25 @@ export function createMutationApi<
   }
 
   /**
-   * Adds an item already in the state to the `addItemToQueries` queries of
-   * the state that don't list it yet, e.g. queries read back from storage
-   * after the item was added. As in `addItemToState`, the
-   * `optimisticListUpdates` rules then run on those queries.
+   * Adds an item added with `addItemToState` to the `addItemToQueries`
+   * queries that were not in the state when it was added
+   * (`stateBeforeAdd`), e.g. queries read back from storage since. As in
+   * `addItemToState`, the `optimisticListUpdates` rules then run on those
+   * queries, against the state before the add. The queries already in the
+   * state were handled by the add itself.
    */
   function addStateItemToQueries(
     itemPayload: ItemPayload,
     addItemToQueries: ListQueryAddItemToQueries<QueryPayload, ItemPayload>,
+    stateBeforeAdd: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
   ): void {
     const itemKey = getItemKey(itemPayload);
     if (!store.state.items[itemKey]) return;
 
-    const previousState = store.state;
-    const queriesToAddTo = getQueriesKeyArray(addItemToQueries.queries);
+    const queriesToAddTo = getQueriesKeyArray(addItemToQueries.queries).filter(
+      ({ key }) => !stateBeforeAdd.queries[key],
+    );
+    if (queriesToAddTo.length === 0) return;
     let changedQueryKeys: string[] = [];
     store.batch(() => {
       store.produceState(
@@ -1857,7 +1862,7 @@ export function createMutationApi<
       if (changedQueryKeys.length > 0) {
         applyOptimisticListUpdates(
           [{ itemKey, payload: itemPayload }],
-          previousState,
+          stateBeforeAdd,
           changedQueryKeys,
         );
       }
