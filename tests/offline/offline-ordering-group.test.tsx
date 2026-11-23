@@ -56,6 +56,12 @@ type ChatOperations = {
     string,
     { id: string }
   >;
+  /** Edits the text of a message: queued edits of a message are merged */
+  editMessage: CollectionOfflineOperationDefinition<
+    Message,
+    string,
+    MessageInput
+  >;
 };
 
 function createChatEnv() {
@@ -131,6 +137,22 @@ function createChatEnv() {
               },
               onSuccessExecute: () => {},
             },
+            editMessage: {
+              inputSchema: messageInputSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.id],
+              orderingGroup: ({ input }) => `chat:${input.chatId}`,
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute: async ({ input }) => {
+                await env.serverTable.delayedUpdateItem(input.id, {
+                  text: input.text,
+                });
+                inserted.push(`${input.chatId}: edited to ${input.text}`);
+              },
+              onSuccessExecute: () => {},
+            },
           },
         },
       },
@@ -172,6 +194,18 @@ function createChatEnv() {
     inserted,
     rejectedTexts,
     send,
+    editMessage: async (id: string, text: string) => {
+      const input = { id, chatId: 'chat-1', text };
+      const result = env.apiStore.performMutation(id, {
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem(id, { text });
+          return { value: { chatId: 'chat-1', text } };
+        },
+        offline: { operation: 'editMessage', input },
+      });
+      await flushAllTimers();
+      return (await result).unwrap().kind;
+    },
     deleteMessage: async (id: string) => {
       const result = env.apiStore.performMutation(id, {
         mutation: async () => {
@@ -274,6 +308,33 @@ test('deleting an older unsent message of the chat does not drop the newer ones'
   expect(t.env.serverTable.getAll()).toMatchInlineSnapshot(
     `messages||2: { chatId: 'chat-1', text: 'fixed' }`,
   );
+});
+
+test('an edit is not merged into an older edit of its message when an edit of another message of the chat was made in between', async () => {
+  const t = createChatEnv();
+
+  // Online, the user posts two messages
+  expect(await t.send('chat-1', 'helo')).toBe('online');
+  expect(await t.send('chat-1', 'how r u')).toBe('online');
+
+  // Offline, the user fixes the first one, then the second one, then the
+  // first one again
+  network.setOffline();
+  expect(await t.editMessage('messages||1', 'hello')).toBe('queued');
+  expect(await t.editMessage('messages||2', 'how are you')).toBe('queued');
+  expect(await t.editMessage('messages||1', 'hello!')).toBe('queued');
+
+  // Merged into the first edit, the last one would reach the server before
+  // the edit of the second message: it is sent on its own, in order
+  act(() => network.goOnline());
+  await flushAllTimers();
+  expect(t.inserted).toMatchInlineSnapshot(`
+    - 'chat-1: helo'
+    - 'chat-1: how r u'
+    - 'chat-1: edited to hello'
+    - 'chat-1: edited to how are you'
+    - 'chat-1: edited to hello!'
+  `);
 });
 
 test('the ordering group spans the stores of the session: a poll posted while the chat messages replay is sent after them', async () => {

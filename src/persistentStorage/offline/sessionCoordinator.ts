@@ -281,10 +281,10 @@ type SessionRegistration = {
   hasQueuedCreation?: (entityRef: ValidPayload) => boolean;
   /**
    * Whether the store has queued work of the ordering group `group` (see the
-   * `orderingGroup` operation option). Only registered by stores with
-   * `orderingGroup` operations.
+   * `orderingGroup` operation option), ordered after `afterQueueOrder` when
+   * given. Only registered by stores with `orderingGroup` operations.
    */
-  hasQueuedOrderingGroup?: (group: string) => boolean;
+  hasQueuedOrderingGroup?: (group: string, afterQueueOrder?: number) => boolean;
   /**
    * Called when another store of the session sent again, or kept, creations
    * that waited for a manual resolution. `releasedEntityKeys` holds their
@@ -1556,12 +1556,15 @@ class SessionOfflineCoordinator {
 
   /**
    * Whether a store of the session attached in this tab has queued work of
-   * the ordering group `group`: a mutation of the group is then queued
-   * behind it instead of running directly.
+   * the ordering group `group` (ordered after `afterQueueOrder` when given):
+   * a mutation of the group is then queued behind it instead of running
+   * directly, or merged into older work of its entity.
    */
-  hasQueuedOrderingGroup(group: string): boolean {
+  hasQueuedOrderingGroup(group: string, afterQueueOrder?: number): boolean {
     for (const registration of this.#registrations.values()) {
-      if (registration.hasQueuedOrderingGroup?.(group)) return true;
+      if (registration.hasQueuedOrderingGroup?.(group, afterQueueOrder)) {
+        return true;
+      }
     }
     return false;
   }

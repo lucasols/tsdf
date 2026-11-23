@@ -681,10 +681,12 @@ export function createOfflineStoreController<
   const hasOrderingGroupOperations = Object.values(operations).some(
     (operation) => operation.orderingGroup !== undefined,
   );
-  // The ordering groups of the queued work, for the `queueEntries` version
-  // they were collected at
-  let queuedOrderingGroups: { version: number; groups: Set<string> } | null =
-    null;
+  // The newest queue order of each ordering group of the queued work, for
+  // the `queueEntries` version they were collected at
+  let queuedOrderingGroups: {
+    version: number;
+    newestQueueOrders: Map<string, number>;
+  } | null = null;
   // Uploads of stored records whose operation this deploy doesn't define
   // (written by a newer deploy), by record. This tab ignores those records
   // but leaves them in storage for a deploy that defines them, so their
@@ -3675,24 +3677,39 @@ export function createOfflineStoreController<
 
   /**
    * Whether work of the ordering group `group` is queued in this store (not
-   * sent or not confirmed yet). The groups are collected once per change of
-   * the queue, from the inputs with the operations of this deploy.
+   * sent or not confirmed yet), ordered after `afterQueueOrder` when given.
+   * The groups are collected once per change of the queue, from the inputs
+   * with the operations of this deploy.
    */
-  function hasQueuedOrderingGroup(group: string): boolean {
+  function hasQueuedOrderingGroup(
+    group: string,
+    afterQueueOrder?: number,
+  ): boolean {
     if (queueEntries.size === 0) return false;
 
     if (queuedOrderingGroups?.version !== queueEntries.version) {
-      const groups = new Set<string>();
+      const newestQueueOrders = new Map<string, number>();
       for (const entry of queueEntries.values()) {
         const entryGroup = operations[entry.operation]?.orderingGroup?.({
           input: entry.input,
         });
-        if (entryGroup !== undefined) groups.add(entryGroup);
+        if (entryGroup === undefined) continue;
+        const queueOrder = getQueueOrder(entry);
+        if (queueOrder > (newestQueueOrders.get(entryGroup) ?? -Infinity)) {
+          newestQueueOrders.set(entryGroup, queueOrder);
+        }
       }
-      queuedOrderingGroups = { version: queueEntries.version, groups };
+      queuedOrderingGroups = {
+        version: queueEntries.version,
+        newestQueueOrders,
+      };
     }
 
-    return queuedOrderingGroups.groups.has(group);
+    const newestQueueOrder = queuedOrderingGroups.newestQueueOrders.get(group);
+    return (
+      newestQueueOrder !== undefined &&
+      (afterQueueOrder === undefined || newestQueueOrder > afterQueueOrder)
+    );
   }
 
   /**
@@ -3912,38 +3929,38 @@ export function createOfflineStoreController<
         existingInput: resolution.input,
         incomingInput: work.input,
       };
-      if (accumulation.canMerge?.(mergeContext) !== false) {
-        let mergedInput: unknown = null;
-        try {
+      let validatedMergedInput: unknown = null;
+      try {
+        if (accumulation.canMerge?.(mergeContext) !== false) {
           const merging = accumulation.mergeInput(mergeContext);
-          mergedInput = isPromise(merging) ? await merging : merging;
-        } catch {
-          // Flagged below instead: the newer change was made and must not
-          // fail because an older one cannot follow it.
+          validatedMergedInput = validateWithSchema(
+            operation.inputSchema,
+            isPromise(merging) ? await merging : merging,
+          );
         }
-        const validatedMergedInput = validateWithSchema(
-          operation.inputSchema,
-          mergedInput,
-        );
-        if (validatedMergedInput !== null) {
-          const dependencyUploadIds = getDependencyUploadIds({
-            operationName: work.operation,
-            input: validatedMergedInput,
-          });
-          return {
-            ...resolution,
-            input: validatedMergedInput,
-            dependencyUploadIds:
-              dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
-            dependencyUploadRefs: getDependencyUploadRefs(
-              current,
-              dependencyUploadIds,
-              resolution.dependencyUploadRefs,
-              work.dependencyUploadRefs,
-            ),
-            updatedAt: Date.now(),
-          };
-        }
+      } catch {
+        // Flagged below instead: the newer change was made (or already saved
+        // by the server) and must not fail because an older one cannot
+        // follow it.
+      }
+      if (validatedMergedInput !== null) {
+        const dependencyUploadIds = getDependencyUploadIds({
+          operationName: work.operation,
+          input: validatedMergedInput,
+        });
+        return {
+          ...resolution,
+          input: validatedMergedInput,
+          dependencyUploadIds:
+            dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
+          dependencyUploadRefs: getDependencyUploadRefs(
+            current,
+            dependencyUploadIds,
+            resolution.dependencyUploadRefs,
+            work.dependencyUploadRefs,
+          ),
+          updatedAt: Date.now(),
+        };
       }
     } else if (
       supersedes &&
@@ -4006,18 +4023,37 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Applies the planned rebases whose resolution was not decided or changed
-   * meanwhile (e.g. retried from another tab), adding them to `applied`.
+   * Applies the planned rebases of the resolutions that still wait for a
+   * decision, adding them to `applied`. A resolution changed meanwhile (e.g.
+   * it followed a concurrent change of its entity first) follows `work` from
+   * its new version.
    */
   async function applyResolutionRebases(
     current: ActiveSessionState,
     rebases: readonly ResolutionRebase[],
+    work: NewerWork,
     applied: ResolutionRebase[] = [],
   ): Promise<ResolutionRebase[]> {
-    for (const rebase of rebases) {
+    for (const plannedRebase of rebases) {
+      let rebase = plannedRebase;
       // Checked with no `await` before the write, which updates the record
       // in memory right away
-      if (resolutions.get(rebase.previous.id) !== rebase.previous) continue;
+      let resolution = resolutions.get(rebase.previous.id);
+      while (
+        resolution &&
+        resolution !== rebase.previous &&
+        !requeuingResolutionIds.has(resolution.id)
+      ) {
+        rebase = {
+          previous: resolution,
+          next: await rebaseResolutionOnNewerWork(current, resolution, work),
+        };
+        resolution = resolutions.get(resolution.id);
+      }
+      // Decided or sent again meanwhile (e.g. retried from another tab)
+      if (resolution !== rebase.previous || rebase.next === resolution) {
+        continue;
+      }
 
       applied.push(rebase);
       if (rebase.next) {
@@ -4256,6 +4292,13 @@ export function createOfflineStoreController<
       parentResolutionId: parentResolution.id,
     });
     refreshDerivedState(args.current);
+    // A newer change merged into it may have replaced the files it sent
+    if (
+      parentResolution.dependencyUploadIds !==
+      args.parentResolution.dependencyUploadIds
+    ) {
+      await deleteOrphanedDependencyUploads(args.current, [args.parentEntry]);
+    }
   }
 
   function isPersistedResolutionBlocked(
@@ -5261,7 +5304,12 @@ export function createOfflineStoreController<
       // called between the candidate and this one but not queued yet (checking
       // the connection, or sent as a direct request that can fall back to the
       // queue) would then be replayed after it, out of call order, so this
-      // mutation keeps its own entry instead.
+      // mutation keeps its own entry instead. So does one whose ordering
+      // group has queued work after the candidate (e.g. a message of the
+      // chat of another entity), which it would be sent before.
+      const orderingGroup = candidateEntry
+        ? operation.orderingGroup?.({ input: validatedInput })
+        : undefined;
       const existingEntry =
         candidateEntry &&
         !hasReservedMutationBetween(
@@ -5269,7 +5317,12 @@ export function createOfflineStoreController<
           getQueueOrder(candidateEntry),
           queueOrder,
           entityRefs,
-        )
+        ) &&
+        (orderingGroup === undefined ||
+          !current.session.hasQueuedOrderingGroup(
+            orderingGroup,
+            getQueueOrder(candidateEntry),
+          ))
           ? candidateEntry
           : undefined;
       const existingWork = heldResolution ?? existingEntry;
@@ -5695,7 +5748,20 @@ export function createOfflineStoreController<
         );
       }
 
-      await applyResolutionRebases(current, resolutionRebases, appliedRebases);
+      if (resolutionRebases.length > 0 && plannedMutation.nextEntry) {
+        await applyResolutionRebases(
+          current,
+          resolutionRebases,
+          {
+            operation: plannedMutation.operationName,
+            input: plannedMutation.validatedInput,
+            entityRefs: plannedMutation.nextEntry.entityRefs,
+            dependencyUploadRefs:
+              plannedMutation.nextEntry.dependencyUploadRefs,
+          },
+          appliedRebases,
+        );
+      }
 
       // Removed after the merged work is queued, for the other tabs (see
       // `persistManualResolutionChain`).
@@ -6584,18 +6650,20 @@ export function createOfflineStoreController<
     prepared: PreparedQueuedMutation,
     calledAt: number,
   ): Promise<void> {
+    const work: NewerWork = {
+      operation: prepared.operationName,
+      input: prepared.validatedInput,
+      entityRefs: getPreparedEntityRefs(prepared),
+      dependencyUploadRefs: prepared.dependencyUploadRefs,
+    };
     const rebases = await applyResolutionRebases(
       current,
       await planResolutionRebases(
         current,
-        {
-          operation: prepared.operationName,
-          input: prepared.validatedInput,
-          entityRefs: getPreparedEntityRefs(prepared),
-          dependencyUploadRefs: prepared.dependencyUploadRefs,
-        },
+        work,
         (resolution) => resolution.enqueuedAt <= calledAt,
       ),
+      work,
     );
     if (rebases.length === 0) return;
 

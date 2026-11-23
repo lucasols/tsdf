@@ -818,7 +818,8 @@ type OfflineConflictResolutionRecordBase<
    * neither merged into this one (`accumulation`) nor replaced it
    * (`supersedes`). Sending this change again (`retry`, or a `requeue` of its
    * input) sends it after that newer change, which it may overwrite: a UI can
-   * warn before offering it. Written by TSDF (see `docs/offline.md`).
+   * warn before offering it. A `retry` that fails again waits without it.
+   * Written by TSDF (see `docs/offline.md`).
    */
   hasNewerChanges?: boolean;
 };
@@ -899,7 +900,8 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
    * neither merged into this one (`accumulation`) nor replaced it
    * (`supersedes`). Sending this change again (`retry`, or a `requeue` of its
    * input) sends it after that newer change, which it may overwrite: a UI can
-   * warn before offering it. Written by TSDF (see `docs/offline.md`).
+   * warn before offering it. A `retry` that fails again waits without it.
+   * Written by TSDF (see `docs/offline.md`).
    */
   hasNewerChanges?: boolean;
 };
@@ -1906,7 +1908,9 @@ export type OfflineOperationDefinition<
    * The group only orders the mutations: it adds no dependency between them.
    * Discarding or cancelling one does not drop the others, and one that waits
    * for a manual resolution leaves the queue, so the rest of its group is
-   * sent without it. Only the stores attached in this tab are checked.
+   * sent without it. Only the stores attached in this tab are checked, and
+   * only their queued work: a mutation of the group still running directly
+   * does not hold the next ones.
    */
   orderingGroup?: (
     ctx: OperationEntityRefsContext<TInput>,

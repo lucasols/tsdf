@@ -319,7 +319,7 @@ Optional replay behavior:
 - `conflictHandling` - Detects conflicts and creates manual resolution records.
 - `accumulation` - Merges newer queued inputs into an existing queued mutation. See [Accumulating queued mutations](#accumulating-queued-mutations).
 - `supersedes` - Prunes older queued work for the same entity.
-- `orderingGroup({ input })` - Sends the mutations of a group in the order they were made, without tying them together otherwise. See [Ordering groups](#ordering-groups).
+- `orderingGroup({ input })` - Queues a mutation behind the queued work of its group, so that the group is replayed in the order its mutations were made, without tying them together otherwise. See [Ordering groups](#ordering-groups).
 
 Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up and sends or resolves them. Apps are expected to reload tabs running an old deploy: TSDF doesn't coordinate the order of offline work between deploys, so an old tab can send its own edits around the work it keeps. Records of an operation removed from the app for good also stay in storage until the session's storage is cleared (`clearSessionStorage`), so keep an operation defined until its queued work is likely gone.
 
@@ -369,7 +369,9 @@ sendPhotoMessage: {
 },
 ```
 
-A mutation whose group still has queued work (not sent yet, being sent, or waiting to be confirmed) is queued behind it, also while online, and replayed after it: the queue is replayed in the order the mutations were made. Mutations of other groups, or without one, still run directly. The key is shared by all the stores of the session, so work of different stores can share a group (only the stores attached in the tab are checked, and the work other tabs queued in them is). It is computed from the input with the operations of the running deploy, and not stored.
+A mutation whose group still has queued work (not sent yet, being sent, or waiting to be confirmed) is queued behind it, also while online, and replayed after it: the queue is replayed in the order the mutations were made. For the same reason, with `accumulation` a mutation is not merged into older queued work of its entity when work of its group was queued after that work. Mutations of other groups, or without one, still run directly. The key is shared by all the stores of the session, so work of different stores can share a group (only the stores attached in the tab are checked, and the work other tabs queued in them is). It is computed from the input with the operations of the running deploy, and not stored.
+
+Only queued work holds the group: a mutation of the group still running as a direct request while online (e.g. a photo message whose upload is in progress) does not, so a message sent meanwhile also runs directly and can reach the server first. If the direct request then fails and is queued, it is sent after the ones that already succeeded.
 
 The group adds no other coupling: discarding, cancelling or superseding one mutation of the group does not drop the others, and a mutation of the group that ends in a manual resolution leaves the queue, so the rest of the group is sent without waiting for the decision, like any other queued work. Waiting would leave the whole chat unsent behind one message the user may never retry; the failed message is sent at its retry, after the ones sent meanwhile.
 
@@ -560,7 +562,7 @@ A change that waits for a decision (`retry-exhausted` or `conflict`) does not ho
 
 - `accumulation`, same operation and entity refs: the later input is merged into the waiting change's input with `mergeInput` (`existingInput` is the waiting change). The later mutation is still sent on its own, and `retry` (or a `requeue` built from `resolution.input`) sends the merged input, so the fields the later mutation changed keep their newer values and the fields only the waiting change touched are still sent. With an operation whose `mergeInput` keeps the incoming input, this resends the newer content.
 - `supersedes` matching the waiting change's operation and entity: the waiting change is dropped, as an older queued mutation would be. The later mutation replaces it, so nothing is left to decide.
-- Otherwise (another operation of the entity, an operation with neither option, a merge refused by `canMerge`, or a `mergeInput` that fails): the waiting change is flagged `hasNewerChanges: true`. `retry` still sends it as it is, after the later mutation, which it may overwrite: a UI can warn before offering it, or offer only `discard`.
+- Otherwise (another operation of the entity, an operation with neither option, a merge refused by `canMerge`, or a `mergeInput` that fails): the waiting change is flagged `hasNewerChanges: true`. `retry` still sends it as it is, after the later mutation, which it may overwrite: a UI can warn before offering it, or offer only `discard`. The user chose to send it anyway, so if the retry fails again the change waits without the flag, unless more mutations of its entity are made after it.
 
 ```tsx
 <SyncProblemRow

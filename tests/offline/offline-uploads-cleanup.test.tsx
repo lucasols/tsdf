@@ -1753,3 +1753,110 @@ test('a staged upload is deleted from storage once an automatic replay retry sav
   expect(getStagedUploads(storeManager)).toMatchInlineSnapshot(`[]`);
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
+
+test('a failed edit that follows a newer edit replacing its file releases the file it no longer sends', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  network.setOffline();
+  // A failed replay is retried 5s later before asking the user
+  const storeManager = createUploadCleanupStoreManager(
+    'offline-upload-rebase-session',
+    { maxFailures: 2, intervalMs: 5_000 },
+  );
+  /** The server rejects the edits that send this file */
+  const rejectedFile = '"server:cover-1"';
+  const requests: string[] = [];
+  const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
+    1,
+    {
+      id: 'offline-upload-rebase-doc',
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            // Sets the cover photo of the document: the newest one wins
+            updateWithAttachment: {
+              inputSchema: rc_object({
+                attachmentId: rc_string,
+                value: rc_number,
+              }),
+              kind: 'update',
+              dependsOnUploads: ({ input }) => [input.attachmentId],
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute: (ctx) => {
+                const file = JSON.stringify(
+                  ctx.uploads.resolvedRefsById[ctx.input.attachmentId],
+                );
+                if (file === rejectedFile) {
+                  requests.push(`set cover ${file} -> rejected`);
+                  return Promise.reject(new Error('server is busy'));
+                }
+                requests.push(`set cover ${file} -> saved`);
+                return Promise.resolve({ value: ctx.input.value });
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+  await flushAllTimers();
+
+  async function setCover(attachmentId: string, value: number) {
+    await stageUpload(storeManager, attachmentId);
+    await resolveWithin(
+      env.apiStore.performMutation({
+        mutation: () => Promise.resolve({ value }),
+        offline: {
+          operation: 'updateWithAttachment',
+          input: { attachmentId, value },
+        },
+      }),
+    );
+  }
+
+  // --- Offline, the user sets a cover photo; its first replay fails ---
+  await setCover('cover-1', 1);
+  await reconnect();
+  expect(requests).toMatchInlineSnapshot(
+    `['set cover "server:cover-1" -> rejected']`,
+  );
+
+  // --- Offline again before the retry, the user picks another photo ---
+  act(() => network.goOffline());
+  await setCover('cover-2', 2);
+
+  // --- Back online the first edit fails for good, the newer one is saved ---
+  await reconnect();
+  await advanceTime(5_000);
+  expect(requests).toMatchInlineSnapshot(`
+    - 'set cover "server:cover-1" -> rejected'
+    - 'set cover "server:cover-1" -> rejected'
+    - 'set cover "server:cover-1" -> rejected'
+    - 'set cover "server:cover-2" -> saved'
+  `);
+
+  // The failed edit follows the newer photo: retrying it sends `cover-2`
+  const resolutions = env.apiStore
+    .getOfflineResolutions()
+    .map(summarizeResolution);
+  expect(resolutions).toMatchInlineSnapshot(`
+    - error: 'server is busy'
+      input: 'attachmentId: "cover-2", value: 2'
+      kind: 'retry-exhausted'
+      on: 'document:document'
+      op: 'updateWithAttachment'
+  `);
+
+  // Nothing sends `cover-1` anymore, so its file is deleted, while `cover-2`
+  // is kept for a retry
+  expect(getStagedUploads(storeManager)).toMatchInlineSnapshot(
+    `- { id: 'cover-2', source: 'manual', state: 'uploaded' }`,
+  );
+  expect(getOpfsDirTree(mockBrowserOpfs)).not.toContain('cover-1');
+});
