@@ -1124,14 +1124,119 @@ describe('list-query', () => {
     );
 
     // The mutation remains an online success, and the callback receives the
-    // undefined payload plus the item id that was mutated.
+    // undefined payload plus the item id that was mutated, and the same
+    // context as `mutation`.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
         ok: '✅'
         value: { kind: 'online' }
       `);
     expect(onSuccess).toHaveBeenCalledTimes(1);
-    expect(onSuccess).toHaveBeenCalledWith(undefined, 'users||1');
+    expect(onSuccess.mock.calls).toMatchInlineSnapshot(`
+      - - undefined
+        - 'users||1'
+        - offlineInput: { itemId: 'users||1', name: 'Grace' }
+          uploads:
+            refusedUploadErrorsById: {}
+            resolvedRefsById: {}
+    `);
+  });
+
+  test('an online edit targeting the whole table gets the `offline` input it was called with in `offlineInput`', async () => {
+    // The `offlineInput` the edit's `mutation` and `onSuccess` received
+    const mutationInputs: unknown[] = [];
+    const onSuccessInputs: unknown[] = [];
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        PatchUserOperations
+      >
+    > = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      PatchUserOperations
+    >(
+      { users: [{ id: 1, name: 'Ada' }] },
+      {
+        getSessionKey: () => 'hybrid-list-table-target-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'hybrid-list-table-target-session',
+          offlineSession: { network: network.config },
+        }),
+        testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                kind: 'update',
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name })),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    // The app targets the whole users table with a filter, so the edit
+    // blocks the table's fetches while it is sent, and sends the request for
+    // the row in `offlineInput`
+    const result = await resolveAfterAllTimers(
+      env.apiStore.performMutation(() => true, {
+        mutation: async (_usersTable, { offlineInput }) => {
+          mutationInputs.push(offlineInput);
+          await env.serverTable.delayedUpdateItem(offlineInput.itemId, {
+            name: offlineInput.name,
+          });
+          return { name: offlineInput.name };
+        },
+        onSuccess: (_data, _usersTable, { offlineInput }) => {
+          onSuccessInputs.push(offlineInput);
+        },
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Grace' },
+        },
+      }),
+    );
+
+    // With no item created offline, `offlineInput` is the input of the call
+    expect({ ok: result.ok, value: result.ok ? result.value : null })
+      .toMatchInlineSnapshot(`
+        ok: '✅'
+
+        value:
+          data: { name: 'Grace' }
+          kind: 'online'
+      `);
+    expect(mutationInputs).toMatchInlineSnapshot(
+      `- { itemId: 'users||1', name: 'Grace' }`,
+    );
+    expect(onSuccessInputs).toMatchInlineSnapshot(
+      `- { itemId: 'users||1', name: 'Grace' }`,
+    );
+    expect(env.serverTable.get('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Grace'
+    `);
   });
 
   test('fallback to queueing when the direct failure is classified as offline', async () => {

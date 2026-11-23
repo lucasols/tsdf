@@ -56,7 +56,8 @@ import {
   type GlobalOfflineEntity,
   type ItemOfflineState,
   type OfflineMutationInput,
-  type OfflineOperationsUploadRef,
+  type OfflineOperationDirectMutationContext,
+  type OfflineOperationName,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecord,
   type ParsedOfflineResolutionConflictResultForStore,
@@ -559,9 +560,11 @@ type ListQueryMutationArgsBase<
    * Performs the server mutation for the affected item payloads. With an
    * `offline` descriptor, an item created offline whose creation was saved
    * since the call (e.g. during the `debounce` window) is passed with its
-   * final payload, so build the request from this argument. Temp payloads of
-   * other items the request references are not rewritten: resolve them with
-   * `resolveTempItemPayload` of their store.
+   * final payload, and `ctx.offlineInput` is the `offline` input with the
+   * temp payloads the operation declares replaced the same way, so build the
+   * request from these arguments. Other temp payloads the request references
+   * are not rewritten: resolve them with `resolveTempItemPayload` of their
+   * store.
    */
   mutation: (
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
@@ -576,12 +579,14 @@ type ListQueryMutationArgsBase<
    */
   revalidateOnSuccess?: ListQueryRevalidateOnSuccessOption<QueryPayload>;
   /**
-   * Called after a successful online mutation, with the same final payload as
-   * `mutation` for an item whose creation was saved since the call.
+   * Called after a successful online mutation, with the same final payload
+   * and context as `mutation` (e.g. `ctx.offlineInput`) for an item whose
+   * creation was saved since the call.
    */
   onSuccess?: (
     response: UnwrapTSDFResult<Awaited<T>>,
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
+    ...args: TMutationExtraArgs
   ) => void;
   /** Called after a failed or skipped mutation. */
   onError?: (error: StoreMutationError | MutationSkipped) => void;
@@ -616,16 +621,14 @@ type ListQueryOfflineMutationArgs<
     QueryPayload,
     ItemPayload
   >,
+  TName extends OfflineOperationName<TOfflineOperations> =
+    OfflineOperationName<TOfflineOperations>,
 > = ListQueryMutationArgsBase<
   T,
   ItemState,
   QueryPayload,
   ItemPayload,
-  [
-    ctx: OfflineDirectMutationContext<
-      OfflineOperationsUploadRef<TOfflineOperations>
-    >,
-  ]
+  [ctx: OfflineOperationDirectMutationContext<TOfflineOperations, TName>]
 > & {
   /**
    * Queues this mutation through the store's registered offline operation when
@@ -635,10 +638,12 @@ type ListQueryOfflineMutationArgs<
    * `dependsOnUploads` are uploaded first and passed to `mutation` as
    * `ctx.uploads.resolvedRefsById`. They are deleted once `mutation`
    * succeeds, and kept for the replay when the mutation is queued instead.
+   * `mutation` and `onSuccess` also get this input as `ctx.offlineInput`, as
+   * `execute` would get it on replay.
    */
   offline: TOfflineOperations extends null
     ? never
-    : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>;
   /** Files to attach if this mutation is queued for offline replay. */
   upload?: OfflineMutationUploadsInput;
 };
@@ -657,29 +662,30 @@ type ListQueryOptionalOfflineMutationArgs<
     QueryPayload,
     ItemPayload
   >,
+  TName extends OfflineOperationName<TOfflineOperations> =
+    OfflineOperationName<TOfflineOperations>,
 > = ListQueryMutationArgsBase<
   T,
   ItemState,
   QueryPayload,
   ItemPayload,
-  [
-    ctx?: OfflineDirectMutationContext<
-      OfflineOperationsUploadRef<TOfflineOperations>
-    >,
-  ]
+  [ctx?: OfflineOperationDirectMutationContext<TOfflineOperations, TName>]
 > & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
    * `undefined` runs it as a plain online mutation.
    *
-   * When it is set and the mutation runs directly, `mutation` gets the uploads
-   * context as its second argument, as with a required `offline` descriptor.
-   * The second argument is `undefined` when `offline` is `undefined`.
+   * When it is set and the mutation runs directly, `mutation` gets the
+   * offline context as its second argument (`onSuccess` as its third), as
+   * with a required `offline` descriptor. It is `undefined` when `offline` is
+   * `undefined`.
    */
   offline?: TOfflineOperations extends null
     ? never
-    : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+    :
+        | OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>
+        | undefined;
   /**
    * Files to attach if this mutation is queued for offline replay. Ignored
    * when `offline` is `undefined`.
@@ -719,14 +725,19 @@ type ListQueryPerformMutationApi<
    * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
    * the server payload.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args: ListQueryOfflineMutationArgs<
       T,
       ItemState,
       QueryPayload,
       ItemPayload,
-      TOfflineOperations
+      TOfflineOperations,
+      TName
     >,
   ): Promise<
     ResultType<
@@ -758,7 +769,11 @@ type ListQueryPerformMutationApi<
    * Use this for create mutations that do not have a pre-generated item payload
    * yet. When the mutation is queued, the result is `{ kind: 'queued' }`.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: null,
     args: Omit<
       ListQueryOfflineMutationArgs<
@@ -766,7 +781,8 @@ type ListQueryPerformMutationApi<
         ItemState,
         QueryPayload,
         ItemPayload,
-        TOfflineOperations
+        TOfflineOperations,
+        TName
       >,
       'optimisticUpdate'
     >,
@@ -786,14 +802,19 @@ type ListQueryPerformMutationApi<
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
    * `{ kind: 'queued' }`) otherwise.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args: ListQueryOptionalOfflineMutationArgs<
       T,
       ItemState,
       QueryPayload,
       ItemPayload,
-      TOfflineOperations
+      TOfflineOperations,
+      TName
     >,
   ): Promise<
     ResultType<
@@ -811,7 +832,11 @@ type ListQueryPerformMutationApi<
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
    * `{ kind: 'queued' }`) otherwise.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: ListQueryMutationPayload<ItemState, ItemPayload>,
     args: Omit<
       ListQueryOptionalOfflineMutationArgs<
@@ -819,7 +844,8 @@ type ListQueryPerformMutationApi<
         ItemState,
         QueryPayload,
         ItemPayload,
-        TOfflineOperations
+        TOfflineOperations,
+        TName
       >,
       'optimisticUpdate'
     >,
@@ -1857,7 +1883,7 @@ export function createListQueryStore<
             OfflineStoreController<Exclude<TOfflineOperations, null>>,
             unknown
           >(offlineController).runUnqueuedMutation(offline, directMutation)
-        : directMutation(createDirectMutationContext({})),
+        : directMutation(createDirectMutationContext(offline.input)),
     queueMutation: <
       TName extends keyof Exclude<TOfflineOperations, null> & string,
     >(args: {

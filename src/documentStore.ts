@@ -58,7 +58,8 @@ import {
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
   type OfflineMutationInput,
-  type OfflineOperationsUploadRef,
+  type OfflineOperationDirectMutationContext,
+  type OfflineOperationName,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecord,
   type ParsedOfflineResolutionConflictResultForStore,
@@ -371,11 +372,13 @@ type DocumentOfflineMutationArgs<
   State extends ValidStoreState,
   T,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
+  TName extends OfflineOperationName<TOfflineOperations> =
+    OfflineOperationName<TOfflineOperations>,
 > = DocumentMutationArgsBase<
   State,
   T,
   DocumentMutationContext<State> &
-    OfflineDirectMutationContext<OfflineOperationsUploadRef<TOfflineOperations>>
+    OfflineOperationDirectMutationContext<TOfflineOperations, TName>
 > & {
   /**
    * Queues this mutation through the store's registered offline operation when
@@ -384,11 +387,12 @@ type DocumentOfflineMutationArgs<
    * When it runs directly, the uploads the operation declares with
    * `dependsOnUploads` are uploaded first and passed to `mutation` as
    * `uploads.resolvedRefsById`. They are deleted once `mutation` succeeds, and
-   * kept for the replay when the mutation is queued instead.
+   * kept for the replay when the mutation is queued instead. `mutation` also
+   * gets this input as `offlineInput`, as `execute` would get it on replay.
    */
   offline: TOfflineOperations extends null
     ? never
-    : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>;
   /** Files to attach if this mutation is queued for offline replay. */
   upload?: OfflineMutationUploadsInput;
 };
@@ -401,15 +405,13 @@ type DocumentOptionalOfflineMutationArgs<
   State extends ValidStoreState,
   T,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
+  TName extends OfflineOperationName<TOfflineOperations> =
+    OfflineOperationName<TOfflineOperations>,
 > = DocumentMutationArgsBase<
   State,
   T,
   DocumentMutationContext<State> &
-    Partial<
-      OfflineDirectMutationContext<
-        OfflineOperationsUploadRef<TOfflineOperations>
-      >
-    >
+    Partial<OfflineOperationDirectMutationContext<TOfflineOperations, TName>>
 > & {
   /**
    * Queues this mutation through the store's registered offline operation when
@@ -417,12 +419,14 @@ type DocumentOptionalOfflineMutationArgs<
    * `undefined` runs it as a plain online mutation.
    *
    * When it is set and the mutation runs directly, `mutation` gets `uploads`
-   * as with a required `offline` descriptor. `uploads` is `undefined` when
-   * `offline` is `undefined`.
+   * and `offlineInput` as with a required `offline` descriptor. They are
+   * `undefined` when `offline` is `undefined`.
    */
   offline?: TOfflineOperations extends null
     ? never
-    : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+    :
+        | OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>
+        | undefined;
   /**
    * Files to attach if this mutation is queued for offline replay. Ignored
    * when `offline` is `undefined`.
@@ -454,8 +458,12 @@ type DocumentPerformMutation<
    * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
    * the server payload.
    */
-  <T>(
-    args: DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
+    args: DocumentOfflineMutationArgs<State, T, TOfflineOperations, TName>,
   ): Promise<
     ResultType<
       OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
@@ -471,8 +479,17 @@ type DocumentPerformMutation<
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
    * `{ kind: 'queued' }`) otherwise.
    */
-  <T>(
-    args: DocumentOptionalOfflineMutationArgs<State, T, TOfflineOperations>,
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
+    args: DocumentOptionalOfflineMutationArgs<
+      State,
+      T,
+      TOfflineOperations,
+      TName
+    >,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>
@@ -1584,9 +1601,10 @@ export function createDocumentStore<
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
 
-    // WORKAROUND: The uploads are resolved at runtime with the untyped ref
-    // shape, and the offline variant of `mutation` reads them with the upload
-    // ref type of the store operations, as `execute` does on replay.
+    // WORKAROUND: The uploads and the offline input are resolved at runtime
+    // with untyped shapes, and the offline variant of `mutation` reads them
+    // with the upload ref type and the operation input type of the store
+    // operations, as `execute` does on replay.
     const mutationFn = __LEGIT_CAST__<
       (
         ctx: DocumentMutationContext<State> &
@@ -1604,9 +1622,9 @@ export function createDocumentStore<
       );
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
-      // An offline-enabled mutation always gets its uploads context
+      // An offline-enabled mutation always gets its offline context
       data: await directMutation(
-        offline ? createDirectMutationContext({}) : undefined,
+        offline ? createDirectMutationContext(offline.input) : undefined,
       ),
     });
 
