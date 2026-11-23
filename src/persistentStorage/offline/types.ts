@@ -1870,7 +1870,11 @@ export type OfflineOperationDefinition<
   /**
    * Optional key of the group whose mutations reach the server in the order
    * they were made, e.g. the messages of a chat whose server sets their
-   * creation time on insert: `({ input }) => input.chatId`.
+   * creation time on insert: `` ({ input }) => `chat:${input.chatId}` ``.
+   * The key is shared by all the stores of the session, so prefix it with what
+   * it groups, and build it from an id that doesn't change when its entity is
+   * saved (an app-generated or server id, not another store's temp payload):
+   * queued inputs keep the temp id, so later mutations would get another key.
    *
    * A mutation whose group has queued work that was not sent or confirmed yet
    * (in any store of the session that uses the same key) is queued behind
