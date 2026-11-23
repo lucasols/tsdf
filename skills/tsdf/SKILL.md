@@ -152,7 +152,7 @@ if (result.ok) {
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).
 - `blockWindowClose` on `createStoreManager(...)` prevents accidental window close mid-mutation, and while queued offline mutations exist only in memory; it defaults to `null`.
 - Lifecycle events: `store.storeEvents.on('mutationStart' | 'mutationEnd', ...)`.
-- Items created offline: `store.storeEvents.on('tempEntityReconciled', ({ payload: { tempId, finalPayload } }) => ...)` fires in every tab when the item is saved; `store.resolveTempItemPayload(payload)` returns the final payload later (Collection, List Query). A `performMutation` for a temp payload still debouncing when the item is saved is queued with the final payload, and its online `mutation` receives the final payload: build the request from that argument.
+- Items created offline: `store.storeEvents.on('tempEntityReconciled', ({ payload: { tempId, finalPayload } }) => ...)` fires in every tab when the item is saved; `store.resolveTempItemPayload(payload)` returns the final payload later (Collection, List Query). A `performMutation` for a temp payload still debouncing when the item is saved is queued with the final payload, and its online `mutation` receives the final payload and the rewritten `offline` input as `ctx.offlineInput` (also the third argument of `onSuccess`): build the request from those, not from values captured in the closure.
 
 Check more on docs: `docs/mutations.md`.
 

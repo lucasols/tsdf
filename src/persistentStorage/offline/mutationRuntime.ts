@@ -77,6 +77,11 @@ export type PreparedOfflineMutation = {
    */
   resolveDirectUploads: (() => Promise<DirectMutationUploadsResolution>) | null;
   /**
+   * The validated `offline` input for the direct request, with the temp
+   * payloads of creations saved since the call replaced by their final ones
+   */
+  getDirectInput: () => unknown;
+  /**
    * Marks the dependency uploads `failed` when a failed upload was not queued,
    * including the ones still being sent that fail too
    */
@@ -116,10 +121,14 @@ export type OfflineAwareMutationController<
 };
 
 export function createDirectMutationContext(
-  resolvedRefsById: Record<string, ValidPayload>,
+  offlineInput: unknown,
+  resolvedRefsById: Record<string, ValidPayload> = {},
   refusedUploadErrorsById: Record<string, unknown> = {},
 ): OfflineDirectMutationContext {
-  return { uploads: { resolvedRefsById, refusedUploadErrorsById } };
+  return {
+    uploads: { resolvedRefsById, refusedUploadErrorsById },
+    offlineInput,
+  };
 }
 
 export async function runHybridOfflineMutation<
@@ -171,7 +180,13 @@ export async function runHybridOfflineMutation<
     }
 
     const data = await directMutation(
-      createDirectMutationContext(resolvedRefsById, refusedUploadErrorsById),
+      createDirectMutationContext(
+        // Rewritten right before the request, as the item payloads `mutation`
+        // receives are
+        prepared.getDirectInput(),
+        resolvedRefsById,
+        refusedUploadErrorsById,
+      ),
     );
     await prepared.handleDirectSuccess();
     return { kind: 'online', data };

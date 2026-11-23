@@ -6166,6 +6166,12 @@ export function createOfflineStoreController<
               return resolution;
             }
           : null,
+      getDirectInput: () => {
+        // A creation the mutation references may have been saved while its
+        // uploads were sent
+        resolveSavedTempEntityRefs(prepared);
+        return prepared.validatedInput;
+      },
       // Like replay: the uploads that did not fail are left untouched.
       markUploadsFailed: () =>
         current.session.markUploadsFailed(dependencyUploadIds),
@@ -6229,7 +6235,14 @@ export function createOfflineStoreController<
         }).dependencyUploadIds
       : [];
     if (!current || dependencyUploadIds.length === 0) {
-      return directMutation(createDirectMutationContext({}));
+      return directMutation(
+        createDirectMutationContext(
+          resolveSavedTempEntityRefsOfUnqueuedInput(
+            operationName,
+            offline.input,
+          ),
+        ),
+      );
     }
 
     // Nothing is queued, so a failed upload is `failed` right away, as with
@@ -6252,10 +6265,31 @@ export function createOfflineStoreController<
       throw new OfflineSessionUnavailableError();
     }
     const result = await directMutation(
-      createDirectMutationContext(resolvedRefsById),
+      createDirectMutationContext(
+        resolveSavedTempEntityRefsOfUnqueuedInput(operationName, offline.input),
+        resolvedRefsById,
+      ),
     );
     void deleteOrphanedDependencyUploads(current, [{ dependencyUploadIds }]);
     return result;
+  }
+
+  /**
+   * `resolveSavedTempEntityRefs` for the input of a mutation that is not
+   * queued, as the item payloads its `mutation` receives are resolved
+   */
+  function resolveSavedTempEntityRefsOfUnqueuedInput(
+    operationName: string,
+    input: unknown,
+  ): unknown {
+    if (resolvedEntityRefBySerializedRef.size === 0) return input;
+    // The remaps belong to the session they were recorded in: this drops
+    // them when the session changed since
+    ensureActiveSession();
+    return (
+      rewriteSavedTempEntityRefs(operationName, input, undefined)?.input ??
+      input
+    );
   }
 
   function getOfflineEntities(): GlobalOfflineEntity[] {

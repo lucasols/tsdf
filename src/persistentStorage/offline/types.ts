@@ -19,6 +19,7 @@ import type {
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type {
   OfflineAttachedUploadIds,
+  OfflineDirectMutationContext,
   OfflineOperationUploadsContext,
   OfflineSessionUploadsConfig,
   OfflineUpload,
@@ -1257,6 +1258,31 @@ export type OfflineOperationsUploadRef<TOperations> = [
     ? ValidPayload
     : TRef
   : ValidPayload;
+
+/**
+ * Names of the operations of a store's offline config, `string` for a store
+ * without operations.
+ */
+export type OfflineOperationName<TOperations> = keyof Exclude<
+  TOperations,
+  null
+> &
+  string;
+
+/**
+ * Context passed to the direct `mutation` of a `performMutation(...)` call
+ * whose `offline` descriptor is for the `TName` operation.
+ */
+export type OfflineOperationDirectMutationContext<
+  TOperations extends Record<
+    string,
+    { inputSchema: PersistentStorageSchema<__LEGIT_ANY__> }
+  > | null,
+  TName extends OfflineOperationName<TOperations>,
+> = OfflineDirectMutationContext<
+  OfflineOperationsUploadRef<TOperations>,
+  OfflineMutationInput<Exclude<TOperations, null>, TName>['input']
+>;
 
 /**
  * Extracts operation result type from a registered operation map.

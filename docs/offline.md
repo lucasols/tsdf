@@ -396,7 +396,7 @@ tempEntity: {
 
 When a queued creation is saved, TSDF replaces the temp payload with the final one: the item state, the query memberships (the saved item takes the place of the temp row) and the offline state of the item. This happens in every open tab of the session, whichever tab sent the creation.
 
-The mutations queued for the entity are sent with the final payload: TSDF replaces the temp payload wherever it appears in their input. This also applies to a `performMutation(...)` call made with the temp payload that is not queued yet when the creation is saved, e.g. a cell edit waiting for its `debounce` window, or one checking the connection before it runs. Its `offline` input is rewritten the same way before it is queued, for the temp payloads its operation declares (`getEntityRefs` and `dependsOn`), and an online run calls `mutation` and `onSuccess` with the final item payloads (`revalidateOnSuccess` then revalidates the saved item, not the temp one; without it or an `onSuccess` that applies the change, the saved item keeps the data it was saved with until it is fetched again). Build the direct request from the payload `mutation` receives rather than from a temp payload captured by the closure:
+The mutations queued for the entity are sent with the final payload: TSDF replaces the temp payload wherever it appears in their input. This also applies to a `performMutation(...)` call made with the temp payload that is not queued yet when the creation is saved, e.g. a cell edit waiting for its `debounce` window, or one checking the connection before it runs. Its `offline` input is rewritten the same way, for the temp payloads its operation declares (`getEntityRefs` and `dependsOn`), whether it is queued or runs online. An online run calls `mutation` and `onSuccess` with the final item payloads (`revalidateOnSuccess` then revalidates the saved item, not the temp one; without it or an `onSuccess` that applies the change, the saved item keeps the data it was saved with until it is fetched again), and with the rewritten input as `offlineInput` in their context, the input `execute` would get if the mutation was queued. Build the direct request from these arguments rather than from a temp payload captured by the closure:
 
 ```ts
 await userStore.performMutation(tempUserPayload, {
@@ -407,7 +407,21 @@ await userStore.performMutation(tempUserPayload, {
 });
 ```
 
-Only the item payloads are passed to `mutation`. A temp payload of another item that the request references (a parent, or a relation set by the edit) is not rewritten for the online run: resolve it inside `mutation` with that item's store, e.g. `api.setManager({ id: userPayload, managerId: userStore.resolveTempItemPayload(tempManagerPayload) })`.
+`offlineInput` also covers a call whose target has no item payload to rewrite, such as a list query filter targeting a whole table, and the other temp payloads of the store the operation declares with `dependsOn`:
+
+```ts
+await recordStore.performMutation((record) => record.tableId === tableId, {
+  // `offlineInput.recordId` is the saved record's id if its creation was saved meanwhile
+  mutation: (_target, { offlineInput }) => api.updateRecord(offlineInput),
+  onSuccess: (_data, _target, { offlineInput }) => applyUpdate(offlineInput),
+  offline: {
+    operation: 'updateRecord',
+    input: { recordId: tempRecordId, values },
+  },
+});
+```
+
+A temp payload the operation does not declare, or one of another store (a relation set by the edit), is not rewritten for the online run: resolve it inside `mutation` with that item's store, e.g. `api.setManager({ id: userPayload, managerId: userStore.resolveTempItemPayload(tempManagerPayload) })`.
 
 Code that keeps a temp payload outside the store (a route open on the record, a selection, an embedded frame that created it) can follow the record in two ways:
 
@@ -798,7 +812,7 @@ Right after a reload the session lists its stored uploads in the background, so 
 
 ### Direct runs
 
-A mutation with an `offline` descriptor that runs online right away gets the same uploads: TSDF uploads the ids the operation's `dependsOnUploads` returns for its input before calling `mutation`, and passes the refs in `uploads`, like `execute` gets them on replay. Document stores add it to the `mutation` context, collection and list query stores pass it as the second argument:
+A mutation with an `offline` descriptor that runs online right away gets the same uploads: TSDF uploads the ids the operation's `dependsOnUploads` returns for its input before calling `mutation`, and passes the refs in `uploads`, like `execute` gets them on replay. It also gets the `offline` input as `offlineInput`, with the temp payloads of creations saved since the call replaced (see [Following a temp entity to its final payload](#following-a-temp-entity-to-its-final-payload)). Document stores add them to the `mutation` context, collection and list query stores pass them in a context object as the second argument of `mutation`, and the third of `onSuccess`:
 
 ```ts
 // Shared by the direct run and the replay
@@ -830,7 +844,7 @@ await userStore.performMutation(
 - When the direct request fails and the mutation is queued instead, the queued mutation declares the uploads, so they are kept. They are already uploaded, so the replay sends the same refs without uploading again.
 - When the request fails with its own error, the uploads are kept as they are, for the next attempt.
 - With the [session gate](#session-gate) closed the uploads are resolved and released the same way. Nothing is queued then.
-- With `offline: descriptor | undefined`, `uploads` (the second argument for collection and list query stores) is optional in the `mutation` type: it is set when the descriptor is, and `undefined` when the call runs as a plain online mutation.
+- With `offline: descriptor | undefined`, `uploads` and `offlineInput` (the context argument for collection and list query stores) are optional in the `mutation` type: they are set when the descriptor is, and `undefined` when the call runs as a plain online mutation.
 - A failed upload is handled as described in [Dependency uploads of a direct run](#dependency-uploads-of-a-direct-run). `mutation` is not called.
 - When `getSessionKey()` changes while the uploads are sent (switching to another org, logout), `mutation` is not called and no upload of the previous session is started. The mutation fails with an error whose `id` is `'offline-session-unavailable'` (code 460) and goes through the normal error handling. It is not queued, because it would then be replayed in a session the user left. The uploads stay staged in the previous session: one that finished keeps its ref, so running the mutation again in that session does not upload it again.
 - Don't resolve or delete these uploads yourself with `resolveOfflineUpload(s)` / `deleteOfflineUpload`: an upload deleted before the request is sent is gone when the mutation falls back to the queue, and its replay fails.

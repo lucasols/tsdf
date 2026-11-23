@@ -1331,6 +1331,65 @@ describe('an edit of a row created offline that is not queued yet when the creat
       });
     }
 
+    // The `offlineInput` the renames targeting the table were called with, in
+    // their `mutation` and `onSuccess`
+    const tableRenameInputs: Array<{
+      in: 'mutation' | 'onSuccess';
+      offlineInput: { itemId: string; name: string };
+    }> = [];
+
+    /**
+     * Renames Linus with the temp id the cell was rendered with, targeting
+     * the whole users table with a filter instead of the row, as the app does
+     * so that saving the edit online blocks the table's fetches. The filter
+     * has no item payload to rewrite: the row the edit is for is only in the
+     * `offline` input, which `mutation` receives in `offlineInput`.
+     */
+    function renameLinusInTable(name: string) {
+      act(() => {
+        void env.apiStore
+          .performMutation(() => true, {
+            debounce: {
+              context: 'rename-user',
+              payload: 'temp:Linus',
+              ms: 1500,
+            },
+            optimisticUpdate: () => {
+              env.apiStore.updateItemState('temp:Linus', (item) => ({
+                ...item,
+                name,
+              }));
+            },
+            // Sends the rename for the row in `offlineInput`
+            mutation: async (_usersTable, { offlineInput }) => {
+              tableRenameInputs.push({ in: 'mutation', offlineInput });
+              await new Promise((resolve) => {
+                setTimeout(resolve, 1200);
+              });
+              env.serverTable.updateItem(offlineInput.itemId, {
+                name: offlineInput.name,
+              });
+              return { name: offlineInput.name };
+            },
+            // Applies the saved name to the row in `offlineInput`
+            onSuccess: (_data, _usersTable, { offlineInput }) => {
+              tableRenameInputs.push({ in: 'onSuccess', offlineInput });
+              env.apiStore.updateItemState(offlineInput.itemId, (item) => ({
+                ...item,
+                name: offlineInput.name,
+              }));
+            },
+            offline: {
+              operation: 'patchUserName',
+              input: { itemId: 'temp:Linus', name },
+            },
+          })
+          .then((result) => {
+            renameResults.push(result.ok ? result.value : result.error);
+          });
+      });
+    }
+
     return {
       env,
       hook,
@@ -1339,6 +1398,8 @@ describe('an edit of a row created offline that is not queued yet when the creat
       onSuccessPayloads,
       renameResults,
       renameLinus,
+      renameLinusInTable,
+      tableRenameInputs,
       createLinus,
       connectionCheckLatencies,
       setOfflineEnabled: (enabled: boolean) => {
@@ -1415,6 +1476,103 @@ describe('an edit of a row created offline that is not queued yet when the creat
       5.72s | Ada, Grace, Linus edited | 🔴 >list-fetch-started
       6.52s | Ada, Grace, Linus edited | 🔴 <list-fetch-finished (value: {"count":3})
       "
+    `);
+
+    hook.unmount();
+  });
+
+  test('a rename targeting the whole table whose debounce ends after the creation is saved is sent for the saved user from `offlineInput`', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-table-target-session';
+    const storeName = 'temp-edit-table-target-store';
+    const {
+      env,
+      hook,
+      replayedOperations,
+      renameResults,
+      renameLinusInTable,
+      tableRenameInputs,
+    } = await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The user reconnects and renames Linus right away: the creation is sent
+    // (1.2s) and saved while the rename still waits for its debounce (1.5s)
+    renameLinusInTable('Linus edited');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is left to replay, so the rename is sent directly.
+    // `offlineInput` holds the saved user instead of the temp id the server
+    // does not know, in `mutation` and in `onSuccess`, which applies the name
+    expect(renameResults).toMatchInlineSnapshot(`
+      - data: { name: 'Linus edited' }
+        kind: 'online'
+    `);
+    expect(tableRenameInputs).toMatchInlineSnapshot(`
+      - in: 'mutation'
+        offlineInput: { itemId: 'users||3', name: 'Linus edited' }
+      - in: 'onSuccess'
+        offlineInput: { itemId: 'users||3', name: 'Linus edited' }
+    `);
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input: { name: 'Linus' }
+        operation: 'createUser'
+    `);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus edited'
+    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(
+      `['Ada', 'Grace', 'Linus edited']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    hook.unmount();
+  });
+
+  test('a rename targeting the whole table that runs after the offline gate closed gets the saved user in `offlineInput`', async () => {
+    network.setOffline();
+    const sessionKey = 'temp-edit-table-target-gate-closed-session';
+    const storeName = 'temp-edit-table-target-gate-closed-store';
+    const {
+      env,
+      hook,
+      renameResults,
+      renameLinusInTable,
+      tableRenameInputs,
+      setOfflineEnabled,
+    } = await setupQueuedTempCreate({ sessionKey, storeName });
+
+    // The user reconnects and renames Linus right away: Linus is saved
+    // during the rename's debounce, and the app closes its offline gate
+    // before the debounce ends, so the rename runs as a plain online request
+    renameLinusInTable('Linus edited');
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(1300);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+    setOfflineEnabled(false);
+    await flushAllTimers();
+
+    // It is sent for the saved user too
+    expect(renameResults).toMatchInlineSnapshot(`
+      - data: { name: 'Linus edited' }
+        kind: 'online'
+    `);
+    expect(tableRenameInputs).toMatchInlineSnapshot(`
+      - in: 'mutation'
+        offlineInput: { itemId: 'users||3', name: 'Linus edited' }
+      - in: 'onSuccess'
+        offlineInput: { itemId: 'users||3', name: 'Linus edited' }
+    `);
+    expect(env.serverTable.get('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus edited'
     `);
 
     hook.unmount();

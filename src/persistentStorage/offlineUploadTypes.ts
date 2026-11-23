@@ -431,7 +431,18 @@ export type OfflineDirectMutationUploadsContext<
  */
 export type OfflineDirectMutationContext<
   TResolvedRef extends ValidPayload = ValidPayload,
+  TInput = unknown,
 > = {
   /** Uploads the operation declares with `dependsOnUploads`, already resolved. */
   uploads: OfflineDirectMutationUploadsContext<TResolvedRef>;
+  /**
+   * The `offline.input` of the call, as `execute` would receive it if the
+   * mutation was queued: the temp payloads of items created offline whose
+   * creation was saved since the call (e.g. during the `debounce` window)
+   * are replaced by their final payloads, for the refs the operation declares
+   * with `getEntityRefs` and `dependsOn`. Build the request from it instead
+   * of from values captured when the call was made, which can still hold a
+   * temp payload the server does not know.
+   */
+  offlineInput: TInput;
 };

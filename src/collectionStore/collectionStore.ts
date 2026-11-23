@@ -57,7 +57,8 @@ import {
   type GlobalOfflineEntity,
   type ItemOfflineState,
   type OfflineMutationInput,
-  type OfflineOperationsUploadRef,
+  type OfflineOperationDirectMutationContext,
+  type OfflineOperationName,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecord,
   type ParsedOfflineResolutionConflictResultForStore,
@@ -465,21 +466,25 @@ type CollectionMutationArgsBase<
    * Performs the server mutation for the affected item payloads. With an
    * `offline` descriptor, an item created offline whose creation was saved
    * since the call (e.g. while the mutation was prepared) is passed with its
-   * final payload, so build the request from this argument. Temp payloads of
-   * other items the request references are not rewritten: resolve them with
-   * `resolveTempItemPayload` of their store.
+   * final payload, and `ctx.offlineInput` is the `offline` input with the
+   * temp payloads the operation declares replaced the same way, so build the
+   * request from these arguments. Other temp payloads the request references
+   * are not rewritten: resolve them with `resolveTempItemPayload` of their
+   * store.
    */
   mutation: (
     payload: CollectionMutationPayloadToUse<ItemPayload>,
     ...args: TMutationExtraArgs
   ) => Promise<T>;
   /**
-   * Called after a successful online mutation, with the same final payload as
-   * `mutation` for an item whose creation was saved since the call.
+   * Called after a successful online mutation, with the same final payload
+   * and context as `mutation` (e.g. `ctx.offlineInput`) for an item whose
+   * creation was saved since the call.
    */
   onSuccess?: (
     response: UnwrapTSDFResult<Awaited<T>>,
     payload: CollectionMutationPayloadToUse<ItemPayload>,
+    ...args: TMutationExtraArgs
   ) => void;
   /** Invalidates affected items after a successful online mutation. */
   revalidateOnSuccess?: boolean;
@@ -510,14 +515,12 @@ type CollectionOfflineMutationArgs<
     ItemState,
     ItemPayload
   >,
+  TName extends OfflineOperationName<TOfflineOperations> =
+    OfflineOperationName<TOfflineOperations>,
 > = CollectionMutationArgsBase<
   T,
   ItemPayload,
-  [
-    ctx: OfflineDirectMutationContext<
-      OfflineOperationsUploadRef<TOfflineOperations>
-    >,
-  ]
+  [ctx: OfflineOperationDirectMutationContext<TOfflineOperations, TName>]
 > & {
   /**
    * Queues this mutation through the store's registered offline operation when
@@ -527,10 +530,12 @@ type CollectionOfflineMutationArgs<
    * `dependsOnUploads` are uploaded first and passed to `mutation` as
    * `ctx.uploads.resolvedRefsById`. They are deleted once `mutation`
    * succeeds, and kept for the replay when the mutation is queued instead.
+   * `mutation` and `onSuccess` also get this input as `ctx.offlineInput`, as
+   * `execute` would get it on replay.
    */
   offline: TOfflineOperations extends null
     ? never
-    : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>;
   /** Files to attach if this mutation is queued for offline replay. */
   upload?: OfflineMutationUploadsInput;
 };
@@ -547,27 +552,28 @@ type CollectionOptionalOfflineMutationArgs<
     ItemState,
     ItemPayload
   >,
+  TName extends OfflineOperationName<TOfflineOperations> =
+    OfflineOperationName<TOfflineOperations>,
 > = CollectionMutationArgsBase<
   T,
   ItemPayload,
-  [
-    ctx?: OfflineDirectMutationContext<
-      OfflineOperationsUploadRef<TOfflineOperations>
-    >,
-  ]
+  [ctx?: OfflineOperationDirectMutationContext<TOfflineOperations, TName>]
 > & {
   /**
    * Queues this mutation through the store's registered offline operation when
    * the session is offline or the direct request fails with an offline outage.
    * `undefined` runs it as a plain online mutation.
    *
-   * When it is set and the mutation runs directly, `mutation` gets the uploads
-   * context as its second argument, as with a required `offline` descriptor.
-   * The second argument is `undefined` when `offline` is `undefined`.
+   * When it is set and the mutation runs directly, `mutation` gets the
+   * offline context as its second argument (`onSuccess` as its third), as
+   * with a required `offline` descriptor. It is `undefined` when `offline` is
+   * `undefined`.
    */
   offline?: TOfflineOperations extends null
     ? never
-    : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+    :
+        | OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>
+        | undefined;
   /**
    * Files to attach if this mutation is queued for offline replay. Ignored
    * when `offline` is `undefined`.
@@ -605,13 +611,18 @@ type CollectionPerformMutation<
    * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
    * the server payload.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: CollectionMutationTarget<ItemPayload>,
     args: CollectionOfflineMutationArgs<
       T,
       ItemState,
       ItemPayload,
-      TOfflineOperations
+      TOfflineOperations,
+      TName
     >,
   ): Promise<
     ResultType<
@@ -643,14 +654,19 @@ type CollectionPerformMutation<
    * Use this for create mutations that do not have a pre-generated item payload
    * yet. When the mutation is queued, the result is `{ kind: 'queued' }`.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: null,
     args: Omit<
       CollectionOfflineMutationArgs<
         T,
         ItemState,
         ItemPayload,
-        TOfflineOperations
+        TOfflineOperations,
+        TName
       >,
       'optimisticUpdate'
     >,
@@ -669,13 +685,18 @@ type CollectionPerformMutation<
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
    * `{ kind: 'queued' }`) otherwise.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: CollectionMutationTarget<ItemPayload>,
     args: CollectionOptionalOfflineMutationArgs<
       T,
       ItemState,
       ItemPayload,
-      TOfflineOperations
+      TOfflineOperations,
+      TName
     >,
   ): Promise<
     ResultType<
@@ -693,14 +714,19 @@ type CollectionPerformMutation<
    * `undefined`, and an `OfflineMutationResult` (`{ kind: 'online', data }` or
    * `{ kind: 'queued' }`) otherwise.
    */
-  <T>(
+  <
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: CollectionMutationPayload<ItemPayload>,
     args: Omit<
       CollectionOptionalOfflineMutationArgs<
         T,
         ItemState,
         ItemPayload,
-        TOfflineOperations
+        TOfflineOperations,
+        TName
       >,
       'optimisticUpdate'
     >,
@@ -2762,9 +2788,10 @@ export function createCollectionStore<
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    // WORKAROUND: The uploads are resolved at runtime with the untyped ref
-    // shape, and the offline variant of `mutation` reads them with the upload
-    // ref type of the store operations, as `execute` does on replay.
+    // WORKAROUND: The uploads and the offline input are resolved at runtime
+    // with untyped shapes, and the offline variant of `mutation` reads them
+    // with the upload ref type and the operation input type of the store
+    // operations, as `execute` does on replay.
     const mutationFn = __LEGIT_CAST__<
       (
         payload: CollectionMutationPayloadToUse<ItemPayload>,
@@ -2772,20 +2799,33 @@ export function createCollectionStore<
       ) => Promise<T>,
       unknown
     >(mutation);
+    // WORKAROUND: As with `mutation`, the offline variant of `onSuccess` reads
+    // the untyped context with the types of the store operations.
+    const onSuccessFn = __LEGIT_CAST__<
+      | ((
+          response: UnwrapTSDFResult<Awaited<T>>,
+          payload: CollectionMutationPayloadToUse<ItemPayload>,
+          ctx?: OfflineDirectMutationContext,
+        ) => void)
+      | undefined,
+      unknown
+    >(onSuccess);
     // A plain online mutation is called with the payload only. An
     // offline-enabled one is called with the final payload of an item whose
     // creation was saved since the call (e.g. while it was prepared).
     let sentPayload = payloadToUse;
+    let sentCtx: OfflineDirectMutationContext | undefined;
     const directMutation = async (ctx?: OfflineDirectMutationContext) => {
       if (!ctx) return unwrapTSDFResult(await mutationFn(payloadToUse));
       sentPayload = resolveSavedTempPayloads(payloadToUse);
+      sentCtx = ctx;
       return unwrapTSDFResult(await mutationFn(sentPayload, ctx));
     };
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
-      // An offline-enabled mutation always gets its uploads context
+      // An offline-enabled mutation always gets its offline context
       data: await directMutation(
-        offline ? createDirectMutationContext({}) : undefined,
+        offline ? createDirectMutationContext(offline.input) : undefined,
       ),
     });
 
@@ -3048,8 +3088,9 @@ export function createCollectionStore<
           );
         }
 
-        if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, sentPayload);
+        if (onSuccessFn && result.kind === 'online') {
+          if (sentCtx) onSuccessFn(result.data, sentPayload, sentCtx);
+          else onSuccessFn(result.data, sentPayload);
         }
       },
       _debounce,

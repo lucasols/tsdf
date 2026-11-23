@@ -206,10 +206,16 @@ describe('document', () => {
       },
     });
 
+    // The `offlineInput` the mutation received
+    const mutationInputs: unknown[] = [];
+
     // Online offline-enabled mutations should behave like normal direct
     // mutations until a failure is classified as connectivity-related.
     const pendingResult = env.apiStore.performMutation({
-      mutation: directMutation,
+      mutation: ({ offlineInput }) => {
+        mutationInputs.push(offlineInput);
+        return directMutation();
+      },
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
     await flushAllTimers();
@@ -221,6 +227,9 @@ describe('document', () => {
         value: { data: 2, kind: 'online' }
       `);
     expect(directMutation).toHaveBeenCalledTimes(1);
+    // The mutation gets the `offline` input of the call, as with the other
+    // stores
+    expect(mutationInputs).toMatchInlineSnapshot(`- value: 2`);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
     );

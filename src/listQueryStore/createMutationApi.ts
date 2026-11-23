@@ -14,7 +14,8 @@ import {
 } from '../persistentStorage/offline/mutationRuntime';
 import type {
   OfflineMutationInput,
-  OfflineOperationsUploadRef,
+  OfflineOperationDirectMutationContext,
+  OfflineOperationName,
 } from '../persistentStorage/offline/types';
 import type {
   OfflineDirectMutationContext,
@@ -1816,6 +1817,7 @@ export function createMutationApi<
     onSuccess?: (
       response: UnwrapTSDFResult<Awaited<T>>,
       payload: MutationPayloadToUse,
+      ...args: TMutationExtraArgs
     ) => void;
     /** Called after a failed mutation with the normalized mutation error. */
     onError?: (error: StoreMutationError | MutationSkipped) => void;
@@ -1835,13 +1837,13 @@ export function createMutationApi<
     upload?: undefined;
   };
 
-  type ListQueryOfflineMutationArgs<T> = ListQueryMutationArgs<
+  type ListQueryOfflineMutationArgs<
     T,
-    [
-      ctx: OfflineDirectMutationContext<
-        OfflineOperationsUploadRef<TOfflineOperations>
-      >,
-    ]
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  > = ListQueryMutationArgs<
+    T,
+    [ctx: OfflineOperationDirectMutationContext<TOfflineOperations, TName>]
   > & {
     /**
      * When provided, the mutation tries the direct request while the session is
@@ -1851,22 +1853,24 @@ export function createMutationApi<
      */
     offline: TOfflineOperations extends null
       ? never
-      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+      : OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>;
     upload?: OfflineMutationUploadsInput;
   };
 
-  type ListQueryOptionalOfflineMutationArgs<T> = ListQueryMutationArgs<
+  type ListQueryOptionalOfflineMutationArgs<
     T,
-    [
-      ctx?: OfflineDirectMutationContext<
-        OfflineOperationsUploadRef<TOfflineOperations>
-      >,
-    ]
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  > = ListQueryMutationArgs<
+    T,
+    [ctx?: OfflineOperationDirectMutationContext<TOfflineOperations, TName>]
   > & {
     /** Like the offline overload's `offline`, but `undefined` runs online. */
     offline?: TOfflineOperations extends null
       ? never
-      : OfflineMutationInput<Exclude<TOfflineOperations, null>> | undefined;
+      :
+          | OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>
+          | undefined;
     upload?: OfflineMutationUploadsInput;
   };
 
@@ -1906,21 +1910,29 @@ export function createMutationApi<
    * payload yet. When the mutation is queued, the result is `{ kind: 'queued' }`
    * instead of the server payload.
    */
-  async function performMutation<T>(
+  async function performMutation<
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: MutationPayload,
-    args: ListQueryOfflineMutationArgs<T>,
+    args: ListQueryOfflineMutationArgs<T, TName>,
   ): Promise<
     ResultType<
       OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   >;
-  async function performMutation<T>(
+  async function performMutation<
+    T,
+    TName extends OfflineOperationName<TOfflineOperations> =
+      OfflineOperationName<TOfflineOperations>,
+  >(
     payload: MutationPayload,
     args:
       | ListQueryOnlineMutationArgs<T>
-      | ListQueryOfflineMutationArgs<T>
-      | ListQueryOptionalOfflineMutationArgs<T>,
+      | ListQueryOfflineMutationArgs<T, TName>
+      | ListQueryOptionalOfflineMutationArgs<T, TName>,
   ): Promise<
     ResultType<
       | UnwrapTSDFResult<Awaited<T>>
@@ -1975,9 +1987,10 @@ export function createMutationApi<
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    // WORKAROUND: The uploads are resolved at runtime with the untyped ref
-    // shape, and the offline variant of `mutation` reads them with the upload
-    // ref type of the store operations, as `execute` does on replay.
+    // WORKAROUND: The uploads and the offline input are resolved at runtime
+    // with untyped shapes, and the offline variant of `mutation` reads them
+    // with the upload ref type and the operation input type of the store
+    // operations, as `execute` does on replay.
     const mutationFn = __LEGIT_CAST__<
       (
         payload: MutationPayloadToUse,
@@ -1985,20 +1998,33 @@ export function createMutationApi<
       ) => Promise<T>,
       unknown
     >(mutation);
+    // WORKAROUND: As with `mutation`, the offline variant of `onSuccess` reads
+    // the untyped context with the types of the store operations.
+    const onSuccessFn = __LEGIT_CAST__<
+      | ((
+          response: UnwrapTSDFResult<Awaited<T>>,
+          payload: MutationPayloadToUse,
+          ctx?: OfflineDirectMutationContext,
+        ) => void)
+      | undefined,
+      unknown
+    >(onSuccess);
     // A plain online mutation is called with the payload only. An
     // offline-enabled one is called with the final payload of an item whose
     // creation was saved since the call (e.g. during the debounce window).
     let sentPayload = payloadToUse;
+    let sentCtx: OfflineDirectMutationContext | undefined;
     const directMutation = async (ctx?: OfflineDirectMutationContext) => {
       if (!ctx) return unwrapTSDFResult(await mutationFn(payloadToUse));
       sentPayload = resolveSavedTempPayloads(payloadToUse);
+      sentCtx = ctx;
       return unwrapTSDFResult(await mutationFn(sentPayload, ctx));
     };
     const runOnlineMutation = async () => ({
       kind: 'online' as const,
-      // An offline-enabled mutation always gets its uploads context
+      // An offline-enabled mutation always gets its offline context
       data: await directMutation(
-        offline ? createDirectMutationContext({}) : undefined,
+        offline ? createDirectMutationContext(offline.input) : undefined,
       ),
     });
 
@@ -2151,8 +2177,9 @@ export function createMutationApi<
           });
         }
 
-        if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, sentPayload);
+        if (onSuccessFn && result.kind === 'online') {
+          if (sentCtx) onSuccessFn(result.data, sentPayload, sentCtx);
+          else onSuccessFn(result.data, sentPayload);
         }
       },
       debounce,
