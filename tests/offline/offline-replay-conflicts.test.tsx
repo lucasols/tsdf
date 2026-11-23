@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_string } from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   type CollectionOfflineOperationDefinition,
@@ -1478,4 +1478,166 @@ test('mutations queued via hybrid fallback still enter the normal conflict resol
     `);
   storeOfflineHook.unmount();
   storeResolutionHook.unmount();
+});
+
+type UserRow = { id: number; name: string };
+
+function createUsersListWithCreateConflict<TInput, TResult>(
+  storeId: string,
+  createUser: ListQueryOfflineOperationDefinition<
+    UserRow,
+    ListQueryParams,
+    string,
+    TInput,
+    { reason: string },
+    TResult
+  >,
+) {
+  const sessionKey = `${storeId}-session`;
+  const env = createListQueryStoreTestEnv<
+    UserRow,
+    false,
+    false,
+    {
+      createUser: ListQueryOfflineOperationDefinition<
+        UserRow,
+        ListQueryParams,
+        string,
+        TInput,
+        { reason: string },
+        TResult
+      >;
+    }
+  >(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: storeId,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: { operations: { createUser } },
+      },
+    },
+  );
+  const list = renderHook(() =>
+    env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { itemSelector: (item) => item.name },
+    ),
+  );
+  return { env, list };
+}
+
+test('committing a creation whose input holds the temp id shows the created row in the list', async () => {
+  network.setOffline();
+  // The input carries the temp id, so keeping the server result rewrites the
+  // waiting change to the final id.
+  const { env, list } = createUsersListWithCreateConflict(
+    'commit-temp-id-in-input',
+    {
+      inputSchema: rc_object({ itemId: rc_string, name: rc_string }),
+      kind: 'create',
+      getEntityRefs: ({ input }) => [input.itemId],
+      conflictHandling: {
+        schema: docConflictSchema,
+        detectConflict: () => ({ reason: 'name-taken' }),
+      },
+      tempEntity: {
+        buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+        addToQueries: { queries: [{ tableId: 'users' }], appendTo: 'end' },
+        reconcileServerEntity: (result) => ({
+          finalPayload: `users||${result.id}`,
+          finalData: { id: result.id, name: 'Linus' },
+        }),
+      },
+      execute: () => Promise.resolve({ id: 0 }),
+    },
+  );
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: async () => {},
+      offline: {
+        operation: 'createUser',
+        input: { itemId: 'temp:Linus', name: 'Linus' },
+      },
+    });
+  });
+
+  // The creation conflicts on reconnect: it waits for a decision and the list
+  // shows what the server has.
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+  expect(list.result.current.items).toMatchInlineSnapshot(`['Ada']`);
+
+  // The user creates it on the server and keeps that result: the list is
+  // refetched under the final id and shows the row.
+  env.serverTable.setItem('users||2', { id: 2, name: 'Linus' });
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected the creation conflict');
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'createUser', {
+      action: 'commit',
+      result: { id: 2 },
+    });
+  });
+  await flushAllTimers();
+
+  expect(list.result.current.items).toMatchInlineSnapshot(`['Ada', 'Linus']`);
+  list.unmount();
+});
+
+test('committing a creation that references no entity refetches the lists', async () => {
+  network.setOffline();
+  const { env, list } = createUsersListWithCreateConflict<
+    { name: string },
+    void
+  >('commit-entityless-creation', {
+    inputSchema: collectionCreateInputSchema,
+    kind: 'create',
+    getEntityRefs: () => [],
+    conflictHandling: {
+      schema: docConflictSchema,
+      detectConflict: () => ({ reason: 'requires manual creation' }),
+    },
+    execute: async () => {},
+    onSuccessExecute: () => {},
+  });
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: async () => {},
+      offline: { operation: 'createUser', input: { name: 'Grace' } },
+    });
+  });
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+  expect(list.result.current.items).toMatchInlineSnapshot(`['Ada']`);
+
+  // The user completes the creation outside the app and keeps it: nothing
+  // names the created row, so the lists are refetched and show it.
+  env.serverTable.setItem('users||2', { id: 2, name: 'Grace' });
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected the creation conflict');
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'createUser', {
+      action: 'commit',
+    });
+  });
+  await flushAllTimers();
+
+  expect(list.result.current.items).toMatchInlineSnapshot(`['Ada', 'Grace']`);
+  list.unmount();
 });

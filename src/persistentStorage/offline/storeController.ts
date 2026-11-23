@@ -4281,9 +4281,7 @@ export function createOfflineStoreController<
   ): void {
     revalidateDiscardedWork(discardedWork, removedEntityKeys);
 
-    if (!discardedWork.some((workItem) => workItem.entityRefs.length > 0)) {
-      return;
-    }
+    if (discardedWork.length === 0) return;
     current.session.publishWorkDiscarded(
       storeName,
       discardedWork.map(({ operation, input, entityRefs }) => ({
@@ -4329,7 +4327,17 @@ export function createOfflineStoreController<
       }
     }
 
-    if (entities.length === 0) return;
+    // Work that references no entity (`getEntityRefs` returns nothing) may
+    // have changed anything: the lists are refetched for it.
+    if (
+      entities.length === 0 &&
+      !(
+        refetchLists &&
+        discardedWork.some((workItem) => workItem.entityRefs.length === 0)
+      )
+    ) {
+      return;
+    }
 
     storeAdapter.revalidateDiscardedEntities?.(entities, refetchLists);
   }
@@ -6597,18 +6605,32 @@ export function createOfflineStoreController<
       // server version from before it: they are refetched, lists included.
       // With held work queued again, the revalidation after it replays does it.
       if (requeuedDescendants.length === 0) {
-        const skippedEntityKeys = new Set(
-          getTempLifecycleEntityKeys(committedResolution),
-        );
+        // The temp entities are refetched under the final ids the result
+        // mapped them to. Their temp keys, and temp entities left unmapped,
+        // are not: the server does not have them.
+        const skippedEntityKeys = new Set<string>();
+        const finalIds: ValidPayload[] = [];
+        for (const tempId of resolutionRecord.tempIds ?? []) {
+          const isMapped = resolvedEntityRefBySerializedRef.has(
+            getCompositeKey(tempId),
+          );
+          const finalId = resolveEntityRef(tempId);
+          if (isMapped) finalIds.push(finalId);
+
+          const tempKey = getEntityKeyOfPayload(tempId);
+          if (
+            tempKey !== undefined &&
+            (!isMapped || getEntityKeyOfPayload(finalId) !== tempKey)
+          ) {
+            skippedEntityKeys.add(tempKey);
+          }
+        }
         for (const waitingResolution of resolutions.values()) {
           for (const entityKey of getCreatedEntityKeys(waitingResolution)) {
             skippedEntityKeys.add(entityKey);
           }
         }
-        // The temp entities it created are refetched under their final ids.
-        const finalEntityRefs = resolveNormalizedRefs(
-          (committedResolution.tempIds ?? []).map(resolveEntityRef),
-        );
+        const finalEntityRefs = resolveNormalizedRefs(finalIds);
         revalidateDiscardedWorkInEveryTab(
           current,
           [
