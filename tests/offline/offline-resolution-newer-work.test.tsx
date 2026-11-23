@@ -17,12 +17,21 @@ type Doc = { title: string; body: string; status: string };
 
 type DocChanges = { title?: string; body?: string };
 
+/** An edit, optionally moving the doc under another doc */
+type EditDocInput = { docId: string; parentId?: string; changes: DocChanges };
+
 type DocOperations = {
+  /** Creates a doc, with an id generated on the client */
+  createDoc: CollectionOfflineOperationDefinition<
+    Doc,
+    string,
+    { docId: string; title: string }
+  >;
   /** Edits fields of the doc: queued edits are merged, newer fields win */
   editDoc: CollectionOfflineOperationDefinition<
     Doc,
     string,
-    { docId: string; changes: DocChanges },
+    EditDocInput,
     { reason: string }
   >;
   /** Sets the status: a newer status replaces an older one */
@@ -40,12 +49,13 @@ type DocOperations = {
 };
 
 type DocMutation =
-  | { operation: 'editDoc'; input: { docId: string; changes: DocChanges } }
+  | { operation: 'editDoc'; input: EditDocInput }
   | { operation: 'setStatus'; input: { docId: string; status: string } }
   | { operation: 'renameDoc'; input: { docId: string; title: string } };
 
 const editDocInputSchema = rc_object({
   docId: rc_string,
+  parentId: rc_string.optionalKey(),
   changes: rc_object({
     title: rc_string.optionalKey(),
     body: rc_string.optionalKey(),
@@ -129,10 +139,28 @@ function createDocsEnv() {
         payloadSchema: rc_string,
         offline: {
           operations: {
+            createDoc: {
+              inputSchema: rc_object({ docId: rc_string, title: rc_string }),
+              kind: 'create',
+              getEntityRefs: ({ input }) => [input.docId],
+              execute: async ({ input }) => {
+                failIfRejected([input.title]);
+                replayed.push(`createDoc ${input.title}`);
+                await env.serverTable.delayedSetItem(input.docId, {
+                  title: input.title,
+                  body: '',
+                  status: 'draft',
+                });
+              },
+              onSuccessExecute: () => {},
+            },
             editDoc: {
               inputSchema: editDocInputSchema,
               kind: 'update',
               getEntityRefs: ({ input }) => [input.docId],
+              // Moved under another doc, the edit needs that doc saved first
+              dependsOn: ({ input }) =>
+                input.parentId === undefined ? [] : [input.parentId],
               accumulation: {
                 mergeInput: ({ existingInput, incomingInput }) => ({
                   ...incomingInput,
@@ -245,6 +273,9 @@ function createDocsEnv() {
         operation: 'editDoc',
         input: { docId: 'docs||1', changes },
       }),
+    /** An edit with the full input (e.g. moving the doc under another doc) */
+    editDocWith: (input: EditDocInput) =>
+      mutate(input.changes, { operation: 'editDoc', input }),
     setStatus: (status: string) =>
       mutate(
         { status },
@@ -303,7 +334,7 @@ describe('an operation with accumulation', () => {
 
     expect(t.getResolutions()).toMatchInlineSnapshot(`
       - error: 'rejected T1 v1'
-        input: 'changes: body: "v1", title: "T1", docId: "docs||1"'
+        input: 'changes: body: "v1", title: "T1", docId: "docs||1", parentId: undefined'
         kind: 'retry-exhausted'
         on: 'item:docs||1'
         op: 'editDoc'
@@ -322,7 +353,7 @@ describe('an operation with accumulation', () => {
     // and the title only it changed is kept
     expect(t.getResolutions()).toMatchInlineSnapshot(`
       - error: 'rejected T1 v1'
-        input: 'changes: body: "v2", title: "T1", docId: "docs||1"'
+        input: 'changes: body: "v2", title: "T1", docId: "docs||1", parentId: undefined'
         kind: 'retry-exhausted'
         on: 'item:docs||1'
         op: 'editDoc'
@@ -361,7 +392,7 @@ describe('an operation with accumulation', () => {
     expect(await t.editDoc({ body: 'v2' })).toBe('queued');
     expect(t.getResolutions()).toMatchInlineSnapshot(`
       - error: 'rejected T1 v1'
-        input: 'changes: body: "v2", title: "T1", docId: "docs||1"'
+        input: 'changes: body: "v2", title: "T1", docId: "docs||1", parentId: undefined'
         kind: 'retry-exhausted'
         on: 'item:docs||1'
         op: 'editDoc'
@@ -406,7 +437,7 @@ describe('an operation with accumulation', () => {
     // The failed change already follows the newer edit
     expect(t.getResolutions()).toMatchInlineSnapshot(`
       - error: 'rejected T1 v1'
-        input: 'changes: body: "v2", title: "T1", docId: "docs||1"'
+        input: 'changes: body: "v2", title: "T1", docId: "docs||1", parentId: undefined'
         kind: 'retry-exhausted'
         on: 'item:docs||1'
         op: 'editDoc'
@@ -431,7 +462,7 @@ describe('an operation with accumulation', () => {
 
     expect(await t.editDoc({ body: 'v2' })).toBe('online');
     expect(t.getResolutions()).toMatchInlineSnapshot(`
-      - input: 'changes: body: "v2", title: "T1", docId: "docs||1"'
+      - input: 'changes: body: "v2", title: "T1", docId: "docs||1", parentId: undefined'
         kind: 'conflict'
         on: 'item:docs||1'
         op: 'editDoc'
@@ -453,6 +484,123 @@ describe('an operation with accumulation', () => {
       body: 'v2'
       status: 'draft'
       title: 'T1'
+    `);
+  });
+});
+
+describe('changes that finish out of order or wait for a creation', () => {
+  test('an older online edit whose response arrives last does not bring its values back into the failed edit', async () => {
+    const t = createDocsEnv();
+
+    // An edit fails and waits for a decision
+    network.setOffline();
+    await t.editDoc({ title: 'T1', body: 'v1' });
+    t.rejectedValues.add('v1');
+    await t.goOnline();
+    t.rejectedValues.clear();
+
+    /** An online edit whose response takes `responseMs` to come back */
+    function editBody(body: string, responseMs: number) {
+      return t.env.apiStore.performMutation('docs||1', {
+        mutation: async () => {
+          await t.env.serverTable.delayedUpdateItem('docs||1', { body });
+          const response = { value: t.getServerDoc() };
+          await new Promise((resolve) => setTimeout(resolve, responseMs));
+          return response;
+        },
+        offline: {
+          operation: 'editDoc',
+          input: { docId: 'docs||1', changes: { body } },
+        },
+      });
+    }
+
+    // Autosave sends `v2`, then `v3` while the response of `v2` is slow: the
+    // server saves both in order, but `v3`'s response arrives first
+    const earlier = editBody('v2', 3_000);
+    await advanceTime(1_300);
+    const later = editBody('v3', 0);
+    await flushAllTimers();
+    expect((await earlier).unwrap().kind).toBe('online');
+    expect((await later).unwrap().kind).toBe('online');
+    expect(t.getServerDoc().body).toBe('v3');
+
+    // The failed edit followed `v3`. The older `v2`, arriving last, is not
+    // merged over it: the failed edit is only flagged
+    expect(t.getResolutions()).toMatchInlineSnapshot(`
+      - error: 'rejected T1 v1'
+        hasNewerChanges: '✅'
+        input: 'changes: body: "v3", title: "T1", docId: "docs||1", parentId: undefined'
+        kind: 'retry-exhausted'
+        on: 'item:docs||1'
+        op: 'editDoc'
+    `);
+
+    // "Try again" keeps the newest body
+    expect(await t.retryFailedChange()).toBe(true);
+    expect(t.getServerDoc()).toMatchInlineSnapshot(`
+      body: 'v3'
+      status: 'draft'
+      title: 'T1'
+    `);
+  });
+
+  test('a failed edit is flagged by a newer edit held behind a doc creation that waits for a decision, so retrying it does not silently overwrite that edit', async () => {
+    const t = createDocsEnv();
+
+    // An edit fails and waits for a decision
+    network.setOffline();
+    await t.editDoc({ title: 'T1', body: 'v1' });
+    t.rejectedValues.add('v1');
+    await t.goOnline();
+    t.rejectedValues.clear();
+
+    // Offline, the user creates a parent doc, which the server rejects
+    t.goOffline();
+    const create = t.env.apiStore.performMutation('docs||2', {
+      // Offline: queued without being called
+      mutation: () => Promise.resolve(null),
+      offline: {
+        operation: 'createDoc',
+        input: { docId: 'docs||2', title: 'Parent' },
+      },
+    });
+    await flushAllTimers();
+    expect((await create).unwrap().kind).toBe('queued');
+    t.rejectedValues.add('Parent');
+    await t.goOnline();
+    t.rejectedValues.clear();
+
+    // Then edits the doc and moves it under the parent: the edit waits for
+    // the parent's creation. It may still be sent, so the older failed edit
+    // is flagged instead of following it
+    t.goOffline();
+    expect(
+      await t.editDocWith({
+        docId: 'docs||1',
+        parentId: 'docs||2',
+        changes: { body: 'v2' },
+      }),
+    ).toBe('queued');
+    expect(t.getResolutions()).toMatchInlineSnapshot(`
+      - error: 'rejected T1 v1'
+        hasNewerChanges: '✅'
+        input: 'changes: body: "v1", title: "T1", docId: "docs||1", parentId: undefined'
+        kind: 'retry-exhausted'
+        on: 'item:docs||1'
+        op: 'editDoc'
+      - blocks: 1
+        error: 'rejected Parent'
+        input: 'docId: "docs||2", title: "Parent"'
+        kind: 'retry-exhausted'
+        on: 'item:docs||2'
+        op: 'createDoc'
+      - blockedBy: 1
+        error: 'Blocked by unresolved dependency'
+        input: 'changes: body: "v2", title: undefined, docId: "docs||1", parentId: "docs||2"'
+        kind: 'retry-exhausted'
+        on: 'item:docs||1'
+        op: 'editDoc'
     `);
   });
 });
@@ -579,7 +727,7 @@ describe('an operation with neither accumulation nor supersedes', () => {
     expect(t.getResolutions()).toMatchInlineSnapshot(`
       - error: 'rejected T1'
         hasNewerChanges: '✅'
-        input: 'changes: body: undefined, title: "T1", docId: "docs||1"'
+        input: 'changes: body: undefined, title: "T1", docId: "docs||1", parentId: undefined'
         kind: 'retry-exhausted'
         on: 'item:docs||1'
         op: 'editDoc'

@@ -719,6 +719,16 @@ export function createOfflineStoreController<
   // called. Queued, they go at that position, so no newer mutation is merged
   // into older work across them.
   const reservedMutations = new Map<number, PreparedQueuedMutation>();
+  // The queue order of the newest change each resolution record merged into
+  // its input (see `rebaseResolutionOnNewerWork`). Changes can finish in
+  // another order than they were made in (e.g. overlapping requests whose
+  // responses arrive reordered), and merging an older one after a newer one
+  // would bring back the older values. In memory only: the changes that race
+  // are those of this tab.
+  const followedWorkOrders = new WeakMap<
+    PersistedOfflineResolutionRecord,
+    number
+  >();
   // Set while a mutation waits for the session to list its stored uploads
   // before computing its upload dependencies (right after a reload).
   let uploadDependenciesWait: Promise<void> | undefined;
@@ -808,7 +818,15 @@ export function createOfflineStoreController<
   type NewerWork = Pick<
     OfflineQueueEntry,
     'operation' | 'input' | 'entityRefs' | 'dependencyUploadRefs'
-  >;
+  > & {
+    /** The queue order reserved when it was made */
+    order: number;
+    /**
+     * Held behind a creation that waits for a decision: it may never be sent,
+     * so the resolutions are only flagged
+     */
+    held?: boolean;
+  };
 
   type ResolutionRebase = {
     previous: PersistedOfflineResolutionRecord;
@@ -2581,11 +2599,44 @@ export function createOfflineStoreController<
     return entry.syncState === 'pending' && entry.attempts === 0;
   }
 
+  /**
+   * Whether a mutation merged into the queued `candidate` would be replayed
+   * out of call order: one of the same entities or ordering group called
+   * between them is not queued yet (checking the connection, or sent as a
+   * direct request that can fall back to the queue), or work of the group is
+   * queued after the candidate (e.g. a message of another entity of the
+   * chat), which it would be sent before.
+   */
+  function hasWorkBetweenAccumulation(
+    current: ActiveSessionState,
+    candidate: OfflineQueueEntry,
+    queueOrder: number,
+    entityRefs: OfflineEntityRef[],
+    orderingGroup: string | undefined,
+  ): boolean {
+    const candidateQueueOrder = getQueueOrder(candidate);
+    return (
+      hasReservedMutationBetween(
+        current.sessionKey,
+        candidateQueueOrder,
+        queueOrder,
+        entityRefs,
+        orderingGroup,
+      ) ||
+      (orderingGroup !== undefined &&
+        current.session.hasQueuedOrderingGroup(
+          orderingGroup,
+          candidateQueueOrder,
+        ))
+    );
+  }
+
   function hasReservedMutationBetween(
     sessionKey: string,
     afterQueueOrder: number,
     beforeQueueOrder: number,
     entityRefs: OfflineEntityRef[],
+    orderingGroup?: string,
   ): boolean {
     for (const [queueOrder, prepared] of reservedMutations) {
       // A mutation of a session the app switched away from is never queued
@@ -2601,7 +2652,11 @@ export function createOfflineStoreController<
       if (
         entityRefs.some((ref) =>
           runEntityRefs.some((runRef) => isSameEntityRef(ref, runRef)),
-        )
+        ) ||
+        (orderingGroup !== undefined &&
+          prepared.operation.orderingGroup?.({
+            input: prepared.validatedInput,
+          }) === orderingGroup)
       ) {
         return true;
       }
@@ -3898,7 +3953,8 @@ export function createOfflineStoreController<
    * How a resolution follows `work`, a change of its entity made after its
    * own: merged into (same operation with `accumulation`), dropped (an
    * operation that `supersedes` it) or flagged `hasNewerChanges`, so that
-   * sending it again does not silently overwrite the newer change. Resolves
+   * sending it again does not silently overwrite the newer change. Held work
+   * and work older than a change already merged in are only flagged. Resolves
    * to the record that replaces it, `null` when it is dropped, or the same
    * record when nothing changes.
    */
@@ -3918,6 +3974,7 @@ export function createOfflineStoreController<
     }
 
     const { accumulation, supersedes } = operation;
+    const followedWorkOrder = followedWorkOrders.get(resolution);
     if (
       accumulation &&
       resolution.operation === work.operation &&
@@ -3931,7 +3988,11 @@ export function createOfflineStoreController<
       };
       let validatedMergedInput: unknown = null;
       try {
-        if (accumulation.canMerge?.(mergeContext) !== false) {
+        if (
+          !work.held &&
+          (followedWorkOrder === undefined || followedWorkOrder < work.order) &&
+          accumulation.canMerge?.(mergeContext) !== false
+        ) {
           const merging = accumulation.mergeInput(mergeContext);
           validatedMergedInput = validateWithSchema(
             operation.inputSchema,
@@ -3948,7 +4009,7 @@ export function createOfflineStoreController<
           operationName: work.operation,
           input: validatedMergedInput,
         });
-        return {
+        const merged: PersistedOfflineResolutionRecord = {
           ...resolution,
           input: validatedMergedInput,
           dependencyUploadIds:
@@ -3961,8 +4022,11 @@ export function createOfflineStoreController<
           ),
           updatedAt: Date.now(),
         };
+        followedWorkOrders.set(merged, work.order);
+        return merged;
       }
     } else if (
+      !work.held &&
       supersedes &&
       work.entityRefs.length === 1 &&
       resolution.entityRefs.length === 1 &&
@@ -3976,9 +4040,16 @@ export function createOfflineStoreController<
       return null;
     }
 
-    return resolution.hasNewerChanges
-      ? resolution
-      : { ...resolution, hasNewerChanges: true, updatedAt: Date.now() };
+    if (resolution.hasNewerChanges) return resolution;
+    const flagged = {
+      ...resolution,
+      hasNewerChanges: true,
+      updatedAt: Date.now(),
+    };
+    if (followedWorkOrder !== undefined) {
+      followedWorkOrders.set(flagged, followedWorkOrder);
+    }
+    return flagged;
   }
 
   /**
@@ -4104,16 +4175,22 @@ export function createOfflineStoreController<
     );
   }
 
-  /** `rebaseResolutionOnNewerWork` over each of `newerWork`, in order */
+  /** `rebaseResolutionOnNewerWork` over each of `newerEntries`, in order */
   async function rebaseResolutionOnNewerWorkItems(
     current: ActiveSessionState,
     resolution: PersistedOfflineResolutionRecord,
-    newerWork: readonly NewerWork[],
+    newerEntries: readonly OfflineQueueEntry[],
   ): Promise<PersistedOfflineResolutionRecord | null> {
     let rebased: PersistedOfflineResolutionRecord | null = resolution;
-    for (const work of newerWork) {
+    for (const entry of newerEntries) {
       if (!rebased) break;
-      rebased = await rebaseResolutionOnNewerWork(current, rebased, work);
+      rebased = await rebaseResolutionOnNewerWork(current, rebased, {
+        operation: entry.operation,
+        input: entry.input,
+        entityRefs: entry.entityRefs,
+        dependencyUploadRefs: entry.dependencyUploadRefs,
+        order: getQueueOrder(entry),
+      });
     }
     return rebased;
   }
@@ -5300,29 +5377,17 @@ export function createOfflineStoreController<
             queueOrder,
             entries: workingQueue.values(),
           });
-      // Merged, the input is replayed at the candidate's place. A mutation
-      // called between the candidate and this one but not queued yet (checking
-      // the connection, or sent as a direct request that can fall back to the
-      // queue) would then be replayed after it, out of call order, so this
-      // mutation keeps its own entry instead. So does one whose ordering
-      // group has queued work after the candidate (e.g. a message of the
-      // chat of another entity), which it would be sent before.
-      const orderingGroup = candidateEntry
-        ? operation.orderingGroup?.({ input: validatedInput })
-        : undefined;
+      // Merged, the input is replayed at the candidate's place, so the
+      // mutation keeps its own entry when that would send it out of order.
       const existingEntry =
         candidateEntry &&
-        !hasReservedMutationBetween(
-          current.sessionKey,
-          getQueueOrder(candidateEntry),
+        !hasWorkBetweenAccumulation(
+          current,
+          candidateEntry,
           queueOrder,
           entityRefs,
-        ) &&
-        (orderingGroup === undefined ||
-          !current.session.hasQueuedOrderingGroup(
-            orderingGroup,
-            getQueueOrder(candidateEntry),
-          ))
+          operation.orderingGroup?.({ input: validatedInput }),
+        )
           ? candidateEntry
           : undefined;
       const existingWork = heldResolution ?? existingEntry;
@@ -5570,6 +5635,7 @@ export function createOfflineStoreController<
     if (nextQueueOrderValue !== null) nextQueueOrder = nextQueueOrderValue;
     let plannedMutation: PlannedQueuedMutation;
     let resolutionRebases: ResolutionRebase[];
+    let rebaseWork: NewerWork | undefined;
     let pendingEntityQueriesLoaded = false;
     let plannedAtTempReconciliationCount: number;
     for (;;) {
@@ -5598,20 +5664,25 @@ export function createOfflineStoreController<
         }
       }
       // The changes of the entity that wait for a decision follow this newer
-      // one, unless it is held itself or replaces one of them (`requeue`)
+      // one, unless it replaces one of them (`requeue`). Held itself, it
+      // only flags them.
       const { nextEntry: plannedEntry } = plannedMutation;
-      resolutionRebases =
+      rebaseWork =
         replacedResolutionId === undefined &&
         plannedEntry &&
-        resolutions.size > 0 &&
-        !isHeldBehindTempCreateResolution(plannedEntry)
-          ? await planResolutionRebases(current, {
+        resolutions.size > 0
+          ? {
               operation: plannedMutation.operationName,
               input: plannedMutation.validatedInput,
               entityRefs: plannedEntry.entityRefs,
               dependencyUploadRefs: plannedEntry.dependencyUploadRefs,
-            })
-          : [];
+              order: queueOrder,
+              held: isHeldBehindTempCreateResolution(plannedEntry),
+            }
+          : undefined;
+      resolutionRebases = rebaseWork
+        ? await planResolutionRebases(current, rebaseWork)
+        : [];
       // An async accumulation merge lets the replay pick up or send the entry
       // being merged into before it is committed. Merging into it then would
       // drop the incoming input or send the existing one twice, so the
@@ -5619,15 +5690,25 @@ export function createOfflineStoreController<
       // when it changes meanwhile, and to an entry that is no longer the
       // newest candidate (e.g. an earlier concurrent mutation whose merge was
       // refused queued a newer one, which merging into the older entry would
-      // send after it). The check runs with no `await` before the commit
-      // below.
+      // send after it, or work of its ordering group was queued meanwhile).
+      // The check runs with no `await` before the commit below.
+      const { accumulatedEntry } = plannedMutation;
       if (
-        (!plannedMutation.accumulatedEntry ||
-          findAccumulationCandidate({
+        (!accumulatedEntry ||
+          (findAccumulationCandidate({
             operationName: plannedMutation.operationName,
-            entityRefs: plannedMutation.accumulatedEntry.entityRefs,
+            entityRefs: accumulatedEntry.entityRefs,
             queueOrder,
-          }) === plannedMutation.accumulatedEntry) &&
+          }) === accumulatedEntry &&
+            !hasWorkBetweenAccumulation(
+              current,
+              accumulatedEntry,
+              queueOrder,
+              accumulatedEntry.entityRefs,
+              preparedMutation.operation.orderingGroup?.({
+                input: preparedMutation.validatedInput,
+              }),
+            ))) &&
         (!plannedMutation.accumulatedResolution ||
           resolutions.get(plannedMutation.accumulatedResolution.id) ===
             plannedMutation.accumulatedResolution) &&
@@ -5748,17 +5829,11 @@ export function createOfflineStoreController<
         );
       }
 
-      if (resolutionRebases.length > 0 && plannedMutation.nextEntry) {
+      if (resolutionRebases.length > 0 && rebaseWork) {
         await applyResolutionRebases(
           current,
           resolutionRebases,
-          {
-            operation: plannedMutation.operationName,
-            input: plannedMutation.validatedInput,
-            entityRefs: plannedMutation.nextEntry.entityRefs,
-            dependencyUploadRefs:
-              plannedMutation.nextEntry.dependencyUploadRefs,
-          },
+          rebaseWork,
           appliedRebases,
         );
       }
@@ -6615,6 +6690,7 @@ export function createOfflineStoreController<
               successCurrent,
               prepared,
               calledAt,
+              reservedQueueOrder,
             );
           }
         }
@@ -6649,12 +6725,14 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     prepared: PreparedQueuedMutation,
     calledAt: number,
+    queueOrder: number,
   ): Promise<void> {
     const work: NewerWork = {
       operation: prepared.operationName,
       input: prepared.validatedInput,
       entityRefs: getPreparedEntityRefs(prepared),
       dependencyUploadRefs: prepared.dependencyUploadRefs,
+      order: queueOrder,
     };
     const rebases = await applyResolutionRebases(
       current,
