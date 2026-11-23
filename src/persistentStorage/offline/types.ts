@@ -100,6 +100,7 @@ const offlineResolutionBaseFields = {
   attachedUploadIds: rc_record(rc_string).optionalKey(),
   dependencyUploadIds: rc_array(rc_string).optionalKey(),
   dependencyUploadRefs: persistedUploadRefsSchema.optionalKey(),
+  queueOrder: rc_number.optionalKey(),
 };
 
 /** Runtime schema for validating persisted offline resolution records on hydration. */
@@ -129,8 +130,9 @@ export type OfflineMutationQueueingConfig = {
    * Controls whether offline-enabled mutations may queue while network mode is
    * active, including browser-detected offline and classified network failures.
    *
-   * With `'disallow'`, a mutation of an entity that already has queued work
-   * still joins the queue behind it, so that older work does not overwrite it.
+   * With `'disallow'`, a mutation of an entity that already has queued work,
+   * or whose `orderingGroup` has queued work, still joins the queue behind it,
+   * so that older work does not overwrite it or reach the server after it.
    * @default 'allow'
    */
   network?: OfflineMutationQueueingPolicy;
@@ -138,8 +140,9 @@ export type OfflineMutationQueueingConfig = {
    * Controls whether offline-enabled mutations may queue while outage mode is
    * active.
    *
-   * With `'disallow'`, a mutation of an entity that already has queued work
-   * still joins the queue behind it, so that older work does not overwrite it.
+   * With `'disallow'`, a mutation of an entity that already has queued work,
+   * or whose `orderingGroup` has queued work, still joins the queue behind it,
+   * so that older work does not overwrite it or reach the server after it.
    * @default 'allow'
    */
   outage?: OfflineMutationQueueingPolicy;
@@ -822,6 +825,12 @@ type OfflineConflictResolutionRecordBase<
    * Written by TSDF (see `docs/offline.md`).
    */
   hasNewerChanges?: boolean;
+  /**
+   * Queue position of the change, when it differs from `enqueuedAt` (e.g. a
+   * direct request that fell back to the queue keeps the position it had
+   * when it was called). Written by TSDF.
+   */
+  queueOrder?: number;
 };
 
 /** Derived dependency metadata exposed for offline manual resolutions. */
@@ -904,6 +913,12 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
    * Written by TSDF (see `docs/offline.md`).
    */
   hasNewerChanges?: boolean;
+  /**
+   * Queue position of the change, when it differs from `enqueuedAt` (e.g. a
+   * direct request that fell back to the queue keeps the position it had
+   * when it was called). Written by TSDF.
+   */
+  queueOrder?: number;
 };
 
 /**
@@ -1901,7 +1916,8 @@ export type OfflineOperationDefinition<
    *
    * A mutation whose group has queued work that was not sent or confirmed yet
    * (in any store of the session that uses the same key) is queued behind
-   * it, also while online, instead of running directly. Mutations of other
+   * it, also while online or when `mutationQueueing` disallows queueing,
+   * instead of running directly. Mutations of other
    * groups, or without a group, are not delayed. Return `undefined` for a
    * mutation that belongs to no group.
    *

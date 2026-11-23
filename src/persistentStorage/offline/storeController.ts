@@ -456,6 +456,14 @@ function getQueueOrder(entry: {
     : entry.createdAt;
 }
 
+/** The queue order of the change a resolution holds */
+function getResolutionQueueOrder(resolution: {
+  queueOrder?: number;
+  enqueuedAt: number;
+}): number {
+  return resolution.queueOrder ?? resolution.enqueuedAt;
+}
+
 /** A `Map` whose `version` changes with each of its changes */
 class VersionedMap<K, V> extends Map<K, V> {
   version = 0;
@@ -830,7 +838,10 @@ export function createOfflineStoreController<
 
   type ResolutionRebase = {
     previous: PersistedOfflineResolutionRecord;
-    /** The record that replaces it, or `null` when it is dropped */
+    /**
+     * The record that replaces it, `null` when it is dropped, or `previous`
+     * when it does not change
+     */
     next: PersistedOfflineResolutionRecord | null;
   };
 
@@ -2788,6 +2799,11 @@ export function createOfflineStoreController<
       attachedUploadIds: entry.attachedUploadIds,
       dependencyUploadIds: entry.dependencyUploadIds,
       dependencyUploadRefs: entry.dependencyUploadRefs,
+      // Its place among the changes of the entity (see
+      // `planResolutionRebases`), when not the time it was queued
+      ...(entry.queueOrder !== entry.createdAt
+        ? { queueOrder: entry.queueOrder }
+        : {}),
     };
   }
 
@@ -3975,6 +3991,9 @@ export function createOfflineStoreController<
 
     const { accumulation, supersedes } = operation;
     const followedWorkOrder = followedWorkOrders.get(resolution);
+    // Already merged in (e.g. queued while the resolution was created, see
+    // `applyResolutionRebases`)
+    if (followedWorkOrder === work.order) return resolution;
     if (
       accumulation &&
       resolution.operation === work.operation &&
@@ -4053,17 +4072,20 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Plans how the resolutions of the entities of `work`, a change made after
-   * theirs, follow it (see `rebaseResolutionOnNewerWork`). Only the changes
-   * the user can send again on their own follow it: not the work held behind
-   * a creation that waits for a decision (merged into or superseded when the
-   * newer change is queued, see `findHeldWorkResolutions`), nor creations
-   * (the newer work of their entity is held behind them).
+   * Plans how the resolutions of the entities of `work` whose change was made
+   * before it follow it (see `rebaseResolutionOnNewerWork`). Made before by
+   * queue order, not by when the requests finished: a direct request keeps
+   * the order reserved when it was called, and a retried change gets a new
+   * one. Only the changes the user can send again on their own follow it:
+   * not the work held behind a creation that waits for a decision (merged
+   * into or superseded when the newer change is queued, see
+   * `findHeldWorkResolutions`), nor creations (the newer work of their
+   * entity is held behind them).
    */
   async function planResolutionRebases(
     current: ActiveSessionState,
     work: NewerWork,
-    isOlder?: (resolution: PersistedOfflineResolutionRecord) => boolean,
+    skippedResolutionIds?: ReadonlySet<string>,
   ): Promise<ResolutionRebase[]> {
     if (resolutions.size === 0) return [];
 
@@ -4074,7 +4096,8 @@ export function createOfflineStoreController<
           work.entityRefs.some((workRef) => isSameEntityRef(ref, workRef)),
         ) &&
         !requeuingResolutionIds.has(resolution.id) &&
-        (isOlder === undefined || isOlder(resolution)) &&
+        getResolutionQueueOrder(resolution) < work.order &&
+        !skippedResolutionIds?.has(resolution.id) &&
         getCreatedEntityKeys(resolution).length === 0 &&
         !isHeldWorkResolution(resolution)
       ) {
@@ -4086,8 +4109,10 @@ export function createOfflineStoreController<
     for (const resolution of followingResolutions.sort(
       compareResolutionRecords,
     )) {
-      const next = await rebaseResolutionOnNewerWork(current, resolution, work);
-      if (next !== resolution) rebases.push({ previous: resolution, next });
+      rebases.push({
+        previous: resolution,
+        next: await rebaseResolutionOnNewerWork(current, resolution, work),
+      });
     }
 
     return rebases;
@@ -4097,7 +4122,10 @@ export function createOfflineStoreController<
    * Applies the planned rebases of the resolutions that still wait for a
    * decision, adding them to `applied`. A resolution changed meanwhile (e.g.
    * it followed a concurrent change of its entity first) follows `work` from
-   * its new version.
+   * its new version. Then the resolutions created meanwhile follow it too:
+   * one created before `work` was queued (e.g. an older change that
+   * exhausted its retries while the files of `work` were stored) did not see
+   * it.
    */
   async function applyResolutionRebases(
     current: ActiveSessionState,
@@ -4105,6 +4133,28 @@ export function createOfflineStoreController<
     work: NewerWork,
     applied: ResolutionRebase[] = [],
   ): Promise<ResolutionRebase[]> {
+    await applyPlannedResolutionRebases(current, rebases, work, applied);
+    if (resolutions.size > rebases.length) {
+      await applyPlannedResolutionRebases(
+        current,
+        await planResolutionRebases(
+          current,
+          work,
+          new Set(rebases.map(({ previous }) => previous.id)),
+        ),
+        work,
+        applied,
+      );
+    }
+    return applied;
+  }
+
+  async function applyPlannedResolutionRebases(
+    current: ActiveSessionState,
+    rebases: readonly ResolutionRebase[],
+    work: NewerWork,
+    applied: ResolutionRebase[],
+  ): Promise<void> {
     for (const plannedRebase of rebases) {
       let rebase = plannedRebase;
       // Checked with no `await` before the write, which updates the record
@@ -4133,7 +4183,6 @@ export function createOfflineStoreController<
         await removeResolution(rebase.previous.id, current, true);
       }
     }
-    return applied;
   }
 
   /** The records whose uploads a rebase may have left unused */
@@ -5668,9 +5717,7 @@ export function createOfflineStoreController<
       // only flags them.
       const { nextEntry: plannedEntry } = plannedMutation;
       rebaseWork =
-        replacedResolutionId === undefined &&
-        plannedEntry &&
-        resolutions.size > 0
+        replacedResolutionId === undefined && plannedEntry
           ? {
               operation: plannedMutation.operationName,
               input: plannedMutation.validatedInput,
@@ -5829,7 +5876,7 @@ export function createOfflineStoreController<
         );
       }
 
-      if (resolutionRebases.length > 0 && rebaseWork) {
+      if (rebaseWork) {
         await applyResolutionRebases(
           current,
           resolutionRebases,
@@ -6528,7 +6575,6 @@ export function createOfflineStoreController<
     offline: OfflineMutationInput<TOperations, TName>;
     upload?: OfflineMutationUploadsInput;
   }): Promise<PreparedOfflineMutation> {
-    const calledAt = Date.now();
     await hydrateIfNeeded();
     const current = await ensureSessionForUploadDependencies(
       args.offline.operation,
@@ -6689,7 +6735,6 @@ export function createOfflineStoreController<
             await followDirectRunWithResolutions(
               successCurrent,
               prepared,
-              calledAt,
               reservedQueueOrder,
             );
           }
@@ -6724,7 +6769,6 @@ export function createOfflineStoreController<
   async function followDirectRunWithResolutions(
     current: ActiveSessionState,
     prepared: PreparedQueuedMutation,
-    calledAt: number,
     queueOrder: number,
   ): Promise<void> {
     const work: NewerWork = {
@@ -6736,11 +6780,7 @@ export function createOfflineStoreController<
     };
     const rebases = await applyResolutionRebases(
       current,
-      await planResolutionRebases(
-        current,
-        work,
-        (resolution) => resolution.enqueuedAt <= calledAt,
-      ),
+      await planResolutionRebases(current, work),
       work,
     );
     if (rebases.length === 0) return;

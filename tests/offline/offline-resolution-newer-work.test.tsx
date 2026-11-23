@@ -320,6 +320,42 @@ function createDocsEnv() {
   };
 }
 
+/**
+ * An online edit whose request hangs until the test makes it fail with a
+ * network error (the connection dropped) or be saved
+ */
+function createHangingEditRequest(t: ReturnType<typeof createDocsEnv>) {
+  let settle: ((saved: boolean) => void) | undefined;
+  let changes: DocChanges = {};
+
+  return {
+    start(editChanges: DocChanges) {
+      changes = editChanges;
+      return t.env.apiStore.performMutation('docs||1', {
+        mutation: async () => {
+          const saved = await new Promise<boolean>((resolve) => {
+            settle = resolve;
+          });
+          if (!saved) throw new TypeError('Failed to fetch');
+          await t.env.serverTable.delayedUpdateItem(
+            'docs||1',
+            getDefinedChanges(changes),
+          );
+          return { value: t.getServerDoc() };
+        },
+        offline: { operation: 'editDoc', input: { docId: 'docs||1', changes } },
+      });
+    },
+    fail() {
+      settle?.(false);
+    },
+    async succeed() {
+      settle?.(true);
+      await flushAllTimers();
+    },
+  };
+}
+
 describe('an operation with accumulation', () => {
   test('retrying a failed edit after a newer edit was saved online keeps the newer values and still sends the fields only the failed edit changed', async () => {
     const t = createDocsEnv();
@@ -540,6 +576,88 @@ describe('changes that finish out of order or wait for a creation', () => {
     expect(await t.retryFailedChange()).toBe(true);
     expect(t.getServerDoc()).toMatchInlineSnapshot(`
       body: 'v3'
+      status: 'draft'
+      title: 'T1'
+    `);
+  });
+
+  test('a failed edit made after an online edit whose request then falls back to the queue keeps its own values', async () => {
+    const t = createDocsEnv();
+
+    // Online, the user saves the body `v2`: its request hangs
+    const olderRequest = createHangingEditRequest(t);
+    const older = olderRequest.start({ body: 'v2' });
+    await advanceTime(100);
+
+    // The connection drops and the user writes `v3`, which is queued. Back
+    // online, the server rejects it, so it waits for a decision
+    t.goOffline();
+    expect(await t.editDoc({ body: 'v3' })).toBe('queued');
+    t.rejectedValues.add('v3');
+    await t.goOnline();
+    t.rejectedValues.clear();
+
+    // The connection drops again and the hanging `v2` request fails: it is
+    // queued at the place it had when it was called, before `v3`. `v3` was
+    // made after it, so it does not follow it and keeps its own body
+    t.goOffline();
+    olderRequest.fail();
+    await flushAllTimers();
+    expect((await older).unwrap().kind).toBe('queued');
+    expect(t.getResolutions()).toMatchInlineSnapshot(`
+      - error: 'rejected v3'
+        input: 'changes: body: "v3", title: undefined, docId: "docs||1", parentId: undefined'
+        kind: 'retry-exhausted'
+        on: 'item:docs||1'
+        op: 'editDoc'
+    `);
+
+    // Back online `v2` is replayed, and "Try again" sends the newest body
+    await t.goOnline();
+    expect(t.replayed).toMatchInlineSnapshot(`['editDoc {"body":"v2"}']`);
+    expect(await t.retryFailedChange()).toBe(true);
+    expect(t.getServerDoc().body).toBe('v3');
+  });
+
+  test('a failed edit whose request fell back to the queue while a newer online edit was in flight follows that edit once it is saved', async () => {
+    const t = createDocsEnv();
+
+    // Online, the user saves `T1`/`v1`, then `v2` while the first request
+    // still hangs
+    const olderRequest = createHangingEditRequest(t);
+    const older = olderRequest.start({ title: 'T1', body: 'v1' });
+    await advanceTime(100);
+    const newerRequest = createHangingEditRequest(t);
+    const newer = newerRequest.start({ body: 'v2' });
+    await advanceTime(100);
+
+    // The connection drops and the first request fails: it is queued. Back
+    // online, the server rejects it, so it waits for a decision, while the
+    // `v2` request is still in flight
+    t.goOffline();
+    olderRequest.fail();
+    await flushAllTimers();
+    expect((await older).unwrap().kind).toBe('queued');
+    t.rejectedValues.add('v1');
+    await t.goOnline();
+    t.rejectedValues.clear();
+
+    // The `v2` request is saved. The failed edit was made before it, so it
+    // follows it, although it started waiting after `v2` was called
+    await newerRequest.succeed();
+    expect((await newer).unwrap().kind).toBe('online');
+    expect(t.getResolutions()).toMatchInlineSnapshot(`
+      - error: 'rejected T1 v1'
+        input: 'changes: body: "v2", title: "T1", docId: "docs||1", parentId: undefined'
+        kind: 'retry-exhausted'
+        on: 'item:docs||1'
+        op: 'editDoc'
+    `);
+
+    // "Try again" keeps the saved body
+    expect(await t.retryFailedChange()).toBe(true);
+    expect(t.getServerDoc()).toMatchInlineSnapshot(`
+      body: 'v2'
       status: 'draft'
       title: 'T1'
     `);
