@@ -3815,7 +3815,15 @@ export function createListQueryStore<
       itemPayload,
       options,
       store,
-      scheduleAutomaticItemFetch,
+      (payload, fields, onSkipped) => {
+        scheduleAutomaticItemFetch(
+          'highPriority',
+          payload,
+          { fields },
+          onSkipped,
+          true,
+        );
+      },
       useMultipleItems,
       persistence ? isItemRestoredFromStorage : undefined,
     );
@@ -4198,8 +4206,11 @@ export function createListQueryStore<
     itemKey: string,
     priority: FetchType,
   ): boolean {
+    return priority !== 'highPriority' && isHeldLoadedItem(itemKey);
+  }
+
+  function isHeldLoadedItem(itemKey: string): boolean {
     return (
-      priority !== 'highPriority' &&
       resolutionItemKeys.has(itemKey) &&
       !!store.state.itemQueries[itemKey]?.wasLoaded
     );
@@ -4208,16 +4219,18 @@ export function createListQueryStore<
   /**
    * Schedules an item fetch hooks start on their own, skipping unsent
    * creations and held items (see `skipsBackgroundItemRefetch`); `onSkipped`
-   * is called when the fetch is skipped.
+   * is called when the fetch is skipped. A `keepsHeldItem` fetch (the
+   * `requireFreshData` refresh) skips a loaded held item at any priority.
    */
   function scheduleAutomaticItemFetch(
     fetchType: FetchType,
     itemPayload: ItemPayload,
     options?: { fields?: FieldsInput },
     onSkipped?: () => void,
+    keepsHeldItem = false,
   ): ScheduleFetchResults {
-    // The unsent creations are only known once the queued work is read, e.g.
-    // for a screen mounted at startup
+    // The unsent creations and held items are only known once the queued work
+    // is read, e.g. for a screen mounted at startup
     if (offlineController && !offlineController.isHydrated()) {
       const schedule = () => {
         if (isDisposed) return;
@@ -4226,6 +4239,7 @@ export function createListQueryStore<
           itemPayload,
           options,
           onSkipped,
+          keepsHeldItem,
         );
       };
       void offlineController.hydrateIfNeeded().then(schedule, schedule);
@@ -4237,6 +4251,7 @@ export function createListQueryStore<
       itemPayload,
       options,
       onSkipped,
+      keepsHeldItem,
     );
   }
 
@@ -4245,13 +4260,57 @@ export function createListQueryStore<
     itemPayload: ItemPayload,
     options: { fields?: FieldsInput } | undefined,
     onSkipped: (() => void) | undefined,
+    keepsHeldItem: boolean,
   ): ScheduleFetchResults {
     const itemKey = getItemKey(itemPayload);
+    // A held item may not be read back from async storage yet, e.g. for an
+    // editor mounted at startup: read it first to know it is loaded
+    if (
+      keepsHeldItem &&
+      persistence?.hasAsyncPreload &&
+      resolutionItemKeys.has(itemKey) &&
+      store.state.itemQueries[itemKey] === undefined
+    ) {
+      const schedule = () => {
+        if (isDisposed) return;
+        scheduleFetchOfKnownItem(
+          itemKey,
+          fetchType,
+          itemPayload,
+          options,
+          onSkipped,
+          keepsHeldItem,
+        );
+      };
+      void persistence.preloadItems([itemKey]).then(schedule, schedule);
+      return 'scheduled';
+    }
+
+    return scheduleFetchOfKnownItem(
+      itemKey,
+      fetchType,
+      itemPayload,
+      options,
+      onSkipped,
+      keepsHeldItem,
+    );
+  }
+
+  function scheduleFetchOfKnownItem(
+    itemKey: string,
+    fetchType: FetchType,
+    itemPayload: ItemPayload,
+    options: { fields?: FieldsInput } | undefined,
+    onSkipped: (() => void) | undefined,
+    keepsHeldItem: boolean,
+  ): ScheduleFetchResults {
     // An unsent creation only exists locally until its creation is
     // confirmed, so the server doesn't know it yet
     if (
       unsentCreationItemKeys.has(itemKey) ||
-      skipsBackgroundItemRefetch(itemKey, fetchType)
+      (keepsHeldItem
+        ? isHeldLoadedItem(itemKey)
+        : skipsBackgroundItemRefetch(itemKey, fetchType))
     ) {
       onSkipped?.();
       return 'skipped';

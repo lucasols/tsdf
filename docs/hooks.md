@@ -51,6 +51,13 @@ This option changes both fetching and the returned status:
 - Items that only exist locally (offline creations the server has not
   confirmed yet) are not fetched: the hook reports their local status right
   away.
+- A loaded document or item with an offline change waiting for a manual
+  resolution is not fetched either: the refresh would show the server's
+  version over the user's change. The hook reports the local version right
+  away, and the store refetches it once the change is handled (see
+  [Revalidation After Recovering](./offline.md#revalidation-after-recovering)).
+  With `'ifFromStorage'` too. Right after a reload, the hook waits for the
+  session's queued work and resolutions to be read before deciding.
 - Scheduler coalescing can merge simultaneous work, but repeated mounts can
   still produce repeated network requests.
 

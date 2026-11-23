@@ -5,7 +5,9 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
   CollectionOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
+  RequireFreshData,
 } from '../../src/main';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
 import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
@@ -16,7 +18,12 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type UpdateValueConflictOperations,
@@ -56,6 +63,16 @@ afterEach(() => {
 
 const conflictSchema = rc_object({ reason: rc_string });
 
+type StorageAdapter = 'local-sync' | typeof opfsPersistentStorage;
+
+/** Waits for a store call; async storage writes need the timers to run. */
+function createSettle(adapter: StorageAdapter) {
+  return <T,>(value: T | Promise<T>) =>
+    adapter === 'local-sync'
+      ? value
+      : resolveAfterAllTimers(Promise.resolve(value));
+}
+
 function goOnline() {
   act(() => {
     network.goOnline();
@@ -75,10 +92,19 @@ type RenameItemOperations = {
 
 /**
  * A loaded collection store whose offline renames always conflict, and a
- * view showing Ada.
+ * view showing Ada. With `reloadedWithServerName`, it is the same store after
+ * the app reloads, starting from what was saved on the device while the
+ * server has that name.
  */
-function setupCollection(name: string, usesRealTimeUpdates: boolean) {
-  network.setOffline();
+function setupCollection(
+  name: string,
+  usesRealTimeUpdates: boolean,
+  reloadedWithServerName?: string,
+  adapter: StorageAdapter = 'local-sync',
+) {
+  const reloaded = reloadedWithServerName !== undefined;
+  if (!reloaded) network.setOffline();
+  const settle = createSettle(adapter);
   const sessionKey = `${name}-session`;
   const tabs = createFocusChangeCoordinator(['app'], 'app');
 
@@ -86,7 +112,7 @@ function setupCollection(name: string, usesRealTimeUpdates: boolean) {
     { name: string },
     RenameItemOperations
   >(
-    { 'users||1': { name: 'Ada' } },
+    { 'users||1': { name: reloadedWithServerName ?? 'Ada' } },
     {
       id: name,
       getSessionKey: () => sessionKey,
@@ -95,12 +121,12 @@ function setupCollection(name: string, usesRealTimeUpdates: boolean) {
         getSessionKey: () => sessionKey,
         offlineSession: { network: network.config },
       }),
-      testScenario: 'loaded',
+      testScenario: reloaded ? 'idle' : 'loaded',
       usesRealTimeUpdates,
       revalidateOnWindowFocus: true,
       bindFocusController: tabs.bind('app'),
       persistentStorage: {
-        adapter: 'local-sync',
+        adapter,
         schema: collectionSchema,
         payloadSchema: rc_string,
         offline: {
@@ -126,28 +152,36 @@ function setupCollection(name: string, usesRealTimeUpdates: boolean) {
     },
   );
 
-  function renderAdaView() {
+  function renderAdaView(requireFreshData?: RequireFreshData) {
     return renderHook(() => {
-      const ada = env.apiStore.useItem('users||1');
-      env.trackItemUI('ada', ada.data?.value.name ?? `- ${ada.status}`);
+      const ada = env.apiStore.useItem('users||1', { requireFreshData });
+      env.trackItemUI(
+        'ada',
+        requireFreshData && ada.isLoading
+          ? `${ada.data?.value.name ?? '-'} (loading)`
+          : (ada.data?.value.name ?? `- ${ada.status}`),
+      );
     });
   }
 
   async function renameAdaOffline() {
     env.addTimelineComments('beforeNextAction', ['offline: rename Ada']);
     await act(async () => {
-      await env.apiStore.performMutation('users||1', {
-        optimisticUpdate: () => {
-          env.apiStore.updateItemState('users||1', (draft) => {
-            draft.value.name = 'Ada edited';
-          });
-        },
-        mutation: () => Promise.reject(new Error('unreachable while offline')),
-        offline: {
-          operation: 'renameItem',
-          input: { itemId: 'users||1', name: 'Ada edited' },
-        },
-      });
+      await settle(
+        env.apiStore.performMutation('users||1', {
+          optimisticUpdate: () => {
+            env.apiStore.updateItemState('users||1', (draft) => {
+              draft.value.name = 'Ada edited';
+            });
+          },
+          mutation: () =>
+            Promise.reject(new Error('unreachable while offline')),
+          offline: {
+            operation: 'renameItem',
+            input: { itemId: 'users||1', name: 'Ada edited' },
+          },
+        }),
+      );
     });
   }
 
@@ -162,9 +196,11 @@ function setupCollection(name: string, usesRealTimeUpdates: boolean) {
       'the user keeps their rename: Ada is refetched',
     ]);
     await act(async () => {
-      await env.apiStore.resolveOfflineResolution(resolution.id, 'renameItem', {
-        action: 'commit',
-      });
+      await settle(
+        env.apiStore.resolveOfflineResolution(resolution.id, 'renameItem', {
+          action: 'commit',
+        }),
+      );
     });
     await flushAllTimers();
   }
@@ -297,6 +333,100 @@ test('collection: an item waiting for a decision keeps its local version when a 
   view.unmount();
 });
 
+/**
+ * A rename of Ada conflicts, then the app reloads with it still waiting for a
+ * decision, on a screen that requires fresh data (e.g. an editor), and the
+ * user keeps their rename. Returns the timeline after the reload.
+ */
+async function reloadOnEditorOfHeldCollectionItem(
+  requireFreshData: RequireFreshData,
+  adapter: StorageAdapter,
+) {
+  const name = `held-local-collection-fresh-${requireFreshData}`;
+  const before = setupCollection(name, false, undefined, adapter);
+  const view = before.renderAdaView();
+  await flushAllTimers();
+
+  // Offline: rename Ada. Meanwhile Bob renames her on the server, so the
+  // rename conflicts once back online.
+  await before.renameAdaOffline();
+  before.env.serverTable.updateItem('users||1', { name: 'Ada by Bob' });
+  goOnline();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads on the editor. It mounts before the queued work and its
+  // resolutions are read from the device: the forced refresh waits for them,
+  // and then leaves the local version alone instead of showing Bob's older
+  // content over the user's rename. The editor stops loading.
+  resetSessionForTests();
+  const { env, renderAdaView, keepAdaRename } = setupCollection(
+    name,
+    false,
+    'Ada by Bob',
+    adapter,
+  );
+  env.addTimelineComments('beforeNextAction', [
+    'the app reloads and the editor mounts',
+  ]);
+  const reloadedView = renderAdaView(requireFreshData);
+  await advanceTime(1000);
+  await flushAllTimers();
+
+  // Once the conflict is handled, Ada is refetched.
+  await keepAdaRename();
+
+  reloadedView.unmount();
+
+  return env.timelineString;
+}
+
+test.each([true, 'ifFromStorage'] as const)(
+  'collection: a requireFreshData: %s view keeps the local version of an item waiting for a decision after the app reloads',
+  async (requireFreshData) => {
+    expect(
+      await reloadOnEditorOfHeldCollectionItem(requireFreshData, 'local-sync'),
+    ).toMatchInlineSnapshot(`
+      "
+      time   | ada                  |
+      0      | -                    | -- the app reloads and the editor mounts
+      .      | Ada edited (loading) | [ada] ui-initialized
+      .      | Ada edited (loading) | offline:renameItem resolution-required
+      1s     | Ada edited           | [ada] ui-changed
+      12s    | Ada edited           | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+      12.01s | Ada edited           | -- the user keeps their rename: Ada is refetched
+      .      | Ada edited           | 🔴 [users||1] >fetch-started
+      12.81s | Ada edited           | 🔴 [users||1] <fetch-finished (value: {"name":"Ada edited (saved)"})
+      .      | Ada edited (saved)   | [ada] ui-changed
+      "
+    `);
+  },
+);
+
+test('collection: a requireFreshData view keeps the local version of an item waiting for a decision after the app reloads, with async storage', async () => {
+  resetSessionForTests({ clearStorage: true });
+  createOpfsPersistentStorageTestStore();
+
+  // Ada is read back from async storage before the forced refresh decides:
+  // she waits for a decision, so the local version stays.
+  expect(await reloadOnEditorOfHeldCollectionItem(true, opfsPersistentStorage))
+    .toMatchInlineSnapshot(`
+    "
+    time    | ada                |
+    0       | -                  | -- the app reloads and the editor mounts
+    .       | - (loading)        | [ada] ui-initialized
+    11ms    | Ada edited         | [ada] ui-changed
+    12ms    | Ada edited         | offline:renameItem resolution-required
+    12s     | Ada edited         | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+    12.053s | Ada edited         | -- the user keeps their rename: Ada is refetched
+    .       | Ada edited         | 🔴 [users||1] >fetch-started
+    12.853s | Ada edited         | 🔴 [users||1] <fetch-finished (value: {"name":"Ada edited (saved)"})
+    .       | Ada edited (saved) | [ada] ui-changed
+    "
+  `);
+});
+
 // -- ListQueryStore -------------------------------------------------------------
 
 type RenameUserOperations = {
@@ -311,10 +441,20 @@ type RenameUserOperations = {
 
 /**
  * A loaded list query store whose offline renames always conflict, and a
- * view with the list of users and a detail panel showing Ada.
+ * view with the list of users and a detail panel showing Ada. With
+ * `reloadedWithServerName`, it is the same store after the app reloads,
+ * starting from what was saved on the device while the server has that name
+ * for Ada.
  */
-function setupListQuery(name: string, usesRealTimeUpdates: boolean) {
-  network.setOffline();
+function setupListQuery(
+  name: string,
+  usesRealTimeUpdates: boolean,
+  reloadedWithServerName?: string,
+  adapter: StorageAdapter = 'local-sync',
+) {
+  const reloaded = reloadedWithServerName !== undefined;
+  if (!reloaded) network.setOffline();
+  const settle = createSettle(adapter);
   const sessionKey = `${name}-session`;
   const tabs = createFocusChangeCoordinator(['app'], 'app');
 
@@ -326,7 +466,7 @@ function setupListQuery(name: string, usesRealTimeUpdates: boolean) {
   >(
     {
       users: [
-        { id: 1, name: 'Ada' },
+        { id: 1, name: reloadedWithServerName ?? 'Ada' },
         { id: 2, name: 'Grace' },
       ],
     },
@@ -338,12 +478,14 @@ function setupListQuery(name: string, usesRealTimeUpdates: boolean) {
         getSessionKey: () => sessionKey,
         offlineSession: { network: network.config },
       }),
-      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      testScenario: reloaded
+        ? 'idle'
+        : { loaded: { queries: [{ tableId: 'users' }] } },
       usesRealTimeUpdates,
       revalidateOnWindowFocus: true,
       bindFocusController: tabs.bind('app'),
       persistentStorage: {
-        adapter: 'local-sync',
+        adapter,
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
@@ -370,34 +512,45 @@ function setupListQuery(name: string, usesRealTimeUpdates: boolean) {
     },
   );
 
-  function renderUsersView() {
+  function renderUsersView(requireFreshData?: RequireFreshData) {
     return renderHook(() => {
       const query = env.apiStore.useListQuery(
         { tableId: 'users' },
-        { itemSelector: (item) => item.name },
+        { itemSelector: (item) => item.name, requireFreshData },
       );
-      const ada = env.apiStore.useItem('users||1');
-      env.trackItemUI('rows', query.items.join(', '));
-      env.trackItemUI('ada', ada.data?.name ?? `- ${ada.status}`);
+      const ada = env.apiStore.useItem('users||1', { requireFreshData });
+      env.trackItemUI(
+        'rows',
+        `${query.items.join(', ')}${requireFreshData && query.isLoading ? ' (loading)' : ''}`,
+      );
+      env.trackItemUI(
+        'ada',
+        requireFreshData && ada.isLoading
+          ? `${ada.data?.name ?? '-'} (loading)`
+          : (ada.data?.name ?? `- ${ada.status}`),
+      );
     });
   }
 
   async function renameAdaOffline() {
     env.addTimelineComments('beforeNextAction', ['offline: rename Ada']);
     await act(async () => {
-      await env.apiStore.performMutation('users||1', {
-        optimisticUpdate: () => {
-          env.apiStore.updateItemState('users||1', (item) => ({
-            ...item,
-            name: 'Ada edited',
-          }));
-        },
-        mutation: () => Promise.reject(new Error('unreachable while offline')),
-        offline: {
-          operation: 'renameUser',
-          input: { itemId: 'users||1', name: 'Ada edited' },
-        },
-      });
+      await settle(
+        env.apiStore.performMutation('users||1', {
+          optimisticUpdate: () => {
+            env.apiStore.updateItemState('users||1', (item) => ({
+              ...item,
+              name: 'Ada edited',
+            }));
+          },
+          mutation: () =>
+            Promise.reject(new Error('unreachable while offline')),
+          offline: {
+            operation: 'renameUser',
+            input: { itemId: 'users||1', name: 'Ada edited' },
+          },
+        }),
+      );
     });
   }
 
@@ -412,9 +565,11 @@ function setupListQuery(name: string, usesRealTimeUpdates: boolean) {
       'the user keeps their rename: Ada and the list are refetched',
     ]);
     await act(async () => {
-      await env.apiStore.resolveOfflineResolution(resolution.id, 'renameUser', {
-        action: 'commit',
-      });
+      await settle(
+        env.apiStore.resolveOfflineResolution(resolution.id, 'renameUser', {
+          action: 'commit',
+        }),
+      );
     });
     await flushAllTimers();
   }
@@ -566,6 +721,109 @@ test('list query: an item waiting for a decision keeps its local version when a 
   view.unmount();
 });
 
+/**
+ * A rename of Ada conflicts, then the app reloads with it still waiting for a
+ * decision, on a screen that requires fresh data for the list and for Ada,
+ * and the user keeps their rename. Returns the timeline after the reload.
+ */
+async function reloadOnScreenOfHeldListItem(
+  requireFreshData: RequireFreshData,
+  adapter: StorageAdapter,
+) {
+  const name = `held-local-list-fresh-${requireFreshData}`;
+  const before = setupListQuery(name, false, undefined, adapter);
+  const view = before.renderUsersView();
+  await flushAllTimers();
+
+  // Offline: rename Ada. Meanwhile Bob renames her on the server, so the
+  // rename conflicts once back online.
+  await before.renameAdaOffline();
+  before.env.serverTable.updateItem('users||1', { name: 'Ada by Bob' });
+  goOnline();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads on the screen. It mounts before the queued work and its
+  // resolutions are read from the device: the forced refreshes wait for
+  // them. The list is refreshed and keeps the local version of Ada, and Ada
+  // is not refetched: that would show Bob's older content over the user's
+  // rename. The screen stops loading.
+  resetSessionForTests();
+  const { env, renderUsersView, keepAdaRename } = setupListQuery(
+    name,
+    false,
+    'Ada by Bob',
+    adapter,
+  );
+  env.addTimelineComments('beforeNextAction', [
+    'the app reloads and the screen mounts',
+  ]);
+  const reloadedView = renderUsersView(requireFreshData);
+  await advanceTime(1000);
+  await flushAllTimers();
+
+  // Once the conflict is handled, Ada and the list are refetched.
+  await keepAdaRename();
+
+  reloadedView.unmount();
+
+  return env.timelineString;
+}
+
+test.each([true, 'ifFromStorage'] as const)(
+  'list query: a requireFreshData: %s view keeps the local version of an item waiting for a decision after the app reloads',
+  async (requireFreshData) => {
+    expect(await reloadOnScreenOfHeldListItem(requireFreshData, 'local-sync'))
+      .toMatchInlineSnapshot(`
+      "
+      time   | ada                  | rows                        |
+      0      | -                    | -                           | -- the app reloads and the screen mounts
+      .      | Ada edited (loading) | Ada edited, Grace (loading) | [rows, ada] ui-initialized
+      .      | Ada edited (loading) | Ada edited, Grace (loading) | offline:renameUser resolution-required
+      10ms   | Ada edited (loading) | Ada edited, Grace (loading) | 🔴 >list-fetch-started
+      810ms  | Ada edited (loading) | Ada edited, Grace (loading) | 🔴 <list-fetch-finished (value: {"count":2})
+      1s     | Ada edited           | Ada edited, Grace           | [rows, ada] ui-changed
+      12s    | Ada edited           | Ada edited, Grace           | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+      12.01s | Ada edited           | Ada edited, Grace           | -- the user keeps their rename: Ada and the list are refetched
+      .      | Ada edited           | Ada edited, Grace           | 🟠 >list-fetch-started
+      .      | Ada edited           | Ada edited, Grace           | 🟡 [users||1] >fetch-started
+      12.81s | Ada edited           | Ada edited, Grace           | 🟠 <list-fetch-finished (value: {"count":2})
+      .      | Ada edited (saved)   | Ada edited (saved), Grace   | [rows, ada] ui-changed
+      .      | Ada edited (saved)   | Ada edited (saved), Grace   | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada edited (saved)"})
+      "
+    `);
+  },
+);
+
+test('list query: a requireFreshData view keeps the local version of an item waiting for a decision after the app reloads, with async storage', async () => {
+  resetSessionForTests({ clearStorage: true });
+  createOpfsPersistentStorageTestStore();
+
+  // Ada is read back from async storage before the forced refresh decides:
+  // she waits for a decision, so the local version stays.
+  expect(await reloadOnScreenOfHeldListItem(true, opfsPersistentStorage))
+    .toMatchInlineSnapshot(`
+      "
+      time    | ada                | rows                      |
+      0       | -                  | -                         | -- the app reloads and the screen mounts
+      .       | - (loading)        |  (loading)                | [rows, ada] ui-initialized
+      11ms    | Ada edited         |  (loading)                | [ada] ui-changed
+      12ms    | Ada edited         |  (loading)                | offline:renameUser resolution-required
+      .       | Ada edited         |  (loading)                | 🔴 >list-fetch-started
+      812ms   | Ada edited         |  (loading)                | 🔴 <list-fetch-finished (value: {"count":2})
+      .       | Ada edited         | Ada edited, Grace         | [rows] ui-changed
+      12s     | Ada edited         | Ada edited, Grace         | [users||1] server-data-changed (value: {"name":"Ada edited (saved)"})
+      12.053s | Ada edited         | Ada edited, Grace         | -- the user keeps their rename: Ada and the list are refetched
+      .       | Ada edited         | Ada edited, Grace         | 🟠 >list-fetch-started
+      .       | Ada edited         | Ada edited, Grace         | 🟡 [users||1] >fetch-started
+      12.853s | Ada edited         | Ada edited, Grace         | 🟠 <list-fetch-finished (value: {"count":2})
+      .       | Ada edited (saved) | Ada edited (saved), Grace | [rows, ada] ui-changed
+      .       | Ada edited (saved) | Ada edited (saved), Grace | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada edited (saved)"})
+      "
+    `);
+});
+
 // -- DocumentStore --------------------------------------------------------------
 
 /**
@@ -578,9 +836,11 @@ function setupDocument(
   name: string,
   usesRealTimeUpdates: boolean,
   reloadedWithServerValue?: number,
+  adapter: StorageAdapter = 'local-sync',
 ) {
   const reloaded = reloadedWithServerValue !== undefined;
   if (!reloaded) network.setOffline();
+  const settle = createSettle(adapter);
   const sessionKey = `${name}-session`;
   const tabs = createFocusChangeCoordinator(['app'], 'app');
 
@@ -599,7 +859,7 @@ function setupDocument(
       revalidateOnWindowFocus: true,
       bindFocusController: tabs.bind('app'),
       persistentStorage: {
-        adapter: 'local-sync',
+        adapter,
         schema: docSchema,
         offline: {
           operations: {
@@ -622,25 +882,32 @@ function setupDocument(
     },
   );
 
-  function renderDocumentView() {
+  function renderDocumentView(requireFreshData?: RequireFreshData) {
     return renderHook(() => {
-      const doc = env.apiStore.useDocument();
-      env.trackUIChanges(doc.data?.value ?? `- ${doc.status}`);
+      const doc = env.apiStore.useDocument({ requireFreshData });
+      env.trackUIChanges(
+        requireFreshData && doc.isLoading
+          ? `${doc.data?.value ?? '-'} (loading)`
+          : (doc.data?.value ?? `- ${doc.status}`),
+      );
     });
   }
 
   async function changeValueOffline() {
     env.addTimelineComments('beforeNextAction', ['offline: change to 2']);
     await act(async () => {
-      await env.apiStore.performMutation({
-        optimisticUpdate: () => {
-          env.apiStore.updateState((draft) => {
-            draft.value = 2;
-          });
-        },
-        mutation: () => Promise.reject(new Error('unreachable while offline')),
-        offline: { operation: 'updateValue', input: { value: 2 } },
-      });
+      await settle(
+        env.apiStore.performMutation({
+          optimisticUpdate: () => {
+            env.apiStore.updateState((draft) => {
+              draft.value = 2;
+            });
+          },
+          mutation: () =>
+            Promise.reject(new Error('unreachable while offline')),
+          offline: { operation: 'updateValue', input: { value: 2 } },
+        }),
+      );
     });
   }
 
@@ -655,10 +922,10 @@ function setupDocument(
       'the user keeps their change: the document is refetched',
     ]);
     await act(async () => {
-      await env.apiStore.resolveOfflineResolution(
-        resolution.id,
-        'updateValue',
-        { action: 'commit' },
+      await settle(
+        env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
+          action: 'commit',
+        }),
       );
     });
     await flushAllTimers();
@@ -1011,4 +1278,95 @@ test('document: a view mounted while its document waits for a decision is refetc
   `);
 
   view.unmount();
+});
+
+/**
+ * A document change conflicts, then the app reloads with it still waiting for
+ * a decision, on a screen that requires fresh data (e.g. a doc editor), and
+ * the user keeps their change. Returns the timeline after the reload.
+ */
+async function reloadOnEditorOfHeldDocument(
+  requireFreshData: RequireFreshData,
+  adapter: StorageAdapter,
+) {
+  const name = `held-local-document-fresh-${requireFreshData}`;
+  const before = setupDocument(name, false, undefined, adapter);
+  const view = before.renderDocumentView();
+  await flushAllTimers();
+
+  // Offline: change the value to 2. Meanwhile someone else sets it to 5, so
+  // the change conflicts once back online.
+  await before.changeValueOffline();
+  before.env.setServerData(5);
+  goOnline();
+  await flushAllTimers();
+  view.unmount();
+  before.env.apiStore.dispose();
+
+  // The app reloads on the editor. It mounts before the queued work and its
+  // resolutions are read from the device: the forced refresh waits for them,
+  // and then leaves the local version alone instead of showing the server's
+  // older content over the user's change. The editor stops loading.
+  resetSessionForTests();
+  const { env, renderDocumentView, keepChange } = setupDocument(
+    name,
+    false,
+    5,
+    adapter,
+  );
+  env.addTimelineComments('beforeNextAction', [
+    'the app reloads and the editor mounts',
+  ]);
+  const reloadedView = renderDocumentView(requireFreshData);
+  await advanceTime(1000);
+  await flushAllTimers();
+
+  // Once the conflict is handled, the document is refetched.
+  await keepChange();
+
+  reloadedView.unmount();
+
+  return env.timelineString;
+}
+
+test.each([true, 'ifFromStorage'] as const)(
+  'document: a requireFreshData: %s view keeps the local version of a document waiting for a decision after the app reloads',
+  async (requireFreshData) => {
+    expect(await reloadOnEditorOfHeldDocument(requireFreshData, 'local-sync'))
+      .toMatchInlineSnapshot(`
+        "
+        time   | ui            |
+        0      | -             | -- the app reloads and the editor mounts
+        .      | "2 (loading)" | ui-initialized
+        .      | "2 (loading)" | offline:updateValue resolution-required
+        1s     | 2             | ui-changed
+        12s    | 2             | server-data-changed (value: 2)
+        12.01s | 2             | -- the user keeps their change: the document is refetched
+        .      | 2             | 🔴 >fetch-started
+        12.81s | 2             | 🔴 <fetch-finished (value: 2)
+        "
+      `);
+  },
+);
+
+test('document: a requireFreshData view keeps the local version of a document waiting for a decision after the app reloads, with async storage', async () => {
+  resetSessionForTests({ clearStorage: true });
+  createOpfsPersistentStorageTestStore();
+
+  // The document is read back from async storage before the forced refresh
+  // decides: it waits for a decision, so the local version stays.
+  expect(await reloadOnEditorOfHeldDocument(true, opfsPersistentStorage))
+    .toMatchInlineSnapshot(`
+      "
+      time    | ui            |
+      0       | -             | -- the app reloads and the editor mounts
+      .       | "- (loading)" | ui-initialized
+      12ms    | "- (loading)" | offline:updateValue resolution-required
+      .       | 2             | ui-changed
+      12s     | 2             | server-data-changed (value: 2)
+      12.053s | 2             | -- the user keeps their change: the document is refetched
+      .       | 2             | 🔴 >fetch-started
+      12.853s | 2             | 🔴 <fetch-finished (value: 2)
+      "
+    `);
 });

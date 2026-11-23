@@ -73,6 +73,9 @@ export function isStrictItemKeyPrefix(
  *   `partialResources` don't support it. A list query result derived with
  *   `derivedQueries` isn't checked, so use `true` when it must be fresh.
  * - `false` (default): normal cache behavior.
+ *
+ * Neither fetches a loaded document or item with an offline change waiting for
+ * a manual resolution: the hook reports its local version right away.
  */
 export type RequireFreshData = boolean | 'ifFromStorage';
 

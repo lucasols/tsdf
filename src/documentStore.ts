@@ -1408,6 +1408,47 @@ export function createDocumentStore<
     scheduleFetch(priority);
   }
 
+  /**
+   * Schedules the `requireFreshData` refresh, or calls `onSkipped` while the
+   * loaded document has a change waiting for a manual resolution: the refresh
+   * would replace the local version the user still has to decide on. Whether
+   * it is held is only known once the queued work is read, e.g. for an
+   * editor mounted at startup.
+   */
+  function scheduleFreshDataRefresh(
+    onSkipped: () => void,
+    didReadBackStoredDocument = false,
+  ): void {
+    if (offlineController && !offlineController.isHydrated()) {
+      const schedule = () => {
+        if (isDisposed) return;
+        scheduleFreshDataRefresh(onSkipped, didReadBackStoredDocument);
+      };
+      void offlineController.hydrateIfNeeded().then(schedule, schedule);
+      return;
+    }
+
+    if (requiresResolution) {
+      if (store.state.data !== null) {
+        onSkipped();
+        return;
+      }
+
+      // The held document may not be read back from async storage yet: read
+      // it first to know it is loaded
+      if (persistence?.hasAsyncPreload && !didReadBackStoredDocument) {
+        const schedule = () => {
+          if (isDisposed) return;
+          scheduleFreshDataRefresh(onSkipped, true);
+        };
+        void persistence.preloadPersistentStorage().then(schedule, schedule);
+        return;
+      }
+    }
+
+    scheduleFetch('highPriority');
+  }
+
   function invalidateData(priority: FetchType = 'highPriority'): void {
     if (skipsBackgroundRefetch(priority)) return;
 
@@ -1973,7 +2014,7 @@ export function createDocumentStore<
       !disabled,
       DOC_TARGET_KEY,
       !!persistence?.isRestoredFromStorage(),
-      () => {
+      (skipRefresh) => {
         // A refresh already in flight brings server data newer than the
         // restored one, so it settles this hook without another request. A
         // retry after a failed fetch is in flight as `loading`, not
@@ -1986,7 +2027,7 @@ export function createDocumentStore<
           return;
         }
 
-        scheduleFetch('highPriority');
+        scheduleFreshDataRefresh(skipRefresh);
       },
     );
 

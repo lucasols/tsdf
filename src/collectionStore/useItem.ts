@@ -1,7 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
-import { FetchType } from '../requestScheduler';
 import { assertNoRequireFreshDataWithDebouncePayload } from '../utils/payloadDebounce';
 import {
   RequireFreshData,
@@ -50,8 +49,12 @@ export function useItem<
     debouncePayload,
   }: UseItemOptions<ItemState, Selected>,
   store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
-  scheduleAutomaticFetch: (
-    fetchType: FetchType,
+  /**
+   * Schedules the `requireFreshData` refresh, or calls `onSkipped` when there
+   * is nothing to refresh: an unsent creation, or a loaded item waiting for a
+   * manual resolution, whose local version the refresh would replace
+   */
+  scheduleFreshDataRefresh: (
     payload: ItemPayload,
     onSkipped: () => void,
   ) => void,
@@ -157,7 +160,7 @@ export function useItem<
         return;
       }
 
-      scheduleAutomaticFetch('highPriority', fetchQuery.payload, skipRefresh);
+      scheduleFreshDataRefresh(fetchQuery.payload, skipRefresh);
     },
   );
 

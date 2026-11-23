@@ -2119,48 +2119,101 @@ export function createCollectionStore<
     itemKey: string,
     priority: FetchType,
   ): boolean {
-    return (
-      priority !== 'highPriority' &&
-      resolutionItemKeys.has(itemKey) &&
-      !!store.state[itemKey]?.wasLoaded
-    );
+    return priority !== 'highPriority' && isHeldLoadedItem(itemKey);
+  }
+
+  function isHeldLoadedItem(itemKey: string): boolean {
+    return resolutionItemKeys.has(itemKey) && !!store.state[itemKey]?.wasLoaded;
   }
 
   /**
    * Schedules a fetch hooks start on their own, skipping unsent creations and
    * held items (see `skipsBackgroundRefetch`); `onSkipped` is called when the
-   * fetch is skipped.
+   * fetch is skipped. A `keepsHeldItem` fetch (the `requireFreshData`
+   * refresh) skips a loaded held item at any priority.
    */
   function scheduleAutomaticFetch(
     fetchType: FetchType,
     payload: ItemPayload,
     onSkipped?: () => void,
+    keepsHeldItem = false,
   ): void {
-    // The unsent creations are only known once the queued work is read, e.g.
-    // for a screen mounted at startup
+    // The unsent creations and held items are only known once the queued work
+    // is read, e.g. for a screen mounted at startup
     if (offlineController && !offlineController.isHydrated()) {
       const schedule = () => {
         if (isDisposed) return;
-        scheduleAutomaticFetchOfKnownItem(fetchType, payload, onSkipped);
+        scheduleAutomaticFetchOfKnownItem(
+          fetchType,
+          payload,
+          onSkipped,
+          keepsHeldItem,
+        );
       };
       void offlineController.hydrateIfNeeded().then(schedule, schedule);
       return;
     }
 
-    scheduleAutomaticFetchOfKnownItem(fetchType, payload, onSkipped);
+    scheduleAutomaticFetchOfKnownItem(
+      fetchType,
+      payload,
+      onSkipped,
+      keepsHeldItem,
+    );
   }
 
   function scheduleAutomaticFetchOfKnownItem(
     fetchType: FetchType,
     payload: ItemPayload,
     onSkipped: (() => void) | undefined,
+    keepsHeldItem: boolean,
   ): void {
     const itemKey = getItemKey(payload);
+    // A held item may not be read back from async storage yet, e.g. for an
+    // editor mounted at startup: read it first to know it is loaded
+    if (
+      keepsHeldItem &&
+      persistence?.hasAsyncPreload &&
+      resolutionItemKeys.has(itemKey) &&
+      store.state[itemKey] === undefined
+    ) {
+      const schedule = () => {
+        if (isDisposed) return;
+        scheduleFetchOfKnownItem(
+          itemKey,
+          fetchType,
+          payload,
+          onSkipped,
+          keepsHeldItem,
+        );
+      };
+      void persistence.preloadItems([itemKey]).then(schedule, schedule);
+      return;
+    }
+
+    scheduleFetchOfKnownItem(
+      itemKey,
+      fetchType,
+      payload,
+      onSkipped,
+      keepsHeldItem,
+    );
+  }
+
+  function scheduleFetchOfKnownItem(
+    itemKey: string,
+    fetchType: FetchType,
+    payload: ItemPayload,
+    onSkipped: (() => void) | undefined,
+    keepsHeldItem: boolean,
+  ): void {
     // An unsent creation only exists locally until its creation is
     // confirmed, so the server doesn't know it yet
     if (
       unsentCreationItemKeys.has(itemKey) ||
-      skipsBackgroundRefetch(itemKey, fetchType)
+      (keepsHeldItem
+        ? isHeldLoadedItem(itemKey)
+        : skipsBackgroundRefetch(itemKey, fetchType))
     ) {
       onSkipped?.();
       return;
@@ -2496,7 +2549,8 @@ export function createCollectionStore<
       payload,
       options,
       store,
-      scheduleAutomaticFetch,
+      (itemPayload, onSkipped) =>
+        scheduleAutomaticFetch('highPriority', itemPayload, onSkipped, true),
       useMultipleItems,
       persistence ? isItemRestoredFromStorage : undefined,
     );
