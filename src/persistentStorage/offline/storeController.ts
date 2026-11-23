@@ -4438,13 +4438,9 @@ export function createOfflineStoreController<
       await removeResolution(resolution.id, current, true);
     }
 
-    storeAdapter.captureQueuedMutationOverlays?.({
-      sessionKey: current.sessionKey,
-      entityRefs: nextEntries.flatMap((nextEntry) => {
-        return nextEntry.entry?.entityRefs ?? [];
-      }),
-    });
-
+    // No overlays are captured for the requeued entries: their entities show
+    // the server version (no optimistic update is applied again), and a
+    // creation removed when it started waiting has nothing to capture.
     refreshDerivedState(current);
     // Resolutions of operations the app no longer registers were dropped
     // instead of requeued.

@@ -46,8 +46,6 @@ export type UsePendingOfflineItemsOptions<
   ) => SelectedItem;
   /** Narrows the hook output using the tracked item payload, before selection. */
   filterPayload?: (payload: ItemPayload) => boolean;
-  /** Includes entities currently blocked in manual resolution. */
-  includeResolutionRequired?: boolean;
 };
 
 export function usePendingOfflineItems<
@@ -59,7 +57,6 @@ export function usePendingOfflineItems<
   {
     selector,
     filterPayload,
-    includeResolutionRequired = false,
   }: UsePendingOfflineItemsOptions<ItemState, ItemPayload, SelectedItem>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   registerActiveItems: (itemKeys: string[]) => () => void,
@@ -88,11 +85,11 @@ export function usePendingOfflineItems<
   >({});
   const eligibleEntities = useMemo(() => {
     return offlineEntities.filter((entity) => {
-      if (entity.entityKind !== 'item') return false;
-      if (!includeResolutionRequired && entity.requiresResolution) return false;
-      return true;
+      // Changes waiting for a decision are not pending anymore: their items
+      // show the server version.
+      return entity.entityKind === 'item' && !entity.requiresResolution;
     });
-  }, [includeResolutionRequired, offlineEntities]);
+  }, [offlineEntities]);
   const { eligibleItemKeys, preloadableItemKeys } = useMemo(() => {
     const allKeys: string[] = [];
     const preloadKeys: string[] = [];
@@ -228,6 +225,13 @@ export function usePendingOfflineItems<
           (hasStateItemQuery && state.itemQueries[itemKey] === null) ||
           missingPersistedItemSnapshot;
         if (isDeleted) {
+          // A creation removed when it started waiting for a decision has no
+          // local data once retried: there is nothing to show until it is
+          // saved, and it is not a delete.
+          const isUnsentCreation =
+            entity.tempId !== undefined || entity.isClientIdCreation === true;
+          if (!isDeletedByKind && isUnsentCreation) continue;
+
           deletedItems.push(itemPayload);
           continue;
         }

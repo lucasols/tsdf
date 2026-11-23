@@ -1,11 +1,10 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_object, rc_string } from 'runcheck';
+import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   type DefineListQueryOfflineOperations,
   type DefineOfflineOperation,
-  type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
@@ -236,152 +235,26 @@ test('usePendingOfflineItems exposes visible queued items, pending deletes, filt
   `);
 });
 
-type ResolutionRequiredItemsOperations = {
-  conflictUser: ListQueryOfflineOperationDefinition<
-    UserRow,
-    ListQueryParams,
-    string,
-    { itemId: string; name: string },
-    { reason: string }
-  >;
-};
-
-test('usePendingOfflineItems can opt resolution-required visible items back in', async () => {
-  const conflictSchema = rc_object({ reason: rc_string });
-  const env = createListQueryStoreTestEnv<
-    UserRow,
-    false,
-    false,
-    ResolutionRequiredItemsOperations
-  >(
-    { users: [{ id: 1, name: 'Ada' }] },
-    {
-      getSessionKey: () => 'pending-offline-items-resolution-item',
-      storeManager: createStoreManager({
-        errorNormalizer: normalizeError,
-        getSessionKey: () => 'pending-offline-items-resolution-item',
-        offlineSession: { network: network.config },
-      }),
-      testScenario: { loaded: { tables: ['users'] } },
-      persistentStorage: {
-        adapter: 'local-sync',
-        schema: userRowSchema,
-        itemPayloadSchema: rc_string,
-        queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          operations: {
-            conflictUser: {
-              inputSchema: userPatchSchema,
-              kind: 'update',
-              getEntityRefs: ({ input }) => [input.itemId],
-              execute: async ({ input }) => {
-                await env.serverTable.delayedSetItem(input.itemId, {
-                  id: 1,
-                  name: input.name,
-                });
-                return { name: input.name };
-              },
-              onSuccessExecute: ({ input }) => {
-                env.apiStore.updateItemState(input.itemId, (item) => ({
-                  ...item,
-                  name: input.name,
-                }));
-              },
-              conflictHandling: {
-                schema: conflictSchema,
-                detectConflict: () => ({ reason: 'server-changed' }),
-              },
-            },
-          },
-        },
-      },
-    },
-  );
-
-  const hook = renderHook(() => {
-    const defaultPending = env.apiStore.usePendingOfflineItems({
-      selector: (item) => item.name,
-    });
-    const includeResolutionRequired = env.apiStore.usePendingOfflineItems({
-      selector: (item) => item.name,
-      includeResolutionRequired: true,
-    });
-
-    return { defaultPending, includeResolutionRequired };
-  });
-
-  await flushAllTimers();
-
-  // Queue a visible edit offline so replay can later convert it into a
-  // resolution-required item without losing the optimistic row.
-  act(() => {
-    network.goOffline();
-  });
-  await flushAllTimers();
-
-  await act(async () => {
-    await env.apiStore.performMutation('users||1', {
-      optimisticUpdate: () => {
-        env.apiStore.updateItemState('users||1', (item) => ({
-          ...item,
-          name: 'Ada conflict',
-        }));
-      },
-      mutation: async () => {
-        await env.serverTable.delayedSetItem('users||1', {
-          id: 1,
-          name: 'Ada conflict',
-        });
-        return { name: 'Ada conflict' };
-      },
-      offline: {
-        operation: 'conflictUser',
-        input: { itemId: 'users||1', name: 'Ada conflict' },
-      },
-    });
-  });
-
-  // Replay should move the entity into manual resolution, which the default
-  // hook hides while the opt-in hook keeps visible.
-  act(() => {
-    network.goOnline();
-  });
-  await flushAllTimers();
-
-  // The opt-in hook shows the item's in-memory optimistic value ('Ada
-  // conflict'), not the persisted base snapshot ('Ada') — a storage preload
-  // must never clobber newer in-memory state with the persisted copy.
-  expect(hook.result.current).toMatchInlineSnapshot(`
-    defaultPending:
-      deletedItems: []
-      items: []
-
-    includeResolutionRequired:
-      deletedItems: []
-      items: ['Ada conflict']
-  `);
-});
-
-type ResolutionRequiredDeletesOperations = DefineListQueryOfflineOperations<
+type FailingCreationOperations = DefineListQueryOfflineOperations<
   UserRow,
   ListQueryParams,
   string,
-  { deleteUser: DefineOfflineOperation<{ itemId: string }> }
+  { createUser: DefineOfflineOperation<{ name: string }, unknown, UserRow> }
 >;
 
-test('usePendingOfflineItems can opt resolution-required deletes back into deletedItems', async () => {
+test('usePendingOfflineItems leaves out a failed creation, and does not list it as deleted once it is sent again', async () => {
   const env = createListQueryStoreTestEnv<
     UserRow,
     false,
     false,
-    ResolutionRequiredDeletesOperations
+    FailingCreationOperations
   >(
     { users: [{ id: 1, name: 'Ada' }] },
     {
-      getSessionKey: () => 'pending-offline-items-resolution-delete',
+      getSessionKey: () => 'pending-offline-items-failed-creation',
       storeManager: createStoreManager({
         errorNormalizer: normalizeError,
-        getSessionKey: () => 'pending-offline-items-resolution-delete',
+        getSessionKey: () => 'pending-offline-items-failed-creation',
         offlineSession: {
           network: network.config,
           replayRetry: { intervalMs: 1, maxFailures: 1 },
@@ -397,15 +270,19 @@ test('usePendingOfflineItems can opt resolution-required deletes back into delet
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
           operations: {
-            deleteUser: {
-              inputSchema: deleteItemInputSchema,
-              kind: 'delete',
-              getEntityRefs: ({ input }) => [input.itemId],
-              execute: () => {
-                throw new Error('delete failed');
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
               },
-              onSuccessExecute: ({ input }) => {
-                env.apiStore.deleteItemState(input.itemId);
+              execute: () => {
+                throw new Error('create rejected');
               },
             },
           },
@@ -414,51 +291,79 @@ test('usePendingOfflineItems can opt resolution-required deletes back into delet
     },
   );
 
-  const hook = renderHook(() => {
-    const defaultPending = env.apiStore.usePendingOfflineItems();
-    const includeResolutionRequired = env.apiStore.usePendingOfflineItems({
-      includeResolutionRequired: true,
-    });
-
-    return { defaultPending, includeResolutionRequired };
-  });
+  const hook = renderHook(() =>
+    env.apiStore.usePendingOfflineItems({ selector: (item) => item.name }),
+  );
+  const log: unknown[] = [];
 
   await flushAllTimers();
 
-  // Start from a normal pending delete so replay has something to exhaust.
+  // Create a user offline: it shows as a pending item.
   act(() => {
     network.goOffline();
   });
   await flushAllTimers();
 
   await act(async () => {
-    await env.apiStore.performMutation('users||1', {
+    await env.apiStore.performMutation('temp:Linus', {
       optimisticUpdate: () => {
-        env.apiStore.deleteItemState('users||1');
+        env.apiStore.addItemToState(
+          'temp:Linus',
+          { id: -1, name: 'Linus' },
+          {
+            addItemToQueries: {
+              queries: [{ tableId: 'users' }],
+              appendTo: 'end',
+            },
+          },
+        );
       },
       mutation: () => {
-        throw new Error('delete failed');
+        throw new Error('create rejected');
       },
-      offline: { operation: 'deleteUser', input: { itemId: 'users||1' } },
+      offline: { operation: 'createUser', input: { name: 'Linus' } },
     });
   });
+  log.push({ phase: 'queued offline', ...hook.result.current });
 
-  // Bring the browser back online and let the first retryable replay failure
-  // spend the whole retry budget so the delete moves into manual resolution.
+  // Back online, the creation keeps failing until it waits for a decision:
+  // it is removed locally and is no longer pending.
   act(() => {
     network.goOnline();
   });
   await withSuppressedActError(async () => {
     await flushAllTimers();
   });
+  log.push({ phase: 'waits for a decision', ...hook.result.current });
 
-  expect(hook.result.current).toMatchInlineSnapshot(`
-    defaultPending:
-      deletedItems: []
-      items: []
+  // The user sends it again while offline: it has no local data until it is
+  // saved, so it is neither a pending item nor a pending delete.
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
 
-    includeResolutionRequired:
-      deletedItems: ['users||1']
+  const [failedCreation] = env.apiStore.getOfflineResolutions();
+  if (!failedCreation) throw new Error('expected a failed creation');
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      failedCreation.id,
+      'createUser',
+      { action: 'retry' },
+    );
+  });
+  await flushAllTimers();
+  log.push({ phase: 'sent again offline', ...hook.result.current });
+
+  expect(log).toMatchInlineSnapshot(`
+    - deletedItems: []
+      items: ['Linus']
+      phase: 'queued offline'
+    - deletedItems: []
       items: []
+      phase: 'waits for a decision'
+    - deletedItems: []
+      items: []
+      phase: 'sent again offline'
   `);
 });
