@@ -6,12 +6,10 @@ type StoreFocusLifecycle = {
   onTransportReconnect: () => void;
   /**
    * The store recovered from offline mode (the session is online and its
-   * queued mutations finished replaying), or one of its changes waiting for a
-   * manual resolution was handled: revalidates it, except the items still
-   * waiting for a resolution. Real-time stores wait one transport
-   * reconnect cooldown first, so a transport reconnect in that window runs a
-   * single revalidation for both. Reconnect and focus revalidations are
-   * dropped while offline, see below.
+   * queued mutations finished replaying): revalidates it. Real-time stores
+   * wait one transport reconnect cooldown first, so a transport reconnect in
+   * that window runs a single revalidation for both. Reconnect and focus
+   * revalidations are dropped while offline, see below.
    */
   onOfflineRecovery: () => void;
   /**

@@ -1420,8 +1420,9 @@ describe('items of other stores', () => {
       tempIds: ['temp:Plan trip']
     `);
 
-    // The task row is still visible, waiting for the decision, and the user
-    // comments on it after losing the connection again.
+    // The task now only lives in its resolution record, and the user comments
+    // on it (e.g. from a screen listing the work waiting for a decision)
+    // after losing the connection again.
     env.tasks.addTimelineComments('beforeNextAction', [
       'offline again: comment on the task whose creation failed',
     ]);
@@ -1432,7 +1433,8 @@ describe('items of other stores', () => {
     await env.addComment('Ask Ana about dates', 'temp:Plan trip');
 
     // The comment could not be sent before the task exists: instead of the
-    // queue, it waits behind the creation of the task, in the comments store.
+    // queue, it waits behind the creation of the task, in the comments store,
+    // and like it only lives in its resolution record: it is not shown.
     expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
     expect(
       env.comments.apiStore
@@ -1474,24 +1476,23 @@ describe('items of other stores', () => {
     expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
     expect(env.tasks.timelineString).toMatchInlineSnapshot(`
       "
-      time   | comments            | tasks                                  |
-      0      | no comments         | Write report, Review budget            | [tasks, comments] ui-initialized
-      3.01s  | no comments         | Write report, Review budget            | -- offline: create a task
-      .      | no comments         | Write report, Review budget, Plan trip | [tasks] ui-changed
-      .      | no comments         | Write report, Review budget, Plan trip | offline:createTask queued
-      .      | no comments         | Write report, Review budget, Plan trip | -- back online: the creation keeps failing until it needs a manual decision
-      .      | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
-      8.01s  | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
-      13.01s | no comments         | Write report, Review budget, Plan trip | offline:createTask replay-started
-      .      | no comments         | Write report, Review budget, Plan trip | offline:createTask resolution-required
-      13.02s | no comments         | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
-      13.82s | no comments         | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
-      14.82s | no comments         | Write report, Review budget, Plan trip | -- offline again: comment on the task whose creation failed
-      .      | Ask Ana about dates | Write report, Review budget, Plan trip | [comments] ui-changed
-      .      | Ask Ana about dates | Write report, Review budget, Plan trip | -- discard the failed task creation
-      .      | no comments         | Write report, Review budget            | [tasks, comments] ui-changed
-      15.83s | no comments         | Write report, Review budget            | 🟠 >list-fetch-started
-      16.63s | no comments         | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
+      time   | comments    | tasks                                  |
+      0      | no comments | Write report, Review budget            | [tasks, comments] ui-initialized
+      3.01s  | no comments | Write report, Review budget            | -- offline: create a task
+      .      | no comments | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .      | no comments | Write report, Review budget, Plan trip | offline:createTask queued
+      .      | no comments | Write report, Review budget, Plan trip | -- back online: the creation keeps failing until it needs a manual decision
+      .      | no comments | Write report, Review budget, Plan trip | offline:createTask replay-started
+      8.01s  | no comments | Write report, Review budget, Plan trip | offline:createTask replay-started
+      13.01s | no comments | Write report, Review budget, Plan trip | offline:createTask replay-started
+      .      | no comments | Write report, Review budget, Plan trip | offline:createTask resolution-required
+      .      | no comments | Write report, Review budget            | [tasks] ui-changed
+      13.02s | no comments | Write report, Review budget            | 🔴 >list-fetch-started
+      13.82s | no comments | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      15.83s | no comments | Write report, Review budget            | -- offline again: comment on the task whose creation failed
+      .      | no comments | Write report, Review budget            | -- discard the failed task creation
+      .      | no comments | Write report, Review budget            | 🟠 >list-fetch-started
+      16.63s | no comments | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -1559,8 +1560,9 @@ describe('items of other stores', () => {
     // The comments would be sent for a task the server does not have: they
     // are held behind the creation of the task, in the comments store (also
     // the one added online, which is not sent directly), and the edit waits
-    // behind its comment. The only decision the user can make is the
-    // creation of the task.
+    // behind its comment. Like the task, they only live in their resolution
+    // records, so they are not shown. The only decision the user can make is
+    // the creation of the task.
     expect(env.tasks.sentRequests).toMatchInlineSnapshot(`
       - 'createTaskWithId tasks||50'
       - 'createTaskWithId tasks||50'
@@ -1613,28 +1615,30 @@ describe('items of other stores', () => {
     );
     expect(env.tasks.timelineString).toMatchInlineSnapshot(`
       "
-      time   | comments                              | tasks                                  |
-      0      | no comments                           | Write report, Review budget            | [tasks, comments] ui-initialized
-      3.01s  | no comments                           | Write report, Review budget            | -- offline: create task 50, add a comment to it and edit the comment
-      .      | no comments                           | Write report, Review budget, Plan trip | [tasks] ui-changed
-      .      | no comments                           | Write report, Review budget, Plan trip | offline:createTaskWithId queued
-      4.01s  | Ask Ana about dates                   | Write report, Review budget, Plan trip | [comments] ui-changed
-      5.01s  | Ask Ana about the dates               | Write report, Review budget, Plan trip | [comments] ui-changed
-      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | -- back online: the task creation keeps failing until it needs a decision
-      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
-      10.01s | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
-      15.01s | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
-      .      | Ask Ana about the dates               | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
-      15.02s | Ask Ana about the dates               | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
-      15.82s | Ask Ana about the dates               | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
-      16.82s | Ask Ana about the dates               | Write report, Review budget, Plan trip | -- online: add another comment to the task
-      .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | [comments] ui-changed
-      17.82s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | -- the user asks to send the task creation again
-      .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
-      19.02s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
-      .      | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | offline:createTaskWithId replay-finished
-      22.63s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🟠 >list-fetch-started
-      23.43s | Ask Ana about the dates, Book flights | Write report, Review budget, Plan trip | 🟠 <list-fetch-finished (value: {"count":3})
+      time   | comments                | tasks                                  |
+      0      | no comments             | Write report, Review budget            | [tasks, comments] ui-initialized
+      3.01s  | no comments             | Write report, Review budget            | -- offline: create task 50, add a comment to it and edit the comment
+      .      | no comments             | Write report, Review budget, Plan trip | [tasks] ui-changed
+      .      | no comments             | Write report, Review budget, Plan trip | offline:createTaskWithId queued
+      4.01s  | Ask Ana about dates     | Write report, Review budget, Plan trip | [comments] ui-changed
+      5.01s  | Ask Ana about the dates | Write report, Review budget, Plan trip | [comments] ui-changed
+      .      | Ask Ana about the dates | Write report, Review budget, Plan trip | -- back online: the task creation keeps failing until it needs a decision
+      .      | Ask Ana about the dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      10.01s | Ask Ana about the dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      15.01s | Ask Ana about the dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
+      .      | Ask Ana about the dates | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
+      .      | no comments             | Write report, Review budget            | [tasks, comments] ui-changed
+      15.02s | no comments             | Write report, Review budget            | 🔴 >list-fetch-started
+      15.82s | no comments             | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      16.82s | no comments             | Write report, Review budget            | -- online: add another comment to the task
+      .      | no comments             | Write report, Review budget            | [comments, comments] ui-changed
+      17.82s | no comments             | Write report, Review budget            | -- the user asks to send the task creation again
+      .      | no comments             | Write report, Review budget            | offline:createTaskWithId replay-started
+      19.02s | no comments             | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      .      | no comments             | Write report, Review budget            | offline:createTaskWithId replay-finished
+      22.63s | no comments             | Write report, Review budget            | 🟠 >list-fetch-started
+      23.43s | no comments             | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":3})
+      .      | no comments             | Write report, Review budget, Plan trip | [tasks] ui-changed
       "
     `);
 

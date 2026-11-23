@@ -1383,9 +1383,8 @@ type ListQueryStoreOptionsBase<
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
   /**
    * Called when an already-loaded item is invalidated. Not called for an item
-   * the invalidation leaves alone: an unsent offline creation, or an item with
-   * a change waiting for a manual resolution on an invalidation with any
-   * priority but `highPriority` (see `docs/offline.md`).
+   * the invalidation leaves alone: an unsent offline creation (see
+   * `docs/offline.md`).
    */
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
   /** Observes request scheduler lifecycle events for this store. */
@@ -1568,12 +1567,6 @@ export function createListQueryStore<
   // temp entity or of an item with an id the app generated. They cannot be
   // refetched, so invalidations skip them.
   const unsentCreationItemKeys = new Set<string>();
-  // Items with a change waiting for a manual resolution. A refetch would
-  // replace the change the user still has to decide on, so the window focus,
-  // reconnect and recovery revalidations and background item refetches skip
-  // them (see `skipsBackgroundItemRefetch`), and list fetches keep their local
-  // version.
-  const resolutionItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
 
@@ -2373,7 +2366,6 @@ export function createListQueryStore<
     offlineFetchController,
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,
-    resolutionItemKeys,
   );
 
   const {
@@ -2440,7 +2432,6 @@ export function createListQueryStore<
       );
     },
     persistence?.restoredItemKeys,
-    skipsBackgroundItemRefetch,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2579,11 +2570,10 @@ export function createListQueryStore<
 
           rebindOfflineOverlays(itemKeyRewrites);
         },
-        revalidateDiscardedEntities: (entities, hasPendingResolutions) => {
-          // A discard that releases an item (or the last change on the whole
-          // store) of a realtime store schedules its recovery revalidation
-          // for the end of the reconnect cooldown: run it now with this
-          // refetch instead of fetching twice.
+        revalidateDiscardedEntities: (entities, refetchLists) => {
+          // Discarding the last queued change of a realtime store schedules
+          // its recovery revalidation for the end of the reconnect cooldown:
+          // run it now with this refetch instead of fetching twice.
           focusLifecycle.flushPendingReconnectRevalidate();
           invalidateQueryAndItems({
             itemPayload: filterAndMap(
@@ -2591,11 +2581,8 @@ export function createListQueryStore<
               (ref) => store.state.itemQueries[ref.entityKey]?.payload ?? false,
             ),
             // Queries too: the discarded change may have removed the item
-            // from lists (a delete) or moved it between them. Unless other
-            // changes of the store still wait for a decision: the recovery
-            // revalidation that follows the discard refreshes the lists then,
-            // or once a change on the whole store is handled.
-            queryPayload: hasPendingResolutions ? false : () => true,
+            // from lists (a delete) or moved it between them.
+            queryPayload: refetchLists ? () => true : false,
             type: 'highPriority',
           });
 
@@ -2624,7 +2611,6 @@ export function createListQueryStore<
           if (offlineOverlaySessionKey !== sessionKey)
             clearOfflineOverlays(sessionKey);
           unsentCreationItemKeys.clear();
-          resolutionItemKeys.clear();
           for (const entity of entities) {
             if (entity.entityKind !== 'item') continue;
 
@@ -2634,13 +2620,15 @@ export function createListQueryStore<
             ) {
               unsentCreationItemKeys.add(entity.entityKey);
             }
-            if (entity.requiresResolution) {
-              resolutionItemKeys.add(entity.entityKey);
-            }
           }
+          // Work waiting for a decision only lives in its resolution
+          // records: the items show the server version, not its overlay.
           const activeItemKeys = new Set(
             entities
-              .filter((entity) => entity.entityKind === 'item')
+              .filter(
+                (entity) =>
+                  entity.entityKind === 'item' && !entity.requiresResolution,
+              )
               .map((entity) => entity.entityKey),
           );
 
@@ -3071,7 +3059,6 @@ export function createListQueryStore<
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState({});
     unsentCreationItemKeys.clear();
-    resolutionItemKeys.clear();
   }
 
   function rebindOfflineOverlays(
@@ -3904,24 +3891,6 @@ export function createListQueryStore<
     return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
   }
 
-  // Window focus, reconnect and recovery revalidations leave out the items
-  // with a change waiting for a manual resolution: a refetch would replace
-  // the change the user still has to decide on.
-  function revalidateAllButResolutionItems(type: FetchType): void {
-    if (resolutionItemKeys.size === 0) {
-      invalidateQueryAndItems({ all: true, type });
-      return;
-    }
-
-    // Lists too: they keep the local version of these items
-    invalidateQueryAndItems({
-      queryPayload: () => true,
-      itemPayload: (itemPayload) =>
-        !resolutionItemKeys.has(getItemKey(itemPayload)),
-      type,
-    });
-  }
-
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -3929,12 +3898,13 @@ export function createListQueryStore<
     getWindowIsFocused,
     testOptions?.onWindowFocus ?? onWindowFocusDefault,
     () => {
-      revalidateAllButResolutionItems('lowPriority');
+      invalidateQueryAndItems({ all: true, type: 'lowPriority' });
     },
     () => {
-      revalidateAllButResolutionItems(
-        usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
-      );
+      invalidateQueryAndItems({
+        all: true,
+        type: usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
+      });
     },
     reevaluateDelayedRTUs,
     getIsOfflineMode,
@@ -4187,28 +4157,8 @@ export function createListQueryStore<
   > = scheduleItemFetchApiImpl;
 
   /**
-   * A background item refetch (any priority but `highPriority`: a hook mount,
-   * a window focus, a realtime update) leaves a loaded item alone while it
-   * has a change waiting for a manual resolution: a refetch would replace the
-   * local version the user still has to decide on. Explicit fetches, and the
-   * fetch of requested fields the item is missing, still run. Once the
-   * change is handled, the store's recovery revalidation refetches it.
-   */
-  function skipsBackgroundItemRefetch(
-    itemKey: string,
-    priority: FetchType,
-  ): boolean {
-    return (
-      priority !== 'highPriority' &&
-      resolutionItemKeys.has(itemKey) &&
-      !!store.state.itemQueries[itemKey]?.wasLoaded
-    );
-  }
-
-  /**
    * Schedules an item fetch hooks start on their own, skipping unsent
-   * creations and held items (see `skipsBackgroundItemRefetch`); `onSkipped`
-   * is called when the fetch is skipped.
+   * creations; `onSkipped` is called when the fetch is skipped.
    */
   function scheduleAutomaticItemFetch(
     fetchType: FetchType,
@@ -4247,12 +4197,9 @@ export function createListQueryStore<
     onSkipped: (() => void) | undefined,
   ): ScheduleFetchResults {
     const itemKey = getItemKey(itemPayload);
-    // An unsent creation only exists locally until its creation is
-    // confirmed, so the server doesn't know it yet
-    if (
-      unsentCreationItemKeys.has(itemKey) ||
-      skipsBackgroundItemRefetch(itemKey, fetchType)
-    ) {
+    // Only exists locally until its creation is confirmed, so the server
+    // doesn't know it yet
+    if (unsentCreationItemKeys.has(itemKey)) {
       onSkipped?.();
       return 'skipped';
     }

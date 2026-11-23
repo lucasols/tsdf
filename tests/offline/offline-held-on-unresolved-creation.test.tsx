@@ -2,7 +2,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
-import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   createTasksAndCommentsEnv,
   createTasksEnv,
@@ -89,10 +88,11 @@ describe('tasks whose creation waits for a manual decision', () => {
           on: 'item:temp:Plan trip'
           op: 'renameTask'
       `);
-    // The user keeps seeing the edit.
-    expect(list.result.current.items).toMatchInlineSnapshot(`
-      ['Write report', 'Review budget', 'Plan summer trip']
-    `);
+    // The task and its rename only live in their resolution records: the
+    // list shows what the server has.
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
 
     env.addTimelineComments('beforeNextAction', [
       'the user asks to send the creation again',
@@ -129,25 +129,25 @@ describe('tasks whose creation waits for a manual decision', () => {
       17s    | Write report, Review budget, Plan trip        | offline:createTask replay-started
       22s    | Write report, Review budget, Plan trip        | offline:createTask replay-started
       .      | Write report, Review budget, Plan trip        | offline:createTask resolution-required
-      22.01s | Write report, Review budget, Plan trip        | 🔴 >list-fetch-started
-      22.81s | Write report, Review budget, Plan trip        | 🔴 <list-fetch-finished (value: {"count":2})
-      23.81s | Write report, Review budget, Plan trip        | -- offline: rename the task whose creation waits for a decision
+      .      | Write report, Review budget                   | [tasks] ui-changed
+      22.01s | Write report, Review budget                   | 🔴 >list-fetch-started
+      22.81s | Write report, Review budget                   | 🔴 <list-fetch-finished (value: {"count":2})
+      23.81s | Write report, Review budget                   | -- offline: rename the task whose creation waits for a decision
+      .      | Write report, Review budget                   | offline:renameTask resolution-required
+      .      | Write report, Review budget                   | offline:renameTask queued
+      23.82s | Write report, Review budget                   | -- back online: nothing can be sent for the task yet
+      .      | Write report, Review budget                   | 🟠 >list-fetch-started
+      24.62s | Write report, Review budget                   | 🟠 <list-fetch-finished (value: {"count":2})
+      25.62s | Write report, Review budget                   | -- the user asks to send the creation again
+      .      | Write report, Review budget                   | offline:createTask replay-started
+      26.82s | Write report, Review budget                   | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
+      .      | Write report, Review budget                   | offline:createTask replay-finished
+      .      | Write report, Review budget                   | offline:renameTask replay-started
+      28.02s | Write report, Review budget                   | [tasks||3] server-data-changed (value: {"name":"Plan summer trip"})
+      .      | Write report, Review budget                   | offline:renameTask replay-finished
+      28.03s | Write report, Review budget                   | 🟡 >list-fetch-started
+      28.83s | Write report, Review budget                   | 🟡 <list-fetch-finished (value: {"count":3})
       .      | Write report, Review budget, Plan summer trip | [tasks] ui-changed
-      .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
-      .      | Write report, Review budget, Plan summer trip | offline:renameTask queued
-      23.82s | Write report, Review budget, Plan summer trip | -- back online: nothing can be sent for the task yet
-      .      | Write report, Review budget, Plan summer trip | 🟠 >list-fetch-started
-      24.62s | Write report, Review budget, Plan summer trip | 🟠 <list-fetch-finished (value: {"count":2})
-      25.62s | Write report, Review budget, Plan summer trip | -- the user asks to send the creation again
-      .      | Write report, Review budget, Plan summer trip | offline:createTask replay-started
-      26.82s | Write report, Review budget, Plan summer trip | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
-      .      | Write report, Review budget, Plan summer trip | offline:createTask replay-finished
-      .      | Write report, Review budget, Plan summer trip | [tasks, tasks] ui-changed
-      .      | Write report, Review budget, Plan summer trip | offline:renameTask replay-started
-      28.02s | Write report, Review budget, Plan summer trip | [tasks||3] server-data-changed (value: {"name":"Plan summer trip"})
-      .      | Write report, Review budget, Plan summer trip | offline:renameTask replay-finished
-      28.03s | Write report, Review budget, Plan summer trip | 🟡 >list-fetch-started
-      28.83s | Write report, Review budget, Plan summer trip | 🟡 <list-fetch-finished (value: {"count":3})
       "
     `);
 
@@ -179,9 +179,9 @@ describe('tasks whose creation waits for a manual decision', () => {
       - { blocks: 1, op: 'createTask' }
       - { blockedBy: 1, op: 'renameTask' }
     `);
-    expect(list.result.current.items).toMatchInlineSnapshot(`
-      ['Write report', 'Review budget', 'Plan summer trip']
-    `);
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
 
     list.unmount();
   });
@@ -254,22 +254,22 @@ describe('tasks whose creation waits for a manual decision', () => {
       8.01s  | Write report, Review budget, Plan trip | offline:createTask replay-started
       13.01s | Write report, Review budget, Plan trip | offline:createTask replay-started
       .      | Write report, Review budget, Plan trip | offline:createTask resolution-required
-      13.02s | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
-      13.82s | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
-      14.82s | Write report, Review budget, Plan trip | -- delete the task whose creation waits for a decision
       .      | Write report, Review budget            | [tasks] ui-changed
+      13.02s | Write report, Review budget            | 🔴 >list-fetch-started
+      13.82s | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      14.82s | Write report, Review budget            | -- delete the task whose creation waits for a decision
       .      | Write report, Review budget            | offline:deleteTask resolution-required
       .      | Write report, Review budget            | offline:deleteTask queued
-      15.82s | Write report, Review budget            | -- the user asks to send the creation again
+      .      | Write report, Review budget            | -- the user asks to send the creation again
       .      | Write report, Review budget            | offline:createTask replay-started
-      17.02s | Write report, Review budget            | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
+      16.02s | Write report, Review budget            | [tasks||3] server-data-changed (value: {"id":3,"name":"Plan trip"})
       .      | Write report, Review budget            | offline:createTask replay-finished
       .      | Write report, Review budget            | offline:deleteTask replay-started
       .      | Write report, Review budget            | [tasks||3] >delete-item-started (value: {"id":3,"name":"Plan trip"})
-      17.86s | Write report, Review budget            | [tasks||3] <delete-item-persisted (value: {"id":3,"name":"Plan trip"})
-      18.22s | Write report, Review budget            | offline:deleteTask replay-finished
-      18.23s | Write report, Review budget            | 🟠 >list-fetch-started
-      19.03s | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
+      16.86s | Write report, Review budget            | [tasks||3] <delete-item-persisted (value: {"id":3,"name":"Plan trip"})
+      17.22s | Write report, Review budget            | offline:deleteTask replay-finished
+      17.23s | Write report, Review budget            | 🟠 >list-fetch-started
+      18.03s | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -321,10 +321,11 @@ describe('tasks whose creation waits for a manual decision', () => {
           on: 'item:tasks||1'
           op: 'editTask'
       `);
-    // The rename merged into the held move shows right away, like any other
-    // queued edit.
+    // The held move, and the rename merged into it, only live in their
+    // resolution record. Offline the task can't be refetched yet, so the list
+    // still shows the last local edit until the session recovers.
     expect(list.result.current.items).toMatchInlineSnapshot(
-      `['Write final report', 'Review budget', 'Plan trip']`,
+      `['Write final report', 'Review budget']`,
     );
 
     // Back online the rename is sent; then the user sends the creation again,
@@ -547,7 +548,7 @@ describe('tasks whose creation waits for a manual decision', () => {
       parentId: 'tasks||2'
     `);
     expect(list.result.current.items).toMatchInlineSnapshot(
-      `['Write final report', 'Review budget', 'Plan trip']`,
+      `['Write final report', 'Review budget']`,
     );
 
     list.unmount();
@@ -664,9 +665,9 @@ describe('tasks whose creation waits for a manual decision', () => {
     // nothing is left to send or decide.
     expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-    expect(list.result.current.items).toMatchInlineSnapshot(`
-      ['Write report', 'Review budget']
-    `);
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
 
     list.unmount();
   });
@@ -774,76 +775,6 @@ describe('tasks whose creation waits for a manual decision', () => {
     expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
 
     list.unmount();
-  });
-
-  test('after a restart, opening the screen of the waiting task shows it without fetching it from the server', async () => {
-    const sessionKey = 'open-unresolved-task-after-restart-session';
-    const storeName = 'open-unresolved-task-after-restart-store';
-    const { env: first, list } = await createTaskWhoseCreationKeepsFailing(
-      sessionKey,
-      storeName,
-    );
-    list.unmount();
-    first.apiStore.dispose();
-
-    // The app restarts online on the screen of the task: the task is restored
-    // from storage as stale data, which a screen normally refetches when it
-    // mounts
-    resetSessionForTests();
-    const env = createTasksEnv(sessionKey, storeName);
-    const taskScreen = renderHook(() =>
-      env.apiStore.useItem('temp:Plan trip', {
-        selector: (task) => task?.name ?? null,
-      }),
-    );
-    // A screen that requires fresh data always fetches the task when it
-    // mounts
-    const freshTaskScreen = renderHook(() =>
-      env.apiStore.useItem('temp:Plan trip', {
-        selector: (task) => task?.name ?? null,
-        requireFreshData: true,
-      }),
-    );
-    // A screen that requires fresh data only for data restored from storage
-    // fetches the task too, since it was restored from storage
-    const restoredTaskScreen = renderHook(() =>
-      env.apiStore.useItem('temp:Plan trip', {
-        selector: (task) => task?.name ?? null,
-        requireFreshData: 'ifFromStorage',
-      }),
-    );
-    await flushAllTimers();
-
-    // The server doesn't know the task until its creation is sent again, so
-    // it is not fetched, not even by the screens that require fresh data:
-    // all screens show the local task instead of a not-found error, and the
-    // ones that require fresh data don't keep loading
-    expect(
-      env.serverTable.getRequestHistory('item', { includeTime: false }),
-    ).toMatchInlineSnapshot(`[]`);
-    expect(pick(taskScreen.result.current, ['status', 'data', 'error']))
-      .toMatchInlineSnapshot(`
-      data: 'Plan trip'
-      error: null
-      status: 'success'
-    `);
-    expect(pick(freshTaskScreen.result.current, ['status', 'data', 'error']))
-      .toMatchInlineSnapshot(`
-      data: 'Plan trip'
-      error: null
-      status: 'success'
-    `);
-
-    expect(pick(restoredTaskScreen.result.current, ['status', 'data', 'error']))
-      .toMatchInlineSnapshot(`
-      data: 'Plan trip'
-      error: null
-      status: 'success'
-    `);
-
-    taskScreen.unmount();
-    freshTaskScreen.unmount();
-    restoredTaskScreen.unmount();
   });
 
   test('stores closed while they still read their queued work send no fetch for the screens opened meanwhile', async () => {
@@ -961,10 +892,11 @@ describe('tasks created with a client-generated id whose creation waits for a ma
           on: 'item:tasks||50'
           op: 'renameTask'
       `);
-    // The user keeps seeing the last name, and the task reports that its
-    // creation was sent but the server has not confirmed it.
+    // The task and its renames only live in their resolution records, which
+    // report that its creation was sent but the server has not confirmed it:
+    // the list shows what the server has.
     expect(list.result.current.items).toMatchInlineSnapshot(
-      `['Write report', 'Review budget', 'Plan winter trip']`,
+      `['Write report', 'Review budget']`,
     );
     expect(env.apiStore.getItemOfflineState('tasks||50'))
       .toMatchInlineSnapshot(`
@@ -1018,24 +950,25 @@ describe('tasks created with a client-generated id whose creation waits for a ma
       14.01s | Write report, Review budget, Plan summer trip | offline:createTaskWithId replay-started
       .      | Write report, Review budget, Plan summer trip | offline:createTaskWithId resolution-required
       .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
-      14.02s | Write report, Review budget, Plan summer trip | 🔴 >list-fetch-started
-      14.82s | Write report, Review budget, Plan summer trip | 🔴 <list-fetch-finished (value: {"count":2})
-      15.82s | Write report, Review budget, Plan summer trip | -- online: rename the task whose creation waits for a decision
+      .      | Write report, Review budget                   | [tasks] ui-changed
+      14.02s | Write report, Review budget                   | 🔴 >list-fetch-started
+      14.82s | Write report, Review budget                   | 🔴 <list-fetch-finished (value: {"count":2})
+      15.82s | Write report, Review budget                   | -- online: rename the task whose creation waits for a decision
+      .      | Write report, Review budget                   | offline:renameTask resolution-required
+      .      | Write report, Review budget                   | offline:renameTask queued
+      .      | Write report, Review budget                   | -- the user asks to send the creation again
+      .      | Write report, Review budget                   | offline:createTaskWithId replay-started
+      17.02s | Write report, Review budget                   | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      .      | Write report, Review budget                   | offline:createTaskWithId replay-finished
+      .      | Write report, Review budget                   | offline:renameTask replay-started
+      18.22s | Write report, Review budget                   | [tasks||50] server-data-changed (value: {"name":"Plan summer trip"})
+      .      | Write report, Review budget                   | offline:renameTask replay-finished
+      .      | Write report, Review budget                   | offline:renameTask replay-started
+      19.42s | Write report, Review budget                   | [tasks||50] server-data-changed (value: {"name":"Plan winter trip"})
+      .      | Write report, Review budget                   | offline:renameTask replay-finished
+      19.43s | Write report, Review budget                   | 🟠 >list-fetch-started
+      20.23s | Write report, Review budget                   | 🟠 <list-fetch-finished (value: {"count":3})
       .      | Write report, Review budget, Plan winter trip | [tasks] ui-changed
-      .      | Write report, Review budget, Plan winter trip | offline:renameTask resolution-required
-      .      | Write report, Review budget, Plan winter trip | offline:renameTask queued
-      16.82s | Write report, Review budget, Plan winter trip | -- the user asks to send the creation again
-      .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-started
-      18.02s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
-      .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-finished
-      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-started
-      19.22s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan summer trip"})
-      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-finished
-      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-started
-      20.42s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan winter trip"})
-      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-finished
-      20.43s | Write report, Review budget, Plan winter trip | 🟠 >list-fetch-started
-      21.23s | Write report, Review budget, Plan winter trip | 🟠 <list-fetch-finished (value: {"count":3})
       "
     `);
 
@@ -1383,14 +1316,13 @@ describe('tasks whose creation waits for a conflict decision', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | tasks                                             |
-      4.82s | Write report, Review budget, Plan trip, Pack bags | -- timeline-cleared
-      .     | Write report, Review budget, Plan trip, Pack bags | [tasks, tasks] ui-changed
-      .     | Write report, Review budget, Plan trip, Pack bags | offline:createSubtask replay-started
-      6.02s | Write report, Review budget, Plan trip, Pack bags | [tasks||3] server-data-changed (value: {"id":3,"name":"Pack bags","parentId":"tasks||9"})
-      .     | Write report, Review budget, Plan trip, Pack bags | offline:createSubtask replay-finished
-      .     | Write report, Review budget, Plan trip, Pack bags | [tasks, tasks] ui-changed
-      6.03s | Write report, Review budget, Plan trip, Pack bags | 🟠 >list-fetch-started
-      6.83s | Write report, Review budget, Plan trip, Pack bags | 🟠 <list-fetch-finished (value: {"count":4})
+      4.82s | Write report, Review budget                       | -- timeline-cleared
+      .     | Write report, Review budget                       | offline:createSubtask replay-started
+      6.02s | Write report, Review budget                       | [tasks||3] server-data-changed (value: {"id":3,"name":"Pack bags","parentId":"tasks||9"})
+      .     | Write report, Review budget                       | offline:createSubtask replay-finished
+      6.03s | Write report, Review budget                       | 🟠 >list-fetch-started
+      6.83s | Write report, Review budget                       | 🟠 <list-fetch-finished (value: {"count":4})
+      .     | Write report, Review budget, Plan trip, Pack bags | [tasks] ui-changed
       "
     `);
   });

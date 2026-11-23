@@ -492,9 +492,11 @@ test('a global offline view sees the same blocked temp item as the store after r
   const [storeEntity] = storeHook.result.current;
   const [globalEntity] = globalHook.result.current;
 
+  // The temp item now only lives in its resolution records: the list shows
+  // what the server has
   expect(pick(queryHook.result.current, ['items', 'pendingSync', 'status']))
     .toMatchInlineSnapshot(`
-      items: ['Ada', 'Grace', 'Linus blocked edit']
+      items: ['Ada', 'Grace']
       pendingSync: '❌'
       status: 'success'
     `);
@@ -562,8 +564,9 @@ test('a global offline view sees the same blocked temp item as the store after r
     22s    | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
-    22.01s | Ada, Grace, Linus blocked edit | 🔴 >list-fetch-started
-    22.81s | Ada, Grace, Linus blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
+    .      | Ada, Grace                     | ui-changed
+    22.01s | Ada, Grace                     | 🔴 >list-fetch-started
+    22.81s | Ada, Grace                     | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 

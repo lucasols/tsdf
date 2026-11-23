@@ -244,10 +244,12 @@ test('offline conflicts are detected before execute, surface through selectors, 
   );
 
   expect(execute).not.toHaveBeenCalled();
+  // The change now only lives in its resolution record: nothing shows the
+  // document, so it is marked to be refetched when a screen shows it
   expect(env.store.state).toMatchInlineSnapshot(`
     data: { value: 2 }
     error: null
-    refetchOnMount: '❌'
+    refetchOnMount: 'highPriority'
     status: 'success'
   `);
   expect(summarizeOfflineEntities(storeOfflineHook.result.current))
@@ -782,7 +784,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   // Replay the queued create. The first online attempt should stop at the
   // conflict instead of executing the mutation.
   env.addTimelineComments('beforeNextAction', [
-    'replay the queued temp create and persist the conflict',
+    'replay the queued temp create and persist the conflict: the temp row is removed',
   ]);
   act(() => {
     network.goOnline();
@@ -853,9 +855,10 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     time | temp:Ada             |
     0    | -                    | offline:createUser queued
     .    | pending:Ada          | [temp:Ada] ui-initialized
-    1s   | pending:Ada          | -- replay the queued temp create and persist the conflict
+    1s   | pending:Ada          | -- replay the queued temp create and persist the conflict: the temp row is removed
     .    | pending:Ada          | offline:createUser resolution-required
-    2s   | pending:Ada          | -- resolve the conflict with a new name while keeping the same temp row
+    .    | ···                  | [temp:Ada] ui-changed
+    2s   | ···                  | -- resolve the conflict with a new name while keeping the same temp row
     .    | pending:Ada resolved | [temp:Ada] ui-changed
     .    | pending:Ada resolved | offline:createUser replay-started
     3.2s | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
@@ -1182,9 +1185,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
 
   expect(createUserExecute).not.toHaveBeenCalled();
   expect(patchUserExecute).not.toHaveBeenCalled();
-  expect(hook.result.current.items).toMatchInlineSnapshot(`
-    ['Ada', 'Grace', 'Linus blocked edit']
-  `);
+  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada', 'Grace']`);
   expect(parentResolution.childResolutionIds).toHaveLength(1);
   expect(parentResolution.childResolutionIds[0]).toBe(childResolution.id);
   expect(offlineResolutionsHook.result.current.map(summarizeResolution))
@@ -1314,8 +1315,9 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
     .     | Ada, Grace, Linus blocked edit | success      | -- go online and let the temp create stop at conflict detection
     .     | Ada, Grace, Linus blocked edit | success      | offline:createUser resolution-required
     .     | Ada, Grace, Linus blocked edit | success      | offline:patchUserName resolution-required
-    3.02s | Ada, Grace, Linus blocked edit | success      | 🔴 >list-fetch-started
-    3.82s | Ada, Grace, Linus blocked edit | success      | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Ada, Grace                     | success      | [query-items] ui-changed
+    3.02s | Ada, Grace                     | success      | 🔴 >list-fetch-started
+    3.82s | Ada, Grace                     | success      | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 

@@ -519,24 +519,26 @@ test('healthy replay failures are retried 3 times and then move into the resolut
     `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                           |
-    0     | "value:1 sync:none pending:0"                | ui-initialized
-    .     | "value:1 sync:pending pending:1"             | ui-changed
-    .     | "value:1 sync:pending pending:1"             | offline:updateValue queued
-    .     | "value:1 sync:pending pending:1"             | -- bring the browser back online so the first replay failure starts the healthy retry budget
-    .     | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:syncing pending:1"             | -- keep the session online long enough to spend the remaining healthy retry budget
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    10ms  | "value:1 sync:needs-confirmation pending:1"  | 🔴 >fetch-started
-    810ms | "value:1 sync:needs-confirmation pending:1"  | 🔴 <fetch-finished (value: 1)
-    5s    | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    10s   | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
-    .     | "value:1 sync:resolution-required pending:0" | ui-changed
+    time   | ui                                           |
+    0      | "value:1 sync:none pending:0"                | ui-initialized
+    .      | "value:1 sync:pending pending:1"             | ui-changed
+    .      | "value:1 sync:pending pending:1"             | offline:updateValue queued
+    .      | "value:1 sync:pending pending:1"             | -- bring the browser back online so the first replay failure starts the healthy retry budget
+    .      | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:syncing pending:1"             | -- keep the session online long enough to spend the remaining healthy retry budget
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    10ms   | "value:1 sync:needs-confirmation pending:1"  | 🔴 >fetch-started
+    810ms  | "value:1 sync:needs-confirmation pending:1"  | 🔴 <fetch-finished (value: 1)
+    5s     | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    10s    | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
+    .      | "value:1 sync:resolution-required pending:0" | ui-changed
+    10.01s | "value:1 sync:resolution-required pending:0" | 🟠 >fetch-started
+    10.81s | "value:1 sync:resolution-required pending:0" | 🟠 <fetch-finished (value: 1)
     "
   `);
 });
@@ -785,32 +787,34 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
     .      | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
     .      | "value:1 sync:resolution-required pending:0" | ui-changed
-    .      | "value:1 sync:resolution-required pending:0" | -- user resolves with "retry" — entry re-enqueued, 4th execute call succeeds
+    10.01s | "value:1 sync:resolution-required pending:0" | 🟠 >fetch-started
+    10.81s | "value:1 sync:resolution-required pending:0" | 🟠 <fetch-finished (value: 1)
+    11.81s | "value:1 sync:resolution-required pending:0" | -- user resolves with "retry" — entry re-enqueued, 4th execute call succeeds
     .      | "value:1 sync:pending pending:1"             | ui-changed
     .      | "value:1 sync:syncing pending:1"             | ui-changed
     .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
     .      | "value:1 sync:syncing pending:1"             | server-data-changed (value: 2)
     .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-finished
     .      | "value:2 sync:none pending:0"                | ui-changed
-    10.01s | "value:2 sync:none pending:0"                | 🟠 >fetch-started
-    10.81s | "value:2 sync:none pending:0"                | 🟠 <fetch-finished (value: 2)
-    11.81s | "value:2 sync:none pending:0"                | -- go offline, queue another mutation, come back online — exhaust retries again
+    11.82s | "value:2 sync:none pending:0"                | 🟡 >fetch-started
+    12.62s | "value:2 sync:none pending:0"                | 🟡 <fetch-finished (value: 2)
+    13.62s | "value:2 sync:none pending:0"                | -- go offline, queue another mutation, come back online — exhaust retries again
     .      | "value:2 sync:pending pending:1"             | ui-changed
     .      | "value:2 sync:pending pending:1"             | offline:updateValue queued
     .      | "value:2 sync:syncing pending:1"             | ui-changed
     .      | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
     .      | "value:2 sync:needs-confirmation pending:1"  | ui-changed
-    16.81s | "value:2 sync:syncing pending:1"             | ui-changed
+    18.62s | "value:2 sync:syncing pending:1"             | ui-changed
     .      | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
     .      | "value:2 sync:needs-confirmation pending:1"  | ui-changed
-    21.81s | "value:2 sync:syncing pending:1"             | ui-changed
+    23.62s | "value:2 sync:syncing pending:1"             | ui-changed
     .      | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
     .      | "value:2 sync:syncing pending:1"             | offline:updateValue resolution-required
     .      | "value:2 sync:resolution-required pending:0" | ui-changed
-    .      | "value:2 sync:resolution-required pending:0" | -- user resolves with "discard" — entry permanently removed
+    23.63s | "value:2 sync:resolution-required pending:0" | 🟢 >fetch-started
+    24.43s | "value:2 sync:resolution-required pending:0" | 🟢 <fetch-finished (value: 2)
+    25.43s | "value:2 sync:resolution-required pending:0" | -- user resolves with "discard" — entry permanently removed
     .      | "value:2 sync:none pending:0"                | ui-changed
-    21.82s | "value:2 sync:none pending:0"                | 🟡 >fetch-started
-    22.62s | "value:2 sync:none pending:0"                | 🟡 <fetch-finished (value: 2)
     "
   `);
 });
@@ -1061,33 +1065,35 @@ test('going offline again resets the healthy replay failure budget', async () =>
     `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                           |
-    0     | "value:1 sync:none pending:0"                | ui-initialized
-    .     | "value:1 sync:pending pending:1"             | ui-changed
-    .     | "value:1 sync:pending pending:1"             | offline:updateValue queued
-    .     | "value:1 sync:pending pending:1"             | -- start replaying online, but stop before the queued mutation exhausts its healthy retry budget
-    .     | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:syncing pending:1"             | -- keep retrying until the mutation has spent only part of its healthy retry budget
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    10ms  | "value:1 sync:needs-confirmation pending:1"  | 🔴 >fetch-started
-    810ms | "value:1 sync:needs-confirmation pending:1"  | 🔴 <fetch-finished (value: 1)
-    5s    | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    .     | "value:1 sync:needs-confirmation pending:1"  | -- go offline again while the queued mutation is paused in needs-confirmation
-    .     | "value:1 sync:needs-confirmation pending:1"  | -- come back online and verify the paused mutation gets a fresh healthy retry budget
-    .     | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:syncing pending:1"             | -- spend the fresh retry budget; only after these new failures should the mutation require resolution
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    10s   | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    15s   | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
-    .     | "value:1 sync:resolution-required pending:0" | ui-changed
+    time   | ui                                           |
+    0      | "value:1 sync:none pending:0"                | ui-initialized
+    .      | "value:1 sync:pending pending:1"             | ui-changed
+    .      | "value:1 sync:pending pending:1"             | offline:updateValue queued
+    .      | "value:1 sync:pending pending:1"             | -- start replaying online, but stop before the queued mutation exhausts its healthy retry budget
+    .      | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:syncing pending:1"             | -- keep retrying until the mutation has spent only part of its healthy retry budget
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    10ms   | "value:1 sync:needs-confirmation pending:1"  | 🔴 >fetch-started
+    810ms  | "value:1 sync:needs-confirmation pending:1"  | 🔴 <fetch-finished (value: 1)
+    5s     | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    .      | "value:1 sync:needs-confirmation pending:1"  | -- go offline again while the queued mutation is paused in needs-confirmation
+    .      | "value:1 sync:needs-confirmation pending:1"  | -- come back online and verify the paused mutation gets a fresh healthy retry budget
+    .      | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:syncing pending:1"             | -- spend the fresh retry budget; only after these new failures should the mutation require resolution
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    10s    | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    15s    | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
+    .      | "value:1 sync:resolution-required pending:0" | ui-changed
+    15.01s | "value:1 sync:resolution-required pending:0" | 🟠 >fetch-started
+    15.81s | "value:1 sync:resolution-required pending:0" | 🟠 <fetch-finished (value: 1)
     "
   `);
 });

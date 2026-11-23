@@ -1177,7 +1177,7 @@ describe('temp entities declared in list queries', () => {
     hook.unmount();
   });
 
-  test('discarding a create that could not be saved removes the declared row from its lists', async () => {
+  test('a create that could not be saved is removed from its declared lists once it needs a decision', async () => {
     network.setOffline();
     const { env, createUser } = createUsersEnv({
       sessionKey: 'temp-queries-discard-session',
@@ -1226,8 +1226,10 @@ describe('temp entities declared in list queries', () => {
       usersStartingWithA: ['Ada', 'Alan']
     `);
 
+    // Once the create needs a decision it only lives in its resolution record:
+    // the row is removed from both lists.
     env.addTimelineComments('beforeNextAction', [
-      'go online — the server rejects the create',
+      'go online — the server rejects the create, the row is removed',
     ]);
     act(() => {
       network.goOnline();
@@ -1239,9 +1241,7 @@ describe('temp entities declared in list queries', () => {
       .find((item) => item.operation === 'createUser');
     if (!resolution) throw new Error('Expected the createUser resolution');
 
-    env.addTimelineComments('beforeNextAction', [
-      'the user discards the create',
-    ]);
+    // Discarding the create only drops its record
     await act(async () => {
       await env.apiStore.resolveOfflineResolution(resolution.id, 'createUser', {
         action: 'discard',
@@ -1261,19 +1261,14 @@ describe('temp entities declared in list queries', () => {
       12s    | Ada       | Ada, Grace       | -- create "Alan" offline
       .      | Ada, Alan | Ada, Grace, Alan | [all-users, a-users] ui-changed
       .      | Ada, Alan | Ada, Grace, Alan | offline:createUser queued
-      .      | Ada, Alan | Ada, Grace, Alan | -- go online — the server rejects the create
+      .      | Ada, Alan | Ada, Grace, Alan | -- go online — the server rejects the create, the row is removed
       .      | Ada, Alan | Ada, Grace, Alan | offline:createUser replay-started
       .      | Ada, Alan | Ada, Grace, Alan | offline:createUser resolution-required
-      12.01s | Ada, Alan | Ada, Grace, Alan | 🔴 >list-fetch-started
-      .      | Ada, Alan | Ada, Grace, Alan | 🟠 >list-fetch-started
-      12.81s | Ada, Alan | Ada, Grace, Alan | 🔴 <list-fetch-finished (value: {"count":2})
-      .      | Ada, Alan | Ada, Grace, Alan | 🟠 <list-fetch-finished (value: {"count":1})
-      13.81s | Ada, Alan | Ada, Grace, Alan | -- the user discards the create
       .      | Ada       | Ada, Grace       | [all-users, a-users] ui-changed
-      13.82s | Ada       | Ada, Grace       | 🟡 >list-fetch-started
-      .      | Ada       | Ada, Grace       | 🟢 >list-fetch-started
-      14.62s | Ada       | Ada, Grace       | 🟡 <list-fetch-finished (value: {"count":2})
-      .      | Ada       | Ada, Grace       | 🟢 <list-fetch-finished (value: {"count":1})
+      12.01s | Ada       | Ada, Grace       | 🔴 >list-fetch-started
+      .      | Ada       | Ada, Grace       | 🟠 >list-fetch-started
+      12.81s | Ada       | Ada, Grace       | 🔴 <list-fetch-finished (value: {"count":2})
+      .      | Ada       | Ada, Grace       | 🟠 <list-fetch-finished (value: {"count":1})
       "
     `);
 

@@ -246,7 +246,9 @@ describe('list-query replay', () => {
           ctx.input.itemId === 'users||1' && ctx.input.name === 'Ada replayed',
       ),
     ).toBe(true);
-    expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada pending']`);
+    // The patch now only lives in its resolution record: the row shows the
+    // server value
+    expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada']`);
     expect(
       env.apiStore
         .getOfflineEntities()
@@ -287,6 +289,7 @@ describe('list-query replay', () => {
       .      | Ada pending | success      | offline:patchUserName resolution-required
       22.01s | Ada pending | success      | 🔴 >list-fetch-started
       22.81s | Ada pending | success      | 🔴 <list-fetch-finished (value: {"count":1})
+      .      | Ada         | success      | [query-items] ui-changed
       "
     `);
 
@@ -503,7 +506,7 @@ describe('list-query replay', () => {
     // Exhaust the parent replay. The nested child temp-create and the edit that
     // depends on that child should both become blocked manual resolutions.
     env.addTimelineComments('beforeNextAction', [
-      'go online and exhaust parent replay to trigger cascading resolutions',
+      'go online and exhaust parent replay to trigger cascading resolutions: the temp items are removed',
     ]);
     await act(async () => {
       network.goOnline();
@@ -643,11 +646,9 @@ describe('list-query replay', () => {
     );
     expect(childEntity?.childResolutionIds[0]).toBe(grandchildResolution.id);
 
-    // Discarding the parent should clear every nested descendant and roll back
-    // both optimistic temp items from the query and item state.
-    env.addTimelineComments('beforeNextAction', [
-      'discard the parent to cascade-clear all descendants',
-    ]);
+    // Once the parent needed a decision, both optimistic temp items were
+    // removed from the query and item state. Discarding the parent clears
+    // every nested descendant record, without fetching anything.
     await act(async () => {
       await env.apiStore.resolveOfflineResolution(
         parentResolution.id,
@@ -678,19 +679,16 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Parent offline, Child offline      | -- queue an edit against the child temp item
       .      | Ada, Grace, Parent offline, Child blocked edit | ui-changed
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName queued
-      .      | Ada, Grace, Parent offline, Child blocked edit | -- go online and exhaust parent replay to trigger cascading resolutions
+      .      | Ada, Grace, Parent offline, Child blocked edit | -- go online and exhaust parent replay to trigger cascading resolutions: the temp items are removed
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
       8.01s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
       13.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
-      13.02s | Ada, Grace, Parent offline, Child blocked edit | 🔴 >list-fetch-started
-      13.82s | Ada, Grace, Parent offline, Child blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
-      14.82s | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent to cascade-clear all descendants
       .      | Ada, Grace                                     | ui-changed
-      14.83s | Ada, Grace                                     | 🟠 >list-fetch-started
-      15.63s | Ada, Grace                                     | 🟠 <list-fetch-finished (value: {"count":2})
+      13.02s | Ada, Grace                                     | 🔴 >list-fetch-started
+      13.82s | Ada, Grace                                     | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -1012,18 +1010,19 @@ describe('list-query replay', () => {
       13.01s | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser resolution-required
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName resolution-required
-      13.02s | Ada, Grace, Linus blocked edit | success      | 🔴 >list-fetch-started
-      13.82s | Ada, Grace, Linus blocked edit | success      | 🔴 <list-fetch-finished (value: {"count":2})
-      14.82s | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the remapped descendant replays too
-      .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
-      16.02s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
-      .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-finished
-      .      | Ada, Grace, Linus blocked edit | success      | [query-items, query-items] ui-changed
-      .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-started
-      17.22s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
-      .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-finished
-      17.23s | Ada, Grace, Linus blocked edit | success      | 🟠 >list-fetch-started
-      18.03s | Ada, Grace, Linus blocked edit | success      | 🟠 <list-fetch-finished (value: {"count":3})
+      .      | Ada, Grace                     | success      | [query-items] ui-changed
+      13.02s | Ada, Grace                     | success      | 🔴 >list-fetch-started
+      13.82s | Ada, Grace                     | success      | 🔴 <list-fetch-finished (value: {"count":2})
+      14.82s | Ada, Grace                     | success      | -- retry the parent resolution so the remapped descendant replays too
+      .      | Ada, Grace                     | success      | offline:createUser replay-started
+      16.02s | Ada, Grace                     | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
+      .      | Ada, Grace                     | success      | offline:createUser replay-finished
+      .      | Ada, Grace                     | success      | offline:patchUserName replay-started
+      17.22s | Ada, Grace                     | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+      .      | Ada, Grace                     | success      | offline:patchUserName replay-finished
+      17.23s | Ada, Grace                     | success      | 🟠 >list-fetch-started
+      18.03s | Ada, Grace                     | success      | 🟠 <list-fetch-finished (value: {"count":3})
+      .      | Ada, Grace, Linus blocked edit | success      | [query-items] ui-changed
       "
     `);
 
@@ -1234,11 +1233,9 @@ describe('list-query replay', () => {
       13.01s | Ada, Grace, Linus discarded edit | offline:createUser replay-started
       .      | Ada, Grace, Linus discarded edit | offline:createUser resolution-required
       .      | Ada, Grace, Linus discarded edit | offline:patchUserName resolution-required
-      13.02s | Ada, Grace, Linus discarded edit | 🔴 >list-fetch-started
-      13.82s | Ada, Grace, Linus discarded edit | 🔴 <list-fetch-finished (value: {"count":2})
-      14.82s | Ada, Grace                       | ui-changed
-      14.83s | Ada, Grace                       | 🟠 >list-fetch-started
-      15.63s | Ada, Grace                       | 🟠 <list-fetch-finished (value: {"count":2})
+      .      | Ada, Grace                       | ui-changed
+      13.02s | Ada, Grace                       | 🔴 >list-fetch-started
+      13.82s | Ada, Grace                       | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -1246,7 +1243,7 @@ describe('list-query replay', () => {
   });
 });
 
-test('discarding failed offline changes puts the rows back to what the server has', async () => {
+test('failed offline changes show the server rows once they need a decision, and discarding them fetches nothing', async () => {
   network.setOffline();
   const sessionKey = 'offline-discard-restores-rows-session';
   type RejectedEditOperations = PatchUserOperations & {
@@ -1377,17 +1374,14 @@ test('discarding failed offline changes puts the rows back to what the server ha
     throw new Error('Expected both changes to be waiting for a resolution');
   }
 
-  // Once both changes wait for a decision, the store revalidates its lists:
-  // the refetched list keeps both rows as they are locally (Ada renamed, Grace
-  // hidden), since the user still has to decide on them.
+  // Once the queue was drained the store revalidated its lists: the changes
+  // only live in their resolution records, so both rows show what the server
+  // has. Grace, deleted locally, was also fetched again for screens that
+  // only show her.
+  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada', 'Grace']`);
 
-  // Discard the rename. Nothing can roll the optimistic rename back, so the
-  // store refetches what the discarded change touched, and its lists. Grace's
-  // delete still waits for a decision, so the refetched list keeps her hidden,
-  // while Ada's row goes back to what the server has.
-  env.addTimelineComments('beforeNextAction', [
-    'discard the rename: the lists are refetched, Grace stays hidden',
-  ]);
+  // Discarding the changes only drops their records: nothing is fetched (no
+  // new timeline entry)
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
       renameResolution.id,
@@ -1397,16 +1391,6 @@ test('discarding failed offline changes puts the rows back to what the server ha
   });
   await flushAllTimers();
 
-  // Ada shows the server value, Grace is still hidden while her delete waits
-  // for a decision.
-  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada']`);
-
-  // Discard the delete: with nothing left to resolve the store revalidates
-  // its lists, which puts both rows back to what the server has. Grace, deleted
-  // locally, is also fetched for screens that show only her.
-  env.addTimelineComments('beforeNextAction', [
-    'discard the delete: the lists are refetched and show the server rows',
-  ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
       deleteResolution.id,
@@ -1437,24 +1421,17 @@ test('discarding failed offline changes puts the rows back to what the server ha
     23.01s | Ada renamed        | offline:deleteUser replay-started
     .      | Ada renamed        | offline:deleteUser resolution-required
     23.02s | Ada renamed        | 🔴 >list-fetch-started
+    .      | Ada renamed        | 🟠 [users||2] >fetch-started
     23.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
-    33.02s | Ada renamed        | -- discard the rename: the lists are refetched, Grace stays hidden
-    .      | Ada renamed        | 🟠 >list-fetch-started
-    33.82s | Ada renamed        | 🟠 <list-fetch-finished (value: {"count":2})
-    .      | Ada                | [rows] ui-changed
-    34.83s | Ada                | -- discard the delete: the lists are refetched and show the server rows
-    .      | Ada                | 🟡 >list-fetch-started
-    .      | Ada                | 🟢 [users||2] >fetch-started
-    35.63s | Ada                | 🟡 <list-fetch-finished (value: {"count":2})
     .      | Ada, Grace         | [rows] ui-changed
-    .      | Ada, Grace         | 🟢 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
+    .      | Ada, Grace         | 🟠 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
     "
   `);
 
   hook.unmount();
 });
 
-test('discarding a failed offline delete shows the item again on screens that only display that item', async () => {
+test('a failed offline delete shows the item again on screens that only display that item once it needs a decision', async () => {
   network.setOffline();
   const sessionKey = 'offline-discard-delete-item-session';
   type RejectedDeleteOperations = {
@@ -1536,8 +1513,11 @@ test('discarding a failed offline delete shows the item again on screens that on
     });
   });
 
+  // Once the delete needs a decision it only lives in its resolution record:
+  // it never reached the server, so the item is fetched again and the screen
+  // shows Grace instead of a deleted item.
   env.addTimelineComments('beforeNextAction', [
-    'back online: the server rejects the delete until it needs a resolution',
+    'back online: the server rejects the delete until it needs a resolution, then Grace is fetched again',
   ]);
   act(() => {
     network.goOnline();
@@ -1550,11 +1530,7 @@ test('discarding a failed offline delete shows the item again on screens that on
     throw new Error('Expected the delete to be waiting for a resolution');
   }
 
-  // Discard the delete: it never reached the server, so the item is fetched
-  // again and the screen shows Grace instead of a deleted item.
-  env.addTimelineComments('beforeNextAction', [
-    'discard the delete: Grace is fetched again',
-  ]);
+  // Discarding the delete only drops its record
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
       deleteResolution.id,
@@ -1575,15 +1551,14 @@ test('discarding a failed offline delete shows the item again on screens that on
     3.01s  | Grace     | -- offline: delete Grace
     .      | - deleted | [grace] ui-changed
     .      | - deleted | offline:deleteUser queued
-    .      | - deleted | -- back online: the server rejects the delete until it needs a resolution
+    .      | - deleted | -- back online: the server rejects the delete until it needs a resolution, then Grace is fetched again
     .      | - deleted | offline:deleteUser replay-started
     8.01s  | - deleted | offline:deleteUser replay-started
     13.01s | - deleted | offline:deleteUser replay-started
     .      | - deleted | offline:deleteUser resolution-required
-    18.02s | - deleted | -- discard the delete: Grace is fetched again
-    .      | - loading | [grace] ui-changed
+    13.02s | - loading | [grace] ui-changed
     .      | - loading | 🔴 [users||2] >fetch-started
-    18.82s | - loading | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
+    13.82s | - loading | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
     .      | Grace     | [grace] ui-changed
     "
   `);
@@ -1591,7 +1566,7 @@ test('discarding a failed offline delete shows the item again on screens that on
   hook.unmount();
 });
 
-describe('discarding a failed offline creation with a client-generated id', () => {
+describe('a failed offline creation with a client-generated id', () => {
   type ClientIdCreateInput = {
     itemId: string;
     name: string;
@@ -1766,7 +1741,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
     };
   }
 
-  test('removes the created item from the store, its lists and the persisted cache', async () => {
+  test('is removed from the store, its lists and the persisted cache once it needs a decision', async () => {
     network.setOffline();
     const {
       env,
@@ -1789,9 +1764,13 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await flushAllTimers();
 
     // The server rejects the creation on every replay attempt, so it ends up
-    // waiting for the user to decide what to do with it.
+    // waiting for the user to decide what to do with it. It then only lives
+    // in its resolution record: Linus is removed right away, from the list
+    // and from his detail screen, like the rollback of a temp entity. He is
+    // not fetched: the server never got him. With nothing left to sync, the
+    // store revalidates its lists, which confirms he does not exist.
     env.addTimelineComments('beforeNextAction', [
-      'back online: the server rejects the creation until it needs a resolution',
+      'back online: the server rejects the creation until it needs a resolution, then Linus is removed',
     ]);
     act(() => {
       network.goOnline();
@@ -1799,13 +1778,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await advanceTime(15_000);
     await flushAllTimers();
 
-    // Discarding the creation removes Linus right away, from the list and
-    // from his detail screen, like the rollback of a temp entity. He is not
-    // fetched: the server never got him. With nothing left to sync, the store
-    // revalidates its lists, which confirms he does not exist.
-    env.addTimelineComments('beforeNextAction', [
-      'discard the creation: Linus is removed',
-    ]);
+    // Discarding the creation only drops its record
     await discardResolution('createUser');
 
     // The never-saved item is not readable as loaded data anymore.
@@ -1827,24 +1800,21 @@ describe('discarding a failed offline creation with a client-generated id', () =
       0      | -         | -          | -- offline: create Linus
       .      | -         | -          | offline:createUser queued
       .      | Linus     | Ada, Linus | [rows, linus] ui-initialized
-      3.01s  | Linus     | Ada, Linus | -- back online: the server rejects the creation until it needs a resolution
+      3.01s  | Linus     | Ada, Linus | -- back online: the server rejects the creation until it needs a resolution, then Linus is removed
       .      | Linus     | Ada, Linus | offline:createUser replay-started
       8.01s  | Linus     | Ada, Linus | offline:createUser replay-started
       13.01s | Linus     | Ada, Linus | offline:createUser replay-started
       .      | Linus     | Ada, Linus | offline:createUser resolution-required
-      13.02s | Linus     | Ada, Linus | 🔴 >list-fetch-started
-      13.82s | Linus     | Ada, Linus | 🔴 <list-fetch-finished (value: {"count":1})
-      18.01s | Linus     | Ada, Linus | -- discard the creation: Linus is removed
       .      | - deleted | Ada        | [rows, linus] ui-changed
-      18.02s | - deleted | Ada        | 🟠 >list-fetch-started
-      18.82s | - deleted | Ada        | 🟠 <list-fetch-finished (value: {"count":1})
+      13.02s | - deleted | Ada        | 🔴 >list-fetch-started
+      13.82s | - deleted | Ada        | 🔴 <list-fetch-finished (value: {"count":1})
       "
     `);
 
     hook.unmount();
   });
 
-  test('brings the item back when an earlier attempt did create it on the server', async () => {
+  test('comes back when an earlier attempt did create it on the server, also after discarding it', async () => {
     network.setOffline();
     let createAttempts = 0;
     const { env, createUserOffline, discardResolution, renderScreens } =
@@ -1871,9 +1841,12 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await flushAllTimers();
 
     // The first attempt creates Linus on the server but its response is lost,
-    // the next ones are rejected because he already exists.
+    // the next ones are rejected because he already exists. Once the creation
+    // needs a decision Linus is removed locally. With nothing left to sync,
+    // the store revalidates its lists, which find him on the server: the list
+    // and the detail screen show him again.
     env.addTimelineComments('beforeNextAction', [
-      'back online: the creation reaches the server, its retries are rejected',
+      'back online: the creation reaches the server, its retries are rejected, Linus is removed, then restored from the server',
     ]);
     act(() => {
       network.goOnline();
@@ -1881,12 +1854,8 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await advanceTime(15_000);
     await flushAllTimers();
 
-    // Discarding removes Linus locally. With nothing left to sync, the store
-    // revalidates its lists, which find him on the server: the list and the
-    // detail screen show him again.
-    env.addTimelineComments('beforeNextAction', [
-      'discard the creation: Linus is removed, then restored from the server',
-    ]);
+    // Discarding the creation only drops its record: Linus, from the server,
+    // stays
     await discardResolution('createUser');
 
     expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
@@ -1899,18 +1868,15 @@ describe('discarding a failed offline creation with a client-generated id', () =
       0      | -         | -          | -- offline: create Linus
       .      | -         | -          | offline:createUser queued
       .      | Linus     | Ada, Linus | [rows, linus] ui-initialized
-      3.01s  | Linus     | Ada, Linus | -- back online: the creation reaches the server, its retries are rejected
+      3.01s  | Linus     | Ada, Linus | -- back online: the creation reaches the server, its retries are rejected, Linus is removed, then restored from the server
       .      | Linus     | Ada, Linus | offline:createUser replay-started
       4.21s  | Linus     | Ada, Linus | [users||3] server-data-changed (value: {"id":3,"name":"Linus"})
       9.21s  | Linus     | Ada, Linus | offline:createUser replay-started
       14.21s | Linus     | Ada, Linus | offline:createUser replay-started
       .      | Linus     | Ada, Linus | offline:createUser resolution-required
-      14.22s | Linus     | Ada, Linus | 🔴 >list-fetch-started
-      15.02s | Linus     | Ada, Linus | 🔴 <list-fetch-finished (value: {"count":2})
-      18.01s | Linus     | Ada, Linus | -- discard the creation: Linus is removed, then restored from the server
       .      | - deleted | Ada        | [rows, linus] ui-changed
-      18.02s | - deleted | Ada        | 🟠 >list-fetch-started
-      18.82s | - deleted | Ada        | 🟠 <list-fetch-finished (value: {"count":2})
+      14.22s | - deleted | Ada        | 🔴 >list-fetch-started
+      15.02s | - deleted | Ada        | 🔴 <list-fetch-finished (value: {"count":2})
       .      | Linus     | Ada, Linus | [rows, linus] ui-changed
       "
     `);
@@ -1918,7 +1884,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
     hook.unmount();
   });
 
-  test('an edit queued after the creation waits for it and is dropped with it, without refetching the item', async () => {
+  test('an edit queued after the creation waits for it and is dropped with it, without fetching the item', async () => {
     network.setOffline();
     const { env, createUserOffline, discardResolution, renderScreens } =
       createClientIdCreateEnv(
@@ -1953,8 +1919,11 @@ describe('discarding a failed offline creation with a client-generated id', () =
     const hook = renderScreens();
     await flushAllTimers();
 
+    // Once the creation needs a decision, Linus is removed: the creation and
+    // the rename only live in their resolution records. Nothing is refetched
+    // for Linus: the server does not have him.
     env.addTimelineComments('beforeNextAction', [
-      'back online: the creation is rejected until it needs a resolution',
+      'back online: the creation is rejected until it needs a resolution, then Linus is removed',
     ]);
     act(() => {
       network.goOnline();
@@ -1981,11 +1950,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
           op: 'patchUserName'
       `);
 
-    // Discarding the creation removes Linus and drops the rename with it.
-    // Nothing is refetched for Linus: the server does not have him.
-    env.addTimelineComments('beforeNextAction', [
-      'discard the creation: Linus and his rename are dropped, no refetch',
-    ]);
+    // Discarding the creation drops the rename with it
     await discardResolution('createUser');
 
     expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
@@ -1997,25 +1962,22 @@ describe('discarding a failed offline creation with a client-generated id', () =
       .      | -         | -             | offline:createUser queued
       1s     | -         | -             | offline:patchUserName queued
       .      | Linus T.  | Ada, Linus T. | [rows, linus] ui-initialized
-      3s     | Linus T.  | Ada, Linus T. | -- back online: the creation is rejected until it needs a resolution
+      3s     | Linus T.  | Ada, Linus T. | -- back online: the creation is rejected until it needs a resolution, then Linus is removed
       .      | Linus T.  | Ada, Linus T. | offline:createUser replay-started
       8s     | Linus T.  | Ada, Linus T. | offline:createUser replay-started
       13s    | Linus T.  | Ada, Linus T. | offline:createUser replay-started
       .      | Linus T.  | Ada, Linus T. | offline:createUser resolution-required
       .      | Linus T.  | Ada, Linus T. | offline:patchUserName resolution-required
-      13.01s | Linus T.  | Ada, Linus T. | 🔴 >list-fetch-started
-      13.81s | Linus T.  | Ada, Linus T. | 🔴 <list-fetch-finished (value: {"count":1})
-      33s    | Linus T.  | Ada, Linus T. | -- discard the creation: Linus and his rename are dropped, no refetch
       .      | - deleted | Ada           | [rows, linus] ui-changed
-      33.01s | - deleted | Ada           | 🟠 >list-fetch-started
-      33.81s | - deleted | Ada           | 🟠 <list-fetch-finished (value: {"count":1})
+      13.01s | - deleted | Ada           | 🔴 >list-fetch-started
+      13.81s | - deleted | Ada           | 🔴 <list-fetch-finished (value: {"count":1})
       "
     `);
 
     hook.unmount();
   });
 
-  test('an item created on top of a discarded temp creation is removed with it', async () => {
+  test('an item created on top of a failed temp creation is removed with it', async () => {
     network.setOffline();
     const { env, createUserOffline, discardResolution, renderScreens } =
       createClientIdCreateEnv(
@@ -2055,9 +2017,10 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await flushAllTimers();
 
     // The server rejects Grace until she needs a resolution. Linus depends on
-    // her, so he is held as a blocked resolution without being sent.
+    // her, so he is held as a blocked resolution without being sent. Both
+    // then only live in their resolution records: both are removed.
     env.addTimelineComments('beforeNextAction', [
-      'back online: Grace is rejected until she needs a resolution',
+      'back online: Grace is rejected until she needs a resolution, then Grace and Linus are removed',
     ]);
     act(() => {
       network.goOnline();
@@ -2065,10 +2028,7 @@ describe('discarding a failed offline creation with a client-generated id', () =
     await advanceTime(15_000);
     await flushAllTimers();
 
-    // Discarding Grace discards Linus with her: both are removed.
-    env.addTimelineComments('beforeNextAction', [
-      'discard Grace: Linus is discarded and removed with her',
-    ]);
+    // Discarding Grace discards Linus with her
     await discardResolution('createManager');
 
     expect(env.apiStore.getItemState('temp:Grace')).toMatchInlineSnapshot(
@@ -2083,18 +2043,15 @@ describe('discarding a failed offline creation with a client-generated id', () =
       .      | -         | -                 | offline:createManager queued
       .      | -         | -                 | offline:createUser queued
       .      | Linus     | Ada, Grace, Linus | [rows, linus] ui-initialized
-      3.01s  | Linus     | Ada, Grace, Linus | -- back online: Grace is rejected until she needs a resolution
+      3.01s  | Linus     | Ada, Grace, Linus | -- back online: Grace is rejected until she needs a resolution, then Grace and Linus are removed
       .      | Linus     | Ada, Grace, Linus | offline:createManager replay-started
       8.01s  | Linus     | Ada, Grace, Linus | offline:createManager replay-started
       13.01s | Linus     | Ada, Grace, Linus | offline:createManager replay-started
       .      | Linus     | Ada, Grace, Linus | offline:createManager resolution-required
       .      | Linus     | Ada, Grace, Linus | offline:createUser resolution-required
-      13.02s | Linus     | Ada, Grace, Linus | 🔴 >list-fetch-started
-      13.82s | Linus     | Ada, Grace, Linus | 🔴 <list-fetch-finished (value: {"count":1})
-      18.01s | Linus     | Ada, Grace, Linus | -- discard Grace: Linus is discarded and removed with her
       .      | - deleted | Ada               | [rows, linus] ui-changed
-      18.02s | - deleted | Ada               | 🟠 >list-fetch-started
-      18.82s | - deleted | Ada               | 🟠 <list-fetch-finished (value: {"count":1})
+      13.02s | - deleted | Ada               | 🔴 >list-fetch-started
+      13.82s | - deleted | Ada               | 🔴 <list-fetch-finished (value: {"count":1})
       "
     `);
 

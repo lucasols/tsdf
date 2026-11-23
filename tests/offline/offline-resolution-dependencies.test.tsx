@@ -409,9 +409,9 @@ test('nested descendants cascade into blocked resolutions and discard together',
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
-    .      | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent — should cascade-remove child and grandchild resolutions
     .      | Ada, Grace                                     | ui-changed
-    22.01s | Ada, Grace                                     | 🔴 >list-fetch-started
+    22.01s | Ada, Grace                                     | -- discard the parent — should cascade-remove child and grandchild resolutions
+    .      | Ada, Grace                                     | 🔴 >list-fetch-started
     22.81s | Ada, Grace                                     | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
@@ -719,22 +719,22 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
-    3.02s | Ada, Grace, Parent offline, Child blocked edit | 🔴 >list-fetch-started
-    3.82s | Ada, Grace, Parent offline, Child blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
-    4.82s | Ada, Grace, Parent offline, Child blocked edit | -- retry parent — should cascade: parent create → child create → child edit, all with remapped ids
-    .     | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    6.02s | Ada, Grace, Parent offline, Child blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Parent offline"})
-    .     | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-finished
-    .     | Ada, Grace, Parent offline, Child blocked edit | [query-items, query-items] ui-changed
-    .     | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser replay-started
-    7.22s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"id":4,"name":"Child offline","parentId":"users||3"})
-    .     | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser replay-finished
-    .     | Ada, Grace, Parent offline, Child blocked edit | [query-items, query-items] ui-changed
-    .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-started
-    8.42s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"name":"Child blocked edit"})
-    .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-finished
-    8.43s | Ada, Grace, Parent offline, Child blocked edit | 🟠 >list-fetch-started
-    9.23s | Ada, Grace, Parent offline, Child blocked edit | 🟠 <list-fetch-finished (value: {"count":4})
+    .     | Ada, Grace                                     | [query-items] ui-changed
+    3.02s | Ada, Grace                                     | 🔴 >list-fetch-started
+    3.82s | Ada, Grace                                     | 🔴 <list-fetch-finished (value: {"count":2})
+    4.82s | Ada, Grace                                     | -- retry parent — should cascade: parent create → child create → child edit, all with remapped ids
+    .     | Ada, Grace                                     | offline:createUser replay-started
+    6.02s | Ada, Grace                                     | [users||3] server-data-changed (value: {"id":3,"name":"Parent offline"})
+    .     | Ada, Grace                                     | offline:createUser replay-finished
+    .     | Ada, Grace                                     | offline:createChildUser replay-started
+    7.22s | Ada, Grace                                     | [users||4] server-data-changed (value: {"id":4,"name":"Child offline","parentId":"users||3"})
+    .     | Ada, Grace                                     | offline:createChildUser replay-finished
+    .     | Ada, Grace                                     | offline:patchUserName replay-started
+    8.42s | Ada, Grace                                     | [users||4] server-data-changed (value: {"name":"Child blocked edit"})
+    .     | Ada, Grace                                     | offline:patchUserName replay-finished
+    8.43s | Ada, Grace                                     | 🟠 >list-fetch-started
+    9.23s | Ada, Grace                                     | 🟠 <list-fetch-finished (value: {"count":4})
+    .     | Ada, Grace, Parent offline, Child blocked edit | [query-items] ui-changed
     "
   `);
 
@@ -972,18 +972,19 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
     13.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
-    13.02s | Ada, Grace, Linus blocked edit | 🔴 >list-fetch-started
-    13.82s | Ada, Grace, Linus blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
-    14.82s | Ada, Grace, Linus blocked edit | -- retry parent — child edit input should be remapped from temp:Linus offline → users||3
-    .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    16.02s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
-    .      | Ada, Grace, Linus blocked edit | offline:createUser replay-finished
-    .      | Ada, Grace, Linus blocked edit | [query-items, query-items] ui-changed
-    .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-started
-    17.22s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
-    .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-finished
-    17.23s | Ada, Grace, Linus blocked edit | 🟠 >list-fetch-started
-    18.03s | Ada, Grace, Linus blocked edit | 🟠 <list-fetch-finished (value: {"count":3})
+    .      | Ada, Grace                     | [query-items] ui-changed
+    13.02s | Ada, Grace                     | 🔴 >list-fetch-started
+    13.82s | Ada, Grace                     | 🔴 <list-fetch-finished (value: {"count":2})
+    14.82s | Ada, Grace                     | -- retry parent — child edit input should be remapped from temp:Linus offline → users||3
+    .      | Ada, Grace                     | offline:createUser replay-started
+    16.02s | Ada, Grace                     | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
+    .      | Ada, Grace                     | offline:createUser replay-finished
+    .      | Ada, Grace                     | offline:patchUserName replay-started
+    17.22s | Ada, Grace                     | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+    .      | Ada, Grace                     | offline:patchUserName replay-finished
+    17.23s | Ada, Grace                     | 🟠 >list-fetch-started
+    18.03s | Ada, Grace                     | 🟠 <list-fetch-finished (value: {"count":3})
+    .      | Ada, Grace, Linus blocked edit | [query-items] ui-changed
     "
   `);
 
@@ -1201,9 +1202,9 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
         entityKind: 'item'
     input: { itemId: 'users||3', name: 'Linus blocked edit' }
   `);
-  expect(hook.result.current.items).toMatchInlineSnapshot(`
-    ['Ada', 'Grace', 'Linus blocked edit']
-  `);
+  expect(hook.result.current.items).toMatchInlineSnapshot(
+    `['Ada', 'Grace', 'Linus offline']`,
+  );
 
   // Retry the remapped child separately to prove it now targets the final id
   // through the realistic delayed patch path.
@@ -1255,19 +1256,21 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     13.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
-    13.02s | Ada, Grace, Linus blocked edit | 🔴 >list-fetch-started
-    13.82s | Ada, Grace, Linus blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
-    14.82s | Ada, Grace, Linus blocked edit | -- retry parent with scope=self — child should be remapped but NOT auto-replayed
-    .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    16.02s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
-    .      | Ada, Grace, Linus blocked edit | offline:createUser replay-finished
-    .      | Ada, Grace, Linus blocked edit | [query-items, query-items] ui-changed
-    16.03s | Ada, Grace, Linus blocked edit | 🟠 >list-fetch-started
-    16.83s | Ada, Grace, Linus blocked edit | 🟠 <list-fetch-finished (value: {"count":3})
-    17.83s | Ada, Grace, Linus blocked edit | -- retry remapped child — should patch users||3 directly
-    .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-started
-    19.03s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
-    .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-finished
+    .      | Ada, Grace                     | [query-items] ui-changed
+    13.02s | Ada, Grace                     | 🔴 >list-fetch-started
+    13.82s | Ada, Grace                     | 🔴 <list-fetch-finished (value: {"count":2})
+    14.82s | Ada, Grace                     | -- retry parent with scope=self — child should be remapped but NOT auto-replayed
+    .      | Ada, Grace                     | offline:createUser replay-started
+    16.02s | Ada, Grace                     | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
+    .      | Ada, Grace                     | offline:createUser replay-finished
+    16.03s | Ada, Grace                     | 🟠 >list-fetch-started
+    16.83s | Ada, Grace                     | 🟠 <list-fetch-finished (value: {"count":3})
+    .      | Ada, Grace, Linus offline      | [query-items] ui-changed
+    17.83s | Ada, Grace, Linus offline      | -- retry remapped child — should patch users||3 directly
+    .      | Ada, Grace, Linus offline      | offline:patchUserName replay-started
+    19.03s | Ada, Grace, Linus offline      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+    .      | Ada, Grace, Linus offline      | offline:patchUserName replay-finished
+    .      | Ada, Grace, Linus blocked edit | [query-items] ui-changed
     19.04s | Ada, Grace, Linus blocked edit | 🟡 >list-fetch-started
     19.84s | Ada, Grace, Linus blocked edit | 🟡 <list-fetch-finished (value: {"count":3})
     "
@@ -1617,7 +1620,7 @@ test('manager-level actions report blocked resolutions and cascade a parent disc
 
   // --- Setup: reconnect so the create fails and blocks the dependent edit ---
   env.addTimelineComments('beforeNextAction', [
-    'go online — the create fails once, both operations become manual resolutions',
+    'go online — the create fails once, both operations become manual resolutions and the temp row is removed',
   ]);
   await act(async () => {
     network.goOnline();
@@ -1685,11 +1688,9 @@ test('manager-level actions report blocked resolutions and cascade a parent disc
   expect(panel.result.current).toEqual(resolutionsBeforeActions);
   expect(patchUserExecute).not.toHaveBeenCalled();
 
-  // --- Discarding the parent through the manager clears the whole chain and
-  // rolls the optimistic temp row back, like the store-level discard ---
-  env.addTimelineComments('beforeNextAction', [
-    'discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates',
-  ]);
+  // --- Discarding the parent through the manager clears the whole chain,
+  // like the store-level discard. The temp row was already removed when the
+  // create needed a decision, so nothing is fetched ---
   const discardResult = await resolveOfflineResolutionThroughManager(
     storeManager,
     parentResolution.id,
@@ -1714,16 +1715,13 @@ test('manager-level actions report blocked resolutions and cascade a parent disc
     .     | Ada, Grace, Linus offline      | offline:createUser queued
     .     | Ada, Grace, Linus blocked edit | ui-changed
     .     | Ada, Grace, Linus blocked edit | offline:patchUserName queued
-    .     | Ada, Grace, Linus blocked edit | -- go online — the create fails once, both operations become manual resolutions
+    .     | Ada, Grace, Linus blocked edit | -- go online — the create fails once, both operations become manual resolutions and the temp row is removed
     .     | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .     | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .     | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
-    3.02s | Ada, Grace, Linus blocked edit | 🔴 >list-fetch-started
-    3.82s | Ada, Grace, Linus blocked edit | 🔴 <list-fetch-finished (value: {"count":2})
-    4.82s | Ada, Grace, Linus blocked edit | -- discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates
     .     | Ada, Grace                     | ui-changed
-    4.83s | Ada, Grace                     | 🟠 >list-fetch-started
-    5.63s | Ada, Grace                     | 🟠 <list-fetch-finished (value: {"count":2})
+    3.02s | Ada, Grace                     | 🔴 >list-fetch-started
+    3.82s | Ada, Grace                     | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 

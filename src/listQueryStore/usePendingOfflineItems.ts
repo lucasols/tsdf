@@ -11,7 +11,7 @@ import { Store } from 't-state';
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import {
   buildItemOfflineState,
-  shouldApplyOfflineOverlay,
+  getIsPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
 import type {
   InternalGlobalOfflineEntity,
@@ -173,8 +173,7 @@ export function usePendingOfflineItems<
         const itemKey = entity.entityKey;
         const rawOverlay = offlineOverlays[itemKey];
         const visibleOverlay =
-          rawOverlay !== undefined &&
-          shouldApplyOfflineOverlay(entity, rawOverlay)
+          rawOverlay !== undefined && getIsPendingOfflineSync(entity)
             ? rawOverlay
             : undefined;
         const hasStateItem = Object.hasOwn(state.items, itemKey);
