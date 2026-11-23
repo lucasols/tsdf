@@ -2453,7 +2453,6 @@ export function createListQueryStore<
       );
     },
     persistence?.restoredItemKeys,
-    persistence?.restoredQueryKeys,
     skipsBackgroundItemRefetch,
   );
 

@@ -318,8 +318,6 @@ export function createMutationApi<
   recaptureOfflineOverlays: (itemKeys: Iterable<string>) => void,
   /** Items whose data was restored from persistent storage, if persisted. */
   restoredItemKeys: Set<string> | undefined,
-  /** Same as `restoredItemKeys`, for the queries in state. */
-  restoredQueryKeys: ReadonlySet<string> | undefined,
   /** Items with a change waiting for a manual resolution keep their local version. */
   skipsBackgroundItemRefetch: (itemKey: string, priority: FetchType) => boolean,
 ) {
@@ -768,7 +766,6 @@ export function createMutationApi<
         }
       });
 
-      reapplyListUpdatesToRestoredQueries(revertedItems, revertedQueries);
       recaptureOfflineOverlays(revertedItems.keys());
     }
 
@@ -798,33 +795,6 @@ export function createMutationApi<
         queryPayload: changedQueries.length > 0 ? changedQueries : false,
       });
     }
-  }
-
-  /**
-   * A query read back from storage after an optimistic update has no rollback
-   * snapshot, and its rules may have run with the updated items (see
-   * `applyOptimisticListUpdatesToQueries`), so they run again with the
-   * reverted ones.
-   */
-  function reapplyListUpdatesToRestoredQueries(
-    revertedItems: ReadonlyMap<string, { payload: ItemPayload }>,
-    revertedQueries: ReadonlyMap<string, unknown>,
-  ): void {
-    if (!optimisticListUpdates || !restoredQueryKeys?.size) return;
-
-    const queryKeys = [...restoredQueryKeys].filter(
-      (queryKey) =>
-        !revertedQueries.has(queryKey) && store.state.queries[queryKey],
-    );
-    if (queryKeys.length === 0) return;
-
-    applyOptimisticListUpdatesToQueries(
-      Array.from(revertedItems, ([itemKey, { payload }]) => ({
-        itemKey,
-        payload,
-      })),
-      queryKeys,
-    );
   }
 
   function getCurrentOptimisticMutationQueryContext():

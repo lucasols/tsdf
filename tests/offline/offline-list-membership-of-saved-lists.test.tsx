@@ -15,7 +15,6 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
-  advanceTime,
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
@@ -445,64 +444,52 @@ describe('optimisticListUpdates', () => {
   });
 
   test.each(storages)(
-    'a move cancelled while it waits for its debounce leaves the card in the column of its queued move ($storage)',
+    'loading more of a column offline from storage leaves out a card moved to another column ($storage)',
     async ({ adapter }) => {
-      const board = await restartOfflineWithSavedColumns(adapter, 'filter');
+      if (adapter !== 'local-sync') createOpfsPersistentStorageTestStore();
+      const shipRelease = {
+        id: 3,
+        name: 'Ship release',
+        status: 'done',
+      } as const;
 
-      // Offline, the user moves "Write report" to done. The move is queued.
-      await board.moveTask('tasks||1', 'done');
-
-      // On the card's screen, the user starts moving it back to todo. The
-      // move waits for its debounce before it is queued.
-      const cardScreen = renderHook(() =>
-        board.env.apiStore.useItem('tasks||1'),
+      // Online, the user scrolls the done column to its end, so both of its
+      // cards are saved.
+      const first = createBoardEnv(adapter, 'filter');
+      first.env.serverTable.setItem('tasks||3', shipRelease);
+      const firstDone = first.renderColumn(doneColumn);
+      await flushAllTimers();
+      expect(firstDone.result.current.items).toMatchInlineSnapshot(
+        `['Pay invoice', 'Ship release']`,
       );
-      await flushAllTimers();
-      const moveBackDebounce = { context: 'move-task', payload: 'tasks||1' };
-      act(() => {
-        void board.env.apiStore.performMutation('tasks||1', {
-          debounce: { ...moveBackDebounce, ms: 5_000 },
-          optimisticUpdate: () => {
-            board.env.apiStore.updateItemState('tasks||1', (task) => ({
-              ...task,
-              status: 'todo',
-            }));
-          },
-          mutation: () => Promise.reject(new Error('unreachable offline')),
-          offline: {
-            operation: 'moveTask',
-            input: { itemId: 'tasks||1', status: 'todo' },
-          },
-        });
-      });
+      firstDone.unmount();
+      first.env.apiStore.dispose();
 
-      // The board opens meanwhile: its columns are read back from storage
-      // and show the move waiting for its debounce.
-      const todo = board.renderColumn(todoColumn);
+      // After a restart, the done column is refreshed with only its first
+      // page. Its second card stays saved for an offline "load more".
+      resetSessionForTests();
+      const board = createBoardEnv(adapter, 'filter');
+      board.env.serverTable.setItem('tasks||3', shipRelease);
+      board.env.scheduleFetch('highPriority', doneColumn, 1);
+      await flushAllTimers();
+
+      // Offline, the user moves "Ship release" back to todo from its screen.
+      act(() => {
+        network.goOffline();
+      });
+      await board.moveTask('tasks||3', 'todo');
+
+      // Scrolling the done column loads its next page from storage, which
+      // doesn't bring back the card moved out of it.
       const done = board.renderColumn(doneColumn);
-      await advanceTime(1_000);
-      expect({
-        todo: todo.result.current.items,
-        done: done.result.current.items,
-      }).toMatchInlineSnapshot(`
-        done: ['Pay invoice']
-        todo: ['Write report']
-      `);
-
-      // The user cancels the move back: the card returns to the done column
-      // of its queued move.
+      await flushAllTimers();
       act(() => {
-        board.env.apiStore.cancelDebouncedMutation(moveBackDebounce);
+        board.env.apiStore.loadMore(doneColumn, 1);
       });
       await flushAllTimers();
-      expect({
-        todo: todo.result.current.items,
-        done: done.result.current.items,
-      }).toMatchInlineSnapshot(`
-        done: ['Pay invoice', 'Write report']
-        todo: []
-      `);
-      expect(cardScreen.result.current.data?.status).toBe('done');
+      expect(done.result.current.items).toMatchInlineSnapshot(
+        `['Pay invoice']`,
+      );
     },
   );
 
