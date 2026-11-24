@@ -318,8 +318,6 @@ export function createMutationApi<
   recaptureOfflineOverlays: (itemKeys: Iterable<string>) => void,
   /** Items whose data was restored from persistent storage, if persisted. */
   restoredItemKeys: Set<string> | undefined,
-  /** Items with a change waiting for a manual resolution keep their local version. */
-  skipsBackgroundItemRefetch: (itemKey: string, priority: FetchType) => boolean,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -920,7 +918,6 @@ export function createMutationApi<
 
         for (const { itemKey } of itemsKey) {
           if (unsentCreationItemKeys.has(itemKey)) continue;
-          if (skipsBackgroundItemRefetch(itemKey, priority)) continue;
 
           const effectiveLoadedFields = getInvalidationBaselineFields(itemKey);
 
@@ -1065,7 +1062,6 @@ export function createMutationApi<
 
       if (!item) continue;
       if (unsentCreationItemKeys.has(itemKey)) continue;
-      if (skipsBackgroundItemRefetch(itemKey, priority)) continue;
 
       const effectiveLoadedFields = getInvalidationBaselineFields(itemKey);
 

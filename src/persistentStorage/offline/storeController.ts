@@ -170,26 +170,26 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
   /**
    * The server saved these items created with a client-generated id. Called
    * before the creation's `onSuccessExecute`, so that invalidations it makes
-   * refetch them: the entities are only synced again after it.
+   * refetch them: the entities are only synced again after it. An item
+   * removed locally when its creation started waiting for a decision (then
+   * sent again) is fetched from its `payload`.
    */
-  confirmClientIdCreations?: (entityKeys: string[]) => void;
+  confirmClientIdCreations?: (
+    entities: { entityKey: string; payload: ValidPayload | undefined }[],
+  ) => void;
   /**
    * A queued mutation for these entities was discarded. Its optimistic
    * changes are still applied to the store and no baseline exists to roll
    * them back to, so the store refetches the entities from the server.
    * `payload` is the item payload the operation referenced, if any: the
    * store may have no state left to read it from (an item deleted locally).
-   * Entities other changes still wait for a manual resolution on are left
-   * out: a refetch would replace those changes. `hasPendingResolutions` is
-   * `true` while other changes of the store still wait for a manual
-   * resolution: the store should then limit itself to the discarded
-   * entities, leaving broader refetches (e.g. of lists) to the recovery
-   * revalidation that follows the discard, which waits while a change on the
-   * whole store or on no entity is pending.
+   * `refetchLists` also refetches the store's lists (the change may have
+   * moved or removed rows); without it, the recovery revalidation that
+   * follows refreshes them.
    */
   revalidateDiscardedEntities?: (
     entities: (OfflineEntityRef & { payload: ValidPayload | undefined })[],
-    hasPendingResolutions: boolean,
+    refetchLists: boolean,
   ) => void;
 };
 
@@ -3799,17 +3799,18 @@ export function createOfflineStoreController<
 
   /**
    * Removes the items a discarded `create` without temp entity (the app
-   * generated the id on the client) added to the store, like the rollback of a
-   * temp create, and adds their keys to `removedEntityKeys`. Like removed temp
-   * entities, they are not refetched: the server most likely never got them.
-   * If an earlier replay attempt did create one, the store's list
-   * revalidation brings it back.
+   * generated the id on the client) added to the store when `removeItems`,
+   * like the rollback of a temp create, and adds their keys to
+   * `removedEntityKeys`. Like removed temp entities, they are not refetched:
+   * the server most likely never got them. If an earlier replay attempt did
+   * create one, the store's list revalidation brings it back.
    */
   function rollbackClientIdCreatedItems(
     workItem: Pick<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
       'operation' | 'input' | 'entityRefs'
     >,
+    removeItems: boolean,
     removedEntityKeys: Set<string>,
     droppedEntityKeys: ReadonlySet<string>,
     cancelledEntityKeys: Set<string>,
@@ -3822,12 +3823,14 @@ export function createOfflineStoreController<
       });
       if (payload === undefined) continue;
 
-      storeAdapter.rollbackPendingEntity?.({
-        operationName: workItem.operation,
-        input: workItem.input,
-        tempId: payload,
-        pendingEntity: undefined,
-      });
+      if (removeItems) {
+        storeAdapter.rollbackPendingEntity?.({
+          operationName: workItem.operation,
+          input: workItem.input,
+          tempId: payload,
+          pendingEntity: undefined,
+        });
+      }
       removedEntityKeys.add(entityKey);
       // Like a temp entity, an item whose creation was never sent, or was
       // discarded while it waited for a decision, will not get the work of
@@ -3877,11 +3880,68 @@ export function createOfflineStoreController<
       : getClientIdCreatedEntityKeys(workItem);
   }
 
+  /**
+   * Shows what the server has for the entities of work that just started
+   * waiting for a manual decision: the work then only lives in its resolution
+   * records. The entities it created before the server had them (temp
+   * entities, items added with a client-generated id) are removed, the others
+   * are refetched, like when queued work is discarded. The lists are only
+   * refetched with `refetchLists`: during a replay they, and the other tabs,
+   * are refreshed by the recovery revalidation that follows it, and
+   * refetched now they would drop the changes still queued behind this work.
+   */
+  function showServerVersionOfHeldWork(
+    current: ActiveSessionState,
+    heldWork: (OfflineQueueEntry | PersistedOfflineResolutionRecord)[],
+    refetchLists = false,
+  ): void {
+    const removedEntityKeys = new Set<string>();
+
+    for (const workItem of heldWork) {
+      rollbackTempCreatePendingEntity(workItem);
+      for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
+        removedEntityKeys.add(entityKey);
+      }
+
+      for (const entityKey of getClientIdCreatedEntityKeys(workItem)) {
+        const payload = getPayloadForEntityRef({
+          operationName: workItem.operation,
+          input: workItem.input,
+          entityKey,
+        });
+        if (payload === undefined) continue;
+
+        storeAdapter.rollbackPendingEntity?.({
+          operationName: workItem.operation,
+          input: workItem.input,
+          tempId: payload,
+          pendingEntity: undefined,
+        });
+        removedEntityKeys.add(entityKey);
+      }
+    }
+
+    // Nor is the work on entities whose creation waits for a decision
+    // fetched: the server does not have them.
+    for (const resolution of resolutions.values()) {
+      for (const entityKey of getCreatedEntityKeys(resolution)) {
+        removedEntityKeys.add(entityKey);
+      }
+    }
+
+    refreshDerivedState(current);
+    revalidateDiscardedWork(heldWork, removedEntityKeys, refetchLists);
+  }
+
+  /**
+   * Moves the work queued on the entities `parentEntry` creates to manual
+   * resolutions held behind `parentResolutionId`, and resolves to that work.
+   */
   async function promoteBlockedTempCreateDescendants(args: {
     current: ActiveSessionState;
     parentEntry: OfflineQueueEntry;
     parentResolutionId: string;
-  }): Promise<void> {
+  }): Promise<OfflineQueueEntry[]> {
     const descendantQueueEntries = new Map<string, OfflineQueueEntry>();
 
     for (const entityKey of getCreatedEntityKeys(args.parentEntry)) {
@@ -3905,6 +3965,8 @@ export function createOfflineStoreController<
       );
       await removeEntry(dependentEntry.id, args.current, true);
     }
+
+    return [...descendantQueueEntries.values()];
   }
 
   async function persistManualResolutionChain(args: {
@@ -3923,12 +3985,15 @@ export function createOfflineStoreController<
     // the change that now waits for the user's decision.
     await persistResolution(args.parentResolution, args.current, true);
     await removeEntry(args.parentEntry.id, args.current, true);
-    await promoteBlockedTempCreateDescendants({
+    const heldEntries = await promoteBlockedTempCreateDescendants({
       current: args.current,
       parentEntry: args.parentEntry,
       parentResolutionId: args.parentResolution.id,
     });
-    refreshDerivedState(args.current);
+    showServerVersionOfHeldWork(args.current, [
+      args.parentEntry,
+      ...heldEntries,
+    ]);
   }
 
   function isPersistedResolutionBlocked(
@@ -4045,6 +4110,10 @@ export function createOfflineStoreController<
     for (const workItem of [...droppedDescendants, ...tempCreates]) {
       rollbackClientIdCreatedItems(
         workItem,
+        // Work that waited for a decision already removed the items it
+        // created (see `showServerVersionOfHeldWork`): what the store has
+        // for them now came from the server.
+        'syncState' in workItem,
         removedEntityKeys,
         droppedClientIdEntityKeys,
         cancelledEntityKeys,
@@ -4054,25 +4123,24 @@ export function createOfflineStoreController<
         cancelledEntityKeys.add(entityKey);
       }
 
-      if (!workItem.tempIds || !isTempCreateOperation(workItem.operation)) {
-        continue;
-      }
-
       rollbackTempCreatePendingEntity(workItem);
     }
 
     refreshDerivedState(current);
 
-    // The dropped work may also have changed entities that exist on the
-    // server (e.g. moved an item into the cancelled one), and work without a
-    // temp entity to roll back keeps its optimistic change applied: those
-    // entities are refetched.
-    const discardedWork: (
-      | OfflineQueueEntry
-      | PersistedOfflineResolutionRecord
-    )[] = [...droppedDescendants];
+    // The dropped queued work may also have changed entities that exist on
+    // the server (e.g. moved an item into the cancelled one), and work
+    // without a temp entity to roll back keeps its optimistic change
+    // applied: those entities are refetched. Work that waited for a decision
+    // shows the server data already (see `persistManualResolutionChain`).
+    const discardedWork: OfflineQueueEntry[] = [
+      ...descendantQueueEntries.values(),
+    ];
     for (const tempCreate of tempCreates) {
-      if (getTempLifecycleEntityKeys(tempCreate).length === 0) {
+      if (
+        'syncState' in tempCreate &&
+        getTempLifecycleEntityKeys(tempCreate).length === 0
+      ) {
         discardedWork.push(tempCreate);
       }
     }
@@ -4234,10 +4302,7 @@ export function createOfflineStoreController<
   /**
    * Refetches the entities discarded queued work referenced (its optimistic
    * changes cannot be rolled back locally), except the entities the discard
-   * removed (temp entities and items of discarded creations) and the
-   * entities other changes still wait for a decision on: a refetch
-   * would replace those changes. The recovery revalidation refetches them
-   * once the last one is handled.
+   * removed (temp entities and items of discarded creations).
    */
   function revalidateDiscardedWork(
     discardedWork: Pick<
@@ -4245,16 +4310,12 @@ export function createOfflineStoreController<
       'operation' | 'input' | 'entityRefs'
     >[],
     removedEntityKeys: ReadonlySet<string>,
+    refetchLists = true,
   ): void {
     const entities: (OfflineEntityRef & {
       payload: ValidPayload | undefined;
     })[] = [];
     const skippedEntityKeys = new Set(removedEntityKeys);
-    for (const resolution of resolutions.values()) {
-      for (const ref of resolution.entityRefs) {
-        skippedEntityKeys.add(ref.entityKey);
-      }
-    }
 
     for (const workItem of discardedWork) {
       for (const ref of workItem.entityRefs) {
@@ -4274,7 +4335,7 @@ export function createOfflineStoreController<
 
     if (entities.length === 0) return;
 
-    storeAdapter.revalidateDiscardedEntities?.(entities, resolutions.size > 0);
+    storeAdapter.revalidateDiscardedEntities?.(entities, refetchLists);
   }
 
   /**
@@ -4373,13 +4434,9 @@ export function createOfflineStoreController<
       await removeResolution(resolution.id, current, true);
     }
 
-    storeAdapter.captureQueuedMutationOverlays?.({
-      sessionKey: current.sessionKey,
-      entityRefs: nextEntries.flatMap((nextEntry) => {
-        return nextEntry.entry?.entityRefs ?? [];
-      }),
-    });
-
+    // No overlays are captured for the requeued entries: their entities show
+    // the server version (no optimistic update is applied again), and a
+    // creation removed when it started waiting has nothing to capture.
     refreshDerivedState(current);
     // Resolutions of operations the app no longer registers were dropped
     // instead of requeued.
@@ -5378,13 +5435,12 @@ export function createOfflineStoreController<
         });
       }
 
-      // Held work merged into keeps showing the merged change too.
-      const queuedWork =
-        plannedMutation.nextEntry ?? plannedMutation.replacedResolution;
-      if (queuedWork) {
+      // Held work only lives in its resolution records (see
+      // `showServerVersionOfHeldWork`), so it has no overlay.
+      if (plannedMutation.nextEntry && !blockedResolution) {
         storeAdapter.captureQueuedMutationOverlays?.({
           sessionKey: current.sessionKey,
-          entityRefs: queuedWork.entityRefs,
+          entityRefs: plannedMutation.nextEntry.entityRefs,
         });
       }
     } catch (error) {
@@ -5470,6 +5526,16 @@ export function createOfflineStoreController<
       await discardTempLifecycles(current, cancelledTempCreates);
       supersededWork = supersededWork.filter(
         (workItem) => !cancelledTempCreates.includes(workItem),
+      );
+    } else if (blockedResolution || plannedMutation.replacedResolution) {
+      // Without queued work no recovery revalidation follows to refresh the
+      // lists the held work changed.
+      showServerVersionOfHeldWork(
+        current,
+        [blockedResolution, plannedMutation.replacedResolution].filter(
+          (workItem) => workItem !== undefined,
+        ),
+        queueEntries.size === 0,
       );
     } else {
       refreshDerivedState(current);
@@ -5665,12 +5731,12 @@ export function createOfflineStoreController<
         );
         await persistResolution(heldResolution, current, true);
         await removeEntry(nextEntry.id, current, true);
-        await promoteBlockedTempCreateDescendants({
+        const heldEntries = await promoteBlockedTempCreateDescendants({
           current,
           parentEntry: nextEntry,
           parentResolutionId: heldResolution.id,
         });
-        refreshDerivedState(current);
+        showServerVersionOfHeldWork(current, [nextEntry, ...heldEntries]);
         continue;
       }
 
@@ -5855,7 +5921,16 @@ export function createOfflineStoreController<
         const clientIdCreatedEntityKeys =
           getClientIdCreatedEntityKeys(entryToUse);
         if (clientIdCreatedEntityKeys.length > 0) {
-          storeAdapter.confirmClientIdCreations?.(clientIdCreatedEntityKeys);
+          storeAdapter.confirmClientIdCreations?.(
+            clientIdCreatedEntityKeys.map((entityKey) => ({
+              entityKey,
+              payload: getPayloadForEntityRef({
+                operationName: entryToUse.operation,
+                input: entryToUse.input,
+                entityKey,
+              }),
+            })),
+          );
         }
 
         const successfulExecuteSync = runSuccessfulExecuteSync({
@@ -6521,9 +6596,42 @@ export function createOfflineStoreController<
           result: committedResult,
         });
       }
+      // Read again: the reconciliation rewrote its temp refs to the final ones.
+      const committedResolution =
+        resolutions.get(resolutionId) ?? resolutionRecord;
       const requeuedDescendants = await requeueHeldDescendants(resolutionId);
       await removeResolution(resolutionId, current);
       await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
+      // The change was completed outside the queue, and its entities show the
+      // server version from before it: they are refetched, lists included.
+      // With held work queued again, the revalidation after it replays does it.
+      if (requeuedDescendants.length === 0) {
+        const skippedEntityKeys = new Set(
+          getTempLifecycleEntityKeys(committedResolution),
+        );
+        for (const waitingResolution of resolutions.values()) {
+          for (const entityKey of getCreatedEntityKeys(waitingResolution)) {
+            skippedEntityKeys.add(entityKey);
+          }
+        }
+        // The temp entities it created are refetched under their final ids.
+        const finalEntityRefs = resolveNormalizedRefs(
+          (committedResolution.tempIds ?? []).map(resolveEntityRef),
+        );
+        revalidateDiscardedWorkInEveryTab(
+          current,
+          [
+            {
+              ...committedResolution,
+              entityRefs: [
+                ...committedResolution.entityRefs,
+                ...finalEntityRefs,
+              ],
+            },
+          ],
+          skippedEntityKeys,
+        );
+      }
       // The work other stores held behind these creations follows them. It
       // stays held while this resolution exists, so it is released after.
       await notifyCreationsReleased(current, [

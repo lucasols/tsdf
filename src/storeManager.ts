@@ -372,9 +372,8 @@ type RegisteredStore = {
   reset: () => void;
   onTransportReconnect: () => void;
   /**
-   * The store can be revalidated against the server again: its session
-   * recovered or one of its changes waiting for a manual resolution was
-   * handled. Items still waiting for a resolution are left out.
+   * The store can be revalidated against the server again: its session is
+   * back online with its queued mutations replayed.
    */
   onOfflineRecovery: () => void;
   /**
@@ -808,13 +807,11 @@ export function registerStoreWithManager(
   // offline mode, so they must still learn when it recovers.
   if (!registry.unsubscribeFromOfflineRecovery) {
     registry.unsubscribeFromOfflineRecovery = subscribeToOfflineRecovery(
-      (sessionKey, hasStoreRecovered) => {
+      (sessionKey) => {
         if (storeManager.getSessionKey() !== sessionKey) return;
 
         for (const registeredStore of [...registry.stores.values()]) {
-          if (hasStoreRecovered(registeredStore.id)) {
-            registeredStore.onOfflineRecovery();
-          }
+          registeredStore.onOfflineRecovery();
         }
       },
     );

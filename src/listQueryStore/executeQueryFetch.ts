@@ -38,39 +38,13 @@ function applyFetchedItems<
   getItemKey: (params: ItemPayload) => string,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
   appendToExisting: boolean,
-  resolutionItemKeys: ReadonlySet<string>,
 ) {
   const query = draft.queries[queryKey];
   if (!query) return;
 
-  // Items with a change waiting for a manual resolution keep their local
-  // version, which the server data would replace: their data, staying hidden
-  // when deleted locally, and, in the part of the list loaded before, whether
-  // and where they are in it (the change may have moved them between lists,
-  // or the server rejected their creation). Positions in the replaced list,
-  // by item key, which can hold local creations even before its first load.
-  const keepsLocalPositions = resolutionItemKeys.size > 0 && !appendToExisting;
-  // Only a list loaded before decides whether held rows the server returns
-  // are in it
-  const keepsLocalMembership = keepsLocalPositions && query.wasLoaded;
-  let keptPositions: Map<string, number> | null = null;
-  // A fetch of a list with more rows to load (a load more replacing the list,
-  // or a refetch with a larger size) returns the part loaded before first,
-  // then the new rows, placed where the server lists them
-  const newRowsStart = query.hasMore ? query.items.length : Infinity;
-
   query.status = 'success';
   query.wasLoaded = true;
   query.hasMore = hasMore;
-
-  if (keepsLocalPositions) {
-    for (const [index, itemKey] of query.items.entries()) {
-      if (resolutionItemKeys.has(itemKey)) {
-        keptPositions ??= new Map();
-        keptPositions.set(itemKey, index);
-      }
-    }
-  }
 
   if (!appendToExisting) {
     query.items = [];
@@ -78,25 +52,11 @@ function applyFetchedItems<
 
   const existingItemKeys = new Set(query.items);
 
-  for (const [index, { data, itemPayload }] of items.entries()) {
+  for (const { data, itemPayload } of items) {
     const itemKey = getItemKey(itemPayload);
 
-    const keepsLocalVersion =
-      resolutionItemKeys.size > 0 &&
-      resolutionItemKeys.has(itemKey) &&
-      draft.items[itemKey] !== undefined;
-
-    if (keepsLocalVersion && draft.items[itemKey] === null) continue;
-
     if (partialResources) {
-      applyPartialItemMerge(
-        draft,
-        itemKey,
-        data,
-        fields,
-        partialResources,
-        keepsLocalVersion,
-      );
+      applyPartialItemMerge(draft, itemKey, data, fields, partialResources);
 
       const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
       if (invalidationFields) {
@@ -114,20 +74,11 @@ function applyFetchedItems<
           }
         }
       }
-    } else if (!keepsLocalVersion) {
+    } else {
       draft.items[itemKey] = reusePrevIfEqual(
         draft.items[itemKey] ?? undefined,
         data,
       );
-    }
-
-    // Placed by `keptPositions` instead
-    if (
-      keepsLocalVersion &&
-      keepsLocalMembership &&
-      (index < newRowsStart || keptPositions?.has(itemKey))
-    ) {
-      continue;
     }
 
     // Deduplicate: skip items already in the list (handles both append
@@ -136,8 +87,6 @@ function applyFetchedItems<
       query.items.push(itemKey);
       existingItemKeys.add(itemKey);
     }
-
-    if (keepsLocalVersion) continue;
 
     const itemQuery = draft.itemQueries[itemKey];
 
@@ -152,16 +101,6 @@ function applyFetchedItems<
         wasLoaded: true,
         payload: itemPayload,
       };
-    }
-  }
-
-  if (keptPositions) {
-    // Kept items go back where they were, unless the server data replaced
-    // them (no local version to keep)
-    for (const [itemKey, index] of keptPositions) {
-      if (existingItemKeys.has(itemKey)) continue;
-
-      query.items.splice(Math.min(index, query.items.length), 0, itemKey);
     }
   }
 }
@@ -182,10 +121,9 @@ export async function executeQueryFetch<
   errorNormalizer: (exception: Error) => StoreError,
   getItemKey: (params: ItemPayload) => string,
   updateItemSchedulerTiming: (itemKey: string, startTime: number) => void,
-  partialResources: PartialResourcesConfig<ItemState> | undefined,
-  offsetPagination: OffsetPaginationConfig | undefined,
-  offlineController: OfflineAwareFetchController | null | undefined,
-  resolutionItemKeys: ReadonlySet<string>,
+  partialResources?: PartialResourcesConfig<ItemState>,
+  offsetPagination?: OffsetPaginationConfig,
+  offlineController?: OfflineAwareFetchController | null,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
 
@@ -357,7 +295,6 @@ export async function executeQueryFetch<
               getItemKey,
               partialResources,
               appendToExisting,
-              resolutionItemKeys,
             );
           },
           { action: 'query-fetch-success' },

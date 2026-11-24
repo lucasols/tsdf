@@ -1081,7 +1081,7 @@ test('a value set in a tab after another tab set one is sent last, and the serve
   expect(tabA.getEnv().serverMock.current).toBe(4);
 });
 
-test('an edit another tab turned into a conflict keeps showing in the tab that made it', async () => {
+test('an edit another tab turned into a conflict is refetched in the tab that made it', async () => {
   network.setOffline();
   // Tab A keeps the focus and leads
   await openTab('A', { focused: true });
@@ -1118,9 +1118,10 @@ test('an edit another tab turned into a conflict keeps showing in the tab that m
   }
   logTabB('edit queued in tab B');
 
-  // On reconnect tab A replays the edit and moves it to a conflict. Tab B
-  // still has a change waiting for the user's decision, so it must not
-  // refetch the document and replace the edit with the server value.
+  // On reconnect tab A replays the edit and moves it to a conflict. The edit
+  // then only lives in its resolution record, also for tab B: its document
+  // is refetched (here no screen shows it, so the next one that does
+  // fetches it).
   network.goOnline();
   await advanceTime(10_000);
   logTabB('after tab A replayed it');
@@ -1131,99 +1132,30 @@ test('an edit another tab turned into a conflict keeps showing in the tab that m
     ┌─
     ⋅ label: after tab A replayed it
     ⋅ value: -1
-    ⋅ refetchOnOpen: ❌
+    ⋅ refetchOnOpen: ✅
     ⋅ resolutions: doc: conflict
     └─
     "
   `);
 });
 
-test('an edit sent again from another tab keeps showing in the tab that made it', async () => {
-  network.setOffline();
-  // Tab A keeps the focus and leads
-  const tabA = await openTab('A', { focused: true });
-  const tabB = await openTab('B', { focused: false });
-  setDocumentHidden(false);
-
-  // The user edits in tab B while offline; on reconnect tab A replays the
-  // edit and the server rejects it with a conflict (negative values).
-  const tabBEnv = tabB.getEnv();
-  await tabBEnv.apiStore.performMutation({
-    optimisticUpdate: () => {
-      tabBEnv.apiStore.updateState((draft) => {
-        draft.value = -1;
-      });
-    },
-    mutation: async () => {
-      await tabBEnv.serverMock.delayedSetData(-1);
-      return -1;
-    },
-    offline: { operation: 'updateValue', input: { value: -1 } },
-  });
-  await advanceTime(10);
-  network.goOnline();
-  await advanceTime(10_000);
-
-  const tabBDoc = createLoggerStore();
-  function logTabB(label: string) {
-    tabBDoc.add({
-      label,
-      value: tabBEnv.store.state.data?.value,
-      // set when the store is revalidated with no screen showing it: the
-      // next screen that shows the document refetches it
-      refetchOnOpen: tabBEnv.store.state.refetchOnMount !== false,
-      resolutions: describeTabs(tabB)['tab B']?.resolutions.join(', '),
-    });
-  }
-  logTabB('conflict waiting for a decision');
-
-  // From tab A's offline panel the user sends the edit again with another
-  // value, which the server rejects too. The change moves from the conflict
-  // back to the queue and into a new conflict without ever being gone, so
-  // tab B must not refetch the document over it.
-  const [conflict] = tabA.storeManager.getOfflineResolutions();
-  await tabA
-    .getEnv()
-    .apiStore.resolveOfflineResolution(
-      conflict?.id ?? 'missing',
-      'updateValue',
-      { action: 'requeue', input: { value: -2 } },
-    );
-  await advanceTime(10_000);
-  logTabB('sent again from tab A and rejected again');
-
-  expect(tabBDoc.changesSnapshot).toMatchInlineSnapshot(`
-    "
-    ┌─
-    ⋅ label: conflict waiting for a decision
-    ⋅ value: -1
-    ⋅ refetchOnOpen: ❌
-    ⋅ resolutions: doc: conflict
-    └─
-    ┌─
-    ⋅ label: sent again from tab A and rejected again
-    ⋅ value: -1
-    ⋅ refetchOnOpen: ❌
-    ⋅ resolutions: doc: conflict
-    └─
-    "
-  `);
-});
-
-test('discarding a conflict in one tab refetches the user in the tab that made the change', async () => {
+test('renames another tab turned into conflicts are refetched in the tab that made them', async () => {
   seedSharedUsersServer({
     'users||Ada': { name: 'Ada' },
     'users||Bob': { name: 'Bob' },
   });
   network.setOffline();
   const loadedUsers = ['users||Ada', 'users||Bob'];
-  const tabA = await openUsersTab('A', { focused: true, loadedUsers });
+  await openUsersTab('A', { focused: true, loadedUsers });
   const tabB = await openUsersTab('B', { focused: false, loadedUsers });
   // Tab A keeps the focus and leads
   setDocumentHidden(false);
 
   // The user renames both users in tab B while offline. On reconnect tab A
   // replays both renames and the server rejects each with a conflict.
+  // The renames then only live in their resolution records, also for tab B:
+  // both users are refetched (here no screen shows them, so the next one that
+  // does fetches them).
   await tabB.queueRename('users||Ada', 'Ada local');
   await tabB.queueRename('users||Bob', 'Bob local');
   network.goOnline();
@@ -1241,41 +1173,20 @@ test('discarding a conflict in one tab refetches the user in the tab that made t
   }
   logTabB('both renames rejected');
 
-  // The user discards Ada's rename from tab A's offline panel; Bob's conflict
-  // still waits for a decision.
-  // (Ada's rename was queued first, so its conflict is listed first.)
-  const [adaConflict] = tabA.storeManager.getOfflineResolutions();
-  await tabA.storeManager.resolveOfflineResolution(
-    adaConflict?.id ?? 'missing',
-    'discard',
-  );
-  await advanceTime(3_000);
-  logTabB('Ada rename discarded in tab A');
-
-  // Tab B drops the discarded rename like tab A: Ada is refetched (here no
-  // screen shows it, so the next one that does fetches it), while Bob keeps
-  // the rename that still waits for a decision.
   expect(tabBUsers.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ label: both renames rejected
     ⋅ ada: Ada local
-    ⋅ adaMarkedForRefetch: ❌
-    ⋅ bob: Bob local
-    ⋅ bobMarkedForRefetch: ❌
-    └─
-    ┌─
-    ⋅ label: Ada rename discarded in tab A
-    ⋅ ada: Ada local
     ⋅ adaMarkedForRefetch: ✅
     ⋅ bob: Bob local
-    ⋅ bobMarkedForRefetch: ❌
+    ⋅ bobMarkedForRefetch: ✅
     └─
     "
   `);
 });
 
-test('discarding a user created offline with a client-generated id removes it from every tab', async () => {
+test('a user created offline with a client-generated id is removed from every tab once its creation needs a decision', async () => {
   network.setOffline();
   const tabA = await openUsersTab('A', { focused: true });
   const tabB = await openUsersTab('B', { focused: false });
@@ -1301,7 +1212,8 @@ test('discarding a user created offline with a client-generated id removes it fr
   }
   logTabs('creation rejected');
 
-  // The user discards the creation from tab A's offline panel
+  // The user discards the creation from tab A's offline panel: the records
+  // are dropped in every tab
   const [createConflict] = tabA.storeManager.getOfflineResolutions();
   await tabA.storeManager.resolveOfflineResolution(
     createConflict?.id ?? 'missing',
@@ -1310,16 +1222,16 @@ test('discarding a user created offline with a client-generated id removes it fr
   await advanceTime(3_000);
   logTabs('creation discarded in tab A');
 
-  // Linus never reached the server: both tabs drop him instead of keeping the
-  // unsaved user or marking him for a refetch the server would answer with
-  // "not found".
+  // Linus never reached the server: once his creation needs a decision, both
+  // tabs drop him instead of keeping the unsaved user or marking him for a
+  // refetch the server would answer with "not found".
   expect(users.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ label: creation rejected
-    ⋅ tabA: Linus
+    ⋅ tabA: null
     ⋅ tabAMarkedForRefetch: ❌
-    ⋅ tabB: Linus
+    ⋅ tabB: null
     ⋅ tabBMarkedForRefetch: ❌
     └─
     ┌─

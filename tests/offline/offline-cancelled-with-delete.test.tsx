@@ -297,29 +297,31 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
       18s    | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       23s    | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
-      23.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
-      23.81s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
-      24.81s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | -- the user deletes the task
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks] ui-changed
+      23.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 >list-fetch-started
+      23.81s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      24.81s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user deletes the task
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask resolution-required
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask queued
-      25.81s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user asks to send the task creation again
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user asks to send the task creation again
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-started
-      27.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      26.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-finished
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] >delete-item-started (value: {"id":50,"name":"Plan trip"})
-      27.85s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] <delete-item-persisted (value: {"id":50,"name":"Plan trip"})
-      28.21s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-finished
-      28.22s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 >list-fetch-started
-      29.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
+      26.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 [tasks||50] >fetch-started
+      26.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 [tasks||50] <fetch-finished (value: {"id":50,"name":"Plan trip"})
+      26.85s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] <delete-item-persisted (value: {"id":50,"name":"Plan trip"})
+      27.21s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-finished
+      27.22s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 >list-fetch-started
+      28.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 <list-fetch-finished (value: {"count":2})
       "
     `);
 
     list.unmount();
   });
 
-  test('a delete that fails until it needs a decision keeps the notes queued for the task, which are sent, and discarding it keeps the task', async () => {
+  test('a delete that fails until it needs a decision keeps the notes queued for the task, which are sent, and the task shows again', async () => {
     const { env, list, failedCreation } =
       await deleteTaskWhoseCreationKeepsFailing('failed-delete-keeps-notes');
 
@@ -361,9 +363,11 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
       throw new Error('Expected the failed delete');
     }
 
-    env.tasks.addTimelineComments('beforeNextAction', [
-      'the user discards the delete',
-    ]);
+    // Sent again, the delete shows the server version until it is replayed:
+    // the task is fetched once its creation is saved. Once the delete needs a
+    // decision it only lives in its resolution record: the lists are
+    // refetched and the task shows in them again. Discarding the delete only
+    // drops its record.
     await act(async () => {
       await env.tasks.apiStore.resolveOfflineResolution(
         failedDelete.id,
@@ -397,28 +401,25 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
       9.01s  | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       14.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
-      14.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
-      14.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
-      15.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | -- the user deletes the task
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks] ui-changed
+      14.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 >list-fetch-started
+      14.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      15.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user deletes the task
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask resolution-required
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask queued
-      16.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user asks to send the task creation again: the delete keeps failing
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user asks to send the task creation again: the delete keeps failing
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-started
-      18.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      17.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-finished
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
-      23.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
-      28.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
+      17.03s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 [tasks||50] >fetch-started
+      17.83s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 [tasks||50] <fetch-finished (value: {"id":50,"name":"Plan trip"})
+      22.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
+      27.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask resolution-required
-      29.23s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 >list-fetch-started
-      30.03s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":3})
-      31.04s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user discards the delete
-      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 >list-fetch-started
-      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟢 [tasks||50] >fetch-started
-      31.84s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 <list-fetch-finished (value: {"count":3})
+      28.23s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 >list-fetch-started
+      29.03s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 <list-fetch-finished (value: {"count":3})
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | [tasks] ui-changed
-      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🟢 [tasks||50] <fetch-finished (value: {"id":50,"name":"Plan trip"})
       "
     `);
 
@@ -483,21 +484,23 @@ describe('work of other stores declared cancelledWith a deleted entity', () => {
       9.01s  | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       14.01s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId replay-started
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | offline:createTaskWithId resolution-required
-      14.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 >list-fetch-started
-      14.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | 🔴 <list-fetch-finished (value: {"count":2})
-      15.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget, Plan trip | -- the user deletes the task
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks] ui-changed
+      14.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 >list-fetch-started
+      14.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
+      15.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user deletes the task
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask resolution-required
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask queued
-      16.82s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user asks to send the task creation again: the answer of the delete is lost
+      .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | -- the user asks to send the task creation again: the answer of the delete is lost
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-started
-      18.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      17.02s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:createTaskWithId replay-finished
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | offline:deleteTask replay-started
       .      | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] >delete-item-started (value: {"id":50,"name":"Plan trip"})
-      18.86s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] <delete-item-persisted (value: {"id":50,"name":"Plan trip"})
-      24.23s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 >list-fetch-started
-      25.03s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 <list-fetch-finished (value: {"count":2})
+      17.03s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 [tasks||50] >fetch-started
+      17.83s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟠 [tasks||50] <fetch-finished (value: {"id":50,"name":"Plan trip"})
+      17.86s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | [tasks||50] <delete-item-persisted (value: {"id":50,"name":"Plan trip"})
+      23.23s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 >list-fetch-started
+      24.03s | tasks||1: Outline, tasks||50: Ask Ana about dates | Write report, Review budget            | 🟡 <list-fetch-finished (value: {"count":2})
       "
     `);
 

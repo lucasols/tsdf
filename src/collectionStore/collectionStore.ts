@@ -364,9 +364,8 @@ export type CollectionStoreOptions<
   transportReconnectCooldownMs?: number;
   /**
    * Called when an already-loaded item is invalidated. Not called for an item
-   * the invalidation leaves alone: an unsent offline creation, or an item with
-   * a change waiting for a manual resolution on an invalidation with any
-   * priority but `highPriority` (see `docs/offline.md`).
+   * the invalidation leaves alone: an unsent offline creation (see
+   * `docs/offline.md`).
    */
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
   /** Observes request scheduler lifecycle events for this store. */
@@ -1036,7 +1035,7 @@ export function createCollectionStore<
   type CollectionOfflineOverlay = {
     data: ItemState | null;
     payload?: ItemPayload;
-    keepVisibleWhileResolutionRequired?: boolean;
+    keepDataOnNextCapture?: boolean;
   };
   type ResolvedOfflineOperations = TOfflineOperations extends null
     ? Record<never, never>
@@ -1065,11 +1064,6 @@ export function createCollectionStore<
   // temp entity or of an item with an id the app generated. They cannot be
   // refetched, so invalidations skip them.
   const unsentCreationItemKeys = new Set<string>();
-  // Items with a change waiting for a manual resolution: the window focus,
-  // reconnect and recovery revalidations and background refetches skip them,
-  // since a refetch would replace the change the user still has to decide on
-  // (see `skipsBackgroundRefetch`).
-  const resolutionItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
 
   let initialData:
@@ -1215,7 +1209,6 @@ export function createCollectionStore<
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState({});
     unsentCreationItemKeys.clear();
-    resolutionItemKeys.clear();
   }
 
   function rebindOfflineOverlays(
@@ -1230,7 +1223,7 @@ export function createCollectionStore<
       ({ existingOverlay, nextItemKey }) => ({
         data: existingOverlay.data ?? null,
         payload: store.state[nextItemKey]?.payload ?? existingOverlay.payload,
-        keepVisibleWhileResolutionRequired: true,
+        keepDataOnNextCapture: true,
       }),
     );
   }
@@ -1336,6 +1329,14 @@ export function createCollectionStore<
               if (finalData !== undefined) {
                 deleteItemState(tempPayload);
                 addItemToState(finalPayload, finalData);
+              } else if (
+                currentItem === null &&
+                !offlineOverlayStore.state[getItemKey(tempPayload)]
+              ) {
+                // Removed when its creation started waiting for a decision
+                // (then sent again): fetch what the server saved. An item
+                // deleted by queued work (it has an overlay) stays deleted.
+                scheduleFetch('highPriority', finalPayload);
               }
               // Listeners are told even when this tab had no item to replace
               storeEvents.emit('tempEntityReconciled', {
@@ -1388,10 +1389,10 @@ export function createCollectionStore<
               rebindOfflineOverlays(itemKeyRewrites);
             },
             revalidateDiscardedEntities: (entities) => {
-              // A discard that releases an item (or the last change on no
-              // entity) of a realtime store schedules its recovery
-              // revalidation for the end of the reconnect cooldown: run it
-              // now with this refetch instead of fetching twice.
+              // Discarding the last queued change of a realtime store
+              // schedules its recovery revalidation for the end of the
+              // reconnect cooldown: run it now with this refetch instead of
+              // fetching twice.
               focusLifecycle.flushPendingReconnectRevalidate();
               for (const { entityKey, payload } of entities) {
                 const item = store.state[entityKey];
@@ -1412,7 +1413,6 @@ export function createCollectionStore<
               if (offlineOverlaySessionKey !== sessionKey)
                 clearOfflineOverlays(sessionKey);
               unsentCreationItemKeys.clear();
-              resolutionItemKeys.clear();
               for (const entity of entities) {
                 if (
                   entity.tempId !== undefined ||
@@ -1420,13 +1420,16 @@ export function createCollectionStore<
                 ) {
                   unsentCreationItemKeys.add(entity.entityKey);
                 }
-                if (entity.requiresResolution) {
-                  resolutionItemKeys.add(entity.entityKey);
-                }
               }
+              // Work waiting for a decision only lives in its resolution
+              // records: the items show the server version, not its overlay.
               const activeItemKeys = new Set(
                 entities
-                  .filter((entity) => entity.entityKind === 'item')
+                  .filter(
+                    (entity) =>
+                      entity.entityKind === 'item' &&
+                      !entity.requiresResolution,
+                  )
                   .map((entity) => entity.entityKey),
               );
 
@@ -1438,9 +1441,24 @@ export function createCollectionStore<
                 }
               });
             },
-            confirmClientIdCreations: (entityKeys) => {
-              for (const entityKey of entityKeys) {
+            confirmClientIdCreations: (entities) => {
+              for (const { entityKey, payload } of entities) {
                 unsentCreationItemKeys.delete(entityKey);
+                // Removed when its creation started waiting for a decision,
+                // and invalidations skip deleted items: fetch what the server
+                // saved. An item deleted by queued work (it has an overlay)
+                // stays deleted.
+                if (
+                  store.state[entityKey] === null &&
+                  !offlineOverlayStore.state[entityKey] &&
+                  payload !== undefined
+                ) {
+                  scheduleFetch(
+                    'highPriority',
+                    // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
+                    __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+                  );
+                }
               }
             },
           },
@@ -2108,28 +2126,8 @@ export function createCollectionStore<
   }
 
   /**
-   * A background refetch (any priority but `highPriority`: a hook mount, a
-   * window focus, a realtime update) leaves a loaded item alone while it has
-   * a change waiting for a manual resolution: a refetch would replace the
-   * local version the user still has to decide on. Explicit fetches still
-   * replace it. Once the change is handled, the store's recovery revalidation
-   * refetches it.
-   */
-  function skipsBackgroundRefetch(
-    itemKey: string,
-    priority: FetchType,
-  ): boolean {
-    return (
-      priority !== 'highPriority' &&
-      resolutionItemKeys.has(itemKey) &&
-      !!store.state[itemKey]?.wasLoaded
-    );
-  }
-
-  /**
-   * Schedules a fetch hooks start on their own, skipping unsent creations and
-   * held items (see `skipsBackgroundRefetch`); `onSkipped` is called when the
-   * fetch is skipped.
+   * Schedules a fetch hooks start on their own, skipping unsent creations;
+   * `onSkipped` is called when the fetch is skipped.
    */
   function scheduleAutomaticFetch(
     fetchType: FetchType,
@@ -2156,12 +2154,9 @@ export function createCollectionStore<
     onSkipped: (() => void) | undefined,
   ): void {
     const itemKey = getItemKey(payload);
-    // An unsent creation only exists locally until its creation is
-    // confirmed, so the server doesn't know it yet
-    if (
-      unsentCreationItemKeys.has(itemKey) ||
-      skipsBackgroundRefetch(itemKey, fetchType)
-    ) {
+    // Only exists locally until its creation is confirmed, so the server
+    // doesn't know it yet
+    if (unsentCreationItemKeys.has(itemKey)) {
       onSkipped?.();
       return;
     }
@@ -2329,7 +2324,6 @@ export function createCollectionStore<
 
       if (!item) continue;
       if (unsentCreationItemKeys.has(itemKey)) continue;
-      if (skipsBackgroundRefetch(itemKey, priority)) continue;
 
       const currentInvalidationPriority = item.refetchOnMount
         ? fetchTypePriority[item.refetchOnMount]
@@ -3137,18 +3131,6 @@ export function createCollectionStore<
     return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
   }
 
-  // Window focus, reconnect and recovery revalidations leave out the items
-  // with a change waiting for a manual resolution: a refetch would replace
-  // the change the user still has to decide on.
-  function revalidateAllButResolutionItems(priority: FetchType): void {
-    invalidateItem(
-      resolutionItemKeys.size === 0
-        ? () => true
-        : (payload) => !resolutionItemKeys.has(getItemKey(payload)),
-      priority,
-    );
-  }
-
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -3156,10 +3138,11 @@ export function createCollectionStore<
     getWindowIsFocused,
     testOptions?.onWindowFocus ?? onWindowFocusDefault,
     () => {
-      revalidateAllButResolutionItems('lowPriority');
+      invalidateItem(() => true, 'lowPriority');
     },
     () => {
-      revalidateAllButResolutionItems(
+      invalidateItem(
+        () => true,
         usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
       );
     },

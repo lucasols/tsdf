@@ -384,8 +384,10 @@ Behavior:
 
 - `filterPayload` - Filters entries by item payload before they are added to
   `items` or `deletedItems`
-- `includeResolutionRequired` - Includes entries currently blocked in
-  manual-resolution state. By default those entries are hidden
+
+Changes waiting for a decision are not included: their items show the server
+version (render them from `useOfflineResolutions()`). A creation retried from a
+decision shows once it is saved.
 
 ### Return value
 

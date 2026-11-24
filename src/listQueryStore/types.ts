@@ -102,11 +102,10 @@ export type ListQueryOfflineOverlay<
   itemPayload?: ItemPayload;
   queryMemberships: Record<string, number>;
   /**
-   * Temporary-id remaps can leave a child mutation in manual resolution while
-   * it already targets the real server item. Keep that overlay visible until
-   * the child resolution is cleared.
+   * Set on an overlay moved from a temp item to its final item: the next
+   * capture keeps its data instead of capturing the item again.
    */
-  keepVisibleWhileResolutionRequired?: boolean;
+  keepDataOnNextCapture?: boolean;
 };
 
 /**
@@ -413,13 +412,7 @@ export type OffsetPaginationConfig = {
 
 /** Partial-resource helpers used to merge and select field subsets. */
 export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
-  /**
-   * Merges a partial fetch result into an existing item snapshot.
-   *
-   * For an item with an offline change waiting for a manual resolution, it is
-   * called with the fetched item as `prev` and the local item as `fetched`, so
-   * the local values win.
-   */
+  /** Merges a partial fetch result into an existing item snapshot. */
   mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState;
   /** Returns an item containing only the requested fields. */
   selectFields: (fields: string[], item: ItemState) => ItemState;
