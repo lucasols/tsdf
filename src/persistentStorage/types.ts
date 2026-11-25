@@ -690,9 +690,10 @@ export type PersistedListQueryData = {
   hasMore: boolean;
   /**
    * Set when rows before the end of `items` were dropped because their item
-   * entries were evicted from storage. Such a query is restored with the rows
-   * it still has, but not as a loaded query. A query that only lost its last
-   * rows is saved with `hasMore: true` instead.
+   * entries were evicted from storage, or when the query was never loaded and
+   * only has the rows added to it locally. Such a query is restored with the
+   * rows it still has, but not as a loaded query. A query that only lost its
+   * last rows is saved with `hasMore: true` instead.
    */
   missingItems?: boolean;
 };

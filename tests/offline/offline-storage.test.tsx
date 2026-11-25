@@ -1,7 +1,8 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_object, rc_string } from 'runcheck';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
@@ -1971,3 +1972,225 @@ test('local-sync offline edits of list-query items are persisted without storage
   // edit of a list-query or collection item.
   expect(reportedErrors).toMatchInlineSnapshot(`[]`);
 });
+
+const chatQuery: ListQueryParams = { tableId: 'messages' };
+const chatMessageSchema = rc_object({
+  id: rc_number,
+  name: rc_string,
+  text: rc_string,
+});
+
+/** `name` is the author of the message. */
+type ChatMessage = { id: number; name: string; text: string };
+
+type SendMessageOperations = {
+  sendMessage: ListQueryOfflineOperationDefinition<
+    ChatMessage,
+    ListQueryParams,
+    string,
+    ChatMessage,
+    unknown
+  >;
+};
+
+/**
+ * A chat whose messages are sent with an id the app generates: the message is
+ * added to the chat by the `optimisticUpdate`, with `addItemToState`.
+ */
+function createChatEnv({
+  adapter,
+  sessionKey,
+  storeName,
+}: {
+  adapter: 'local-sync' | typeof opfsPersistentStorage;
+  sessionKey: string;
+  storeName: string;
+}) {
+  const env = createListQueryStoreTestEnv<
+    ChatMessage,
+    false,
+    false,
+    SendMessageOperations
+  >(
+    { messages: [{ id: 1, name: 'Grace', text: 'Hi' }] },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: 'idle',
+      persistentStorage: {
+        adapter,
+        schema: chatMessageSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            sendMessage: {
+              inputSchema: chatMessageSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`messages||${input.id}`],
+              execute: async ({ input }) => {
+                await env.serverTable.delayedSetItem(
+                  `messages||${input.id}`,
+                  input,
+                );
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  async function sendMessage(
+    message: ChatMessage,
+    queries: ListQueryParams[] | ((payload: ListQueryParams) => boolean),
+  ) {
+    // The optimistic update renders the mounted chat, so the mutation starts
+    // inside `act`. Queueing it can wait for async storage.
+    let sending: Promise<unknown> = Promise.resolve();
+    act(() => {
+      sending = env.apiStore.performMutation(`messages||${message.id}`, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(`messages||${message.id}`, message, {
+            addItemToQueries: { queries, appendTo: 'end' },
+          });
+        },
+        mutation: () => Promise.reject(new Error('never sent directly')),
+        offline: { operation: 'sendMessage', input: message },
+      });
+    });
+    await resolveAfterAllTimers(sending);
+  }
+
+  return { env, sendMessage };
+}
+
+test.each([
+  { storage: 'local storage', adapter: 'local-sync' as const },
+  { storage: 'async storage', adapter: opfsPersistentStorage },
+])(
+  'messages sent offline in a chat that was never loaded are still shown after reloading offline, until the chat loads ($storage)',
+  async ({ adapter }) => {
+    const sessionKey = 'offline-never-loaded-chat-session';
+    const storeName = 'offline-never-loaded-chat-messages';
+    if (adapter !== 'local-sync') createOpfsPersistentStorageTestStore();
+    network.setOffline();
+
+    const chatUI = createLoggerStore();
+    function renderChat(chat: ReturnType<typeof createChatEnv>) {
+      return renderHook(() => {
+        const { status, items } = chat.env.apiStore.useListQuery(chatQuery, {
+          itemSelector: (item) => item.text,
+        });
+        chatUI.add({ status, items: items.join(', ') });
+      });
+    }
+    /** Reloads the page: only persistent storage survives. */
+    function reload(previous: ReturnType<typeof createChatEnv>) {
+      previous.env.apiStore.dispose();
+      resetSessionForTests();
+      return createChatEnv({ adapter, sessionKey, storeName });
+    }
+
+    // The user opens, while offline, a chat that was never loaded on this
+    // device: it can only show the offline error
+    chatUI.addMark('open a chat never loaded on this device, offline');
+    const first = createChatEnv({ adapter, sessionKey, storeName });
+    const firstChat = renderChat(first);
+    await flushAllTimers();
+
+    // A message is sent: it shows up in the chat while its send is queued
+    chatUI.addMark('send a message');
+    await first.sendMessage({ id: 10, name: 'Ada', text: 'Hello' }, [
+      chatQuery,
+    ]);
+    await flushAllTimers();
+    firstChat.unmount();
+
+    // After reloading offline the message is still in the chat, next to the
+    // offline error: the chat itself was never loaded
+    chatUI.addMark('reload offline');
+    const second = reload(first);
+    const secondChat = renderChat(second);
+    await flushAllTimers();
+
+    // Another message is sent, added to the lists a filter picks: the chat on
+    // screen is one of them, though it was never loaded
+    chatUI.addMark('send a message added to the lists a filter picks');
+    await second.sendMessage(
+      { id: 11, name: 'Ada', text: 'Are you there?' },
+      (payload) => payload.tableId === 'messages',
+    );
+    await flushAllTimers();
+    secondChat.unmount();
+
+    // Reloading offline again keeps both messages
+    chatUI.addMark('reload offline again');
+    const third = reload(second);
+    const thirdChat = renderChat(third);
+    await flushAllTimers();
+
+    // Back online, the messages are sent before the chat is loaded from the
+    // server, so they are never missing from it
+    chatUI.addMark('go online');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(chatUI.changesSnapshot).toMatchInlineSnapshot(`
+      "
+
+      >>> open a chat never loaded on this device, offline
+
+      -> status: loading ⋅ items: ''
+      -> status: error ⋅ items: ''
+
+      >>> send a message
+
+      -> status: error ⋅ items: Hello
+
+      >>> reload offline
+
+      -> status: loading ⋅ items: ''
+      -> status: loading ⋅ items: Hello
+      -> status: error ⋅ items: Hello
+
+      >>> send a message added to the lists a filter picks
+
+      -> status: error ⋅ items: Hello, Are you there?
+
+      >>> reload offline again
+
+      -> status: loading ⋅ items: ''
+      -> status: loading ⋅ items: Hello, Are you there?
+      -> status: error ⋅ items: Hello, Are you there?
+
+      >>> go online
+
+      -> status: error ⋅ items: Hello, Are you there?
+      -> status: loading ⋅ items: Hello, Are you there?
+      -> status: success ⋅ items: Hi, Hello, Are you there?
+      "
+    `);
+    expect(third.env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(
+      third.env.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 3
+    `);
+
+    thirdChat.unmount();
+  },
+  10_000,
+);
