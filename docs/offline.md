@@ -277,6 +277,8 @@ The list query `awaitItemFetch`, `getItemFromStateOrFetch`, `awaitListQueryFetch
 
 A cached list query that lost a row before one of the rows that are left (or every row) is not a cached read: it is not reported as a complete `success`. A list that only lost its last rows (e.g. to `maxItemBytes`) is still a cached read, with fewer rows. Hooks return the rows that are left with `status: 'error'` and the offline error (`isOfflineStoreError(error)`), so the screen can show them together with a notice that the list is incomplete. See [Cached list queries that lost rows](./persistent-storage.md#cached-list-queries-that-lost-rows).
 
+A list that was never loaded on the device (its fetch failed offline) still shows the rows that changes made offline added to it (`addItemToQueries`, `tempEntity.addToQueries`), next to the offline error, and keeps them after a restart. See [Lists that were never loaded](./persistent-storage.md#lists-that-were-never-loaded).
+
 Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
 
 ## Revalidation After Recovering

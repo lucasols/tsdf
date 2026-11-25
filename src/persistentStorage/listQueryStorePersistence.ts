@@ -152,7 +152,12 @@ type StoredQueryEvictionResult = {
   managedQueryEntriesByKey: ManagedQueryEntriesByKey | null;
 };
 
-type EntryNamespaceMetadata = { h?: true; p?: unknown };
+type EntryNamespaceMetadata = {
+  h?: true;
+  /** Async storage flag of `PersistedListQueryData.missingItems`. */
+  m?: true;
+  p?: unknown;
+};
 type ItemEntryNamespaceMetadata = EntryNamespaceMetadata & {
   f?: ItemLoadedFields;
   g?: unknown;
@@ -455,6 +460,7 @@ export function setupListQueryPersistence<
               payload: metadata?.p,
               items: value,
               hasMore: metadata?.h === true,
+              missingItems: metadata?.m === true,
             },
             config.queryPayloadSchema,
           )
@@ -485,6 +491,7 @@ export function setupListQueryPersistence<
       valueCodec: queryStorageValueCodec,
       getManifestMeta: (data) => ({
         ...(data.hasMore ? { h: true as const } : {}),
+        ...(data.missingItems ? { m: true as const } : {}),
         p: data.payload,
       }),
     },
@@ -1904,7 +1911,11 @@ export function setupListQueryPersistence<
     // can be re-read with every row back (e.g. the hook fallback after a
     // missing row is saved by another query) while the query in state is
     // still not loaded, and its stored entry must survive until it loads.
-    if (!wasLoaded) incompleteRestoredQueryKeys.add(queryKey);
+    // A query restored with every row it lists has nothing to keep: it is
+    // saved again like any query that was not loaded (`flushPersistedState`).
+    if (!wasLoaded && restoredItemKeys.length < persistedQuery.items.length) {
+      incompleteRestoredQueryKeys.add(queryKey);
+    }
 
     return {
       error: null,
@@ -3251,19 +3262,23 @@ export function setupListQueryPersistence<
       }
 
       for (const [queryKey, query] of queryEntries) {
-        if (query.status !== 'success' && !query.wasLoaded) {
-          if (incompleteRestoredQueryKeys.has(queryKey)) {
-            // Keep the stored entry (and the rows it still has) untouched
-            // until the query is loaded again.
-            nextQueryKeys.add(queryKey);
-            for (const itemKey of query.items) {
-              persistedQueryItemKeys.add(itemKey);
-            }
+        const isLoaded = query.status === 'success' || query.wasLoaded;
+        if (!isLoaded && incompleteRestoredQueryKeys.has(queryKey)) {
+          // Keep the stored entry (and the rows it still has) untouched
+          // until the query is loaded again.
+          nextQueryKeys.add(queryKey);
+          for (const itemKey of query.items) {
+            persistedQueryItemKeys.add(itemKey);
           }
           continue;
         }
+        // A query that was never loaded is saved only when it has rows, added
+        // by changes made meanwhile (e.g. a message sent offline in a chat
+        // whose fetch failed offline). It is saved as `missingItems`, so it
+        // is restored with these rows but not as loaded, and fetched when used.
+        if (!isLoaded && query.items.length === 0) continue;
         // A loaded query is complete again and is persisted as usual.
-        if (incompleteRestoredQueryKeys.size > 0) {
+        if (isLoaded && incompleteRestoredQueryKeys.size > 0) {
           incompleteRestoredQueryKeys.delete(queryKey);
         }
 
@@ -3324,6 +3339,7 @@ export function setupListQueryPersistence<
           payload: query.payload,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
+          ...(isLoaded ? {} : { missingItems: true }),
         };
         const nextSnapshot = JSON.stringify(nextValue);
 
@@ -3594,9 +3610,18 @@ export function setupListQueryPersistence<
     const finalPersistedQueryKeys = new Set(previousKnownLocalQueryKeys);
 
     for (const [queryKey, query] of queryEntries) {
-      if (query.status !== 'success' && !query.wasLoaded) continue;
+      const isLoaded = query.status === 'success' || query.wasLoaded;
+      // A query that was never loaded is saved only when it has rows, as in
+      // the flush above. The stored entry of a query restored without some of
+      // its rows is kept below.
+      if (
+        !isLoaded &&
+        (query.items.length === 0 || incompleteRestoredQueryKeys.has(queryKey))
+      ) {
+        continue;
+      }
       // A loaded query is complete again and is persisted as usual.
-      if (incompleteRestoredQueryKeys.size > 0) {
+      if (isLoaded && incompleteRestoredQueryKeys.size > 0) {
         incompleteRestoredQueryKeys.delete(queryKey);
       }
 
@@ -3648,6 +3673,7 @@ export function setupListQueryPersistence<
         payload: query.payload,
         items: limitedQuery.itemKeys,
         hasMore: limitedQuery.hasMore,
+        ...(isLoaded ? {} : { missingItems: true }),
       };
 
       finalQueryDataByKey.set(queryKey, nextValue);

@@ -364,6 +364,10 @@ When a row before one of the rows that are left is missing, or no row is left, t
 - Offline, the fetch fails with the offline error: hooks report `status: 'error'` with `error.id === 'offline'` and the remaining rows in `items`, so a screen can show what is left of the list together with a notice that it is incomplete. `awaitListQueryFetch` returns the offline error instead of the incomplete list. A loaded list doesn't load more rows from such a cached list while offline (`loadMore` is skipped and `hasMore` is `false`), since its next rows may come after a missing one.
 - The stored query is left as it is until the list is fetched again, so the next start sees the same state. With `local-sync`, the query entry rewritten after an eviction lists only the rows that are left, and is flagged (`"m": true`) as incomplete unless only its last rows were evicted (then it is saved with `"h": true`).
 
+### Lists that were never loaded
+
+A list query is saved once it was loaded. A list that was never loaded (e.g. opened offline, its fetch failed) is saved only when it has rows, which means rows added to it in the meantime with `addItemToState`'s `addItemToQueries` or an offline `tempEntity.addToQueries`, typically by a change waiting in the offline queue (a message sent offline in a chat never loaded on the device). It is saved with these rows and flagged as incomplete, so after a restart it is restored like a list that lost rows (see above): hooks report the offline error next to the rows while offline, and the list is fetched when it is used online. Once the session recovers, the revalidation runs after the queue is replayed, so the fetched list already has the rows sent meanwhile. As for any list restored after a restart, a hook that first reads it while the queue is still being replayed fetches it right away: the rows whose change is not sent yet are missing from it until the revalidation that follows the replay.
+
 ## Disabling persistence at runtime
 
 `enabled` turns a store's persistence off without recreating the store, for
