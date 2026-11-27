@@ -1,5 +1,4 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { type __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
@@ -8,6 +7,7 @@ import type {
   TSFDListQuery,
   TSFDListQueryState,
 } from '../listQueryStore/types';
+import { getPayloadKey } from '../utils/getPayloadKey';
 import {
   isStrictItemKeyPrefix,
   type ValidPayload,
@@ -350,10 +350,9 @@ export function setupListQueryPersistence<
   const maxQueryBytes = config.maxQueryBytes ?? defaultMaxQueryBytes;
   const maxQuerySize = config.maxQuerySize ?? DEFAULT_MAX_QUERY_SIZE;
   const resolveItemKey =
-    options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
+    options.getItemKey ?? ((payload: ItemPayload) => getPayloadKey(payload));
   const resolveQueryKey =
-    options.getQueryKey ??
-    ((payload: QueryPayload) => getCompositeKey(payload));
+    options.getQueryKey ?? ((payload: QueryPayload) => getPayloadKey(payload));
   const getItemDerivedGroup = options.getItemDerivedGroup;
   const getItemLoadedFieldsToPersist = options.getItemLoadedFieldsToPersist;
   const pinnedItemKeys = new Set(

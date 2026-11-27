@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import type {
@@ -8,6 +7,7 @@ import type {
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import { createStoreManager } from '../../src/storeManager';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -35,11 +35,11 @@ export function rawItemPayload(tableId: string, id: number): string {
 }
 
 export function storeItemKey(tableId: string, id: number): string {
-  return getCompositeKey(rawItemPayload(tableId, id));
+  return getPayloadKey(rawItemPayload(tableId, id));
 }
 
 function storeQueryKey(params: ListQueryParams): string {
-  return getCompositeKey(params);
+  return getPayloadKey(params);
 }
 
 export function itemStorageKey(

@@ -1,6 +1,5 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
 import {
@@ -19,6 +18,7 @@ import type {
   ItemLoadedFields,
   ListQueryAddItemToQueries,
 } from '../../listQueryStore/types';
+import { getPayloadKey } from '../../utils/getPayloadKey';
 import type { BlockWindowCloseHandler } from '../../utils/performMutation';
 import type { ValidPayload } from '../../utils/storeShared';
 import {
@@ -1033,7 +1033,7 @@ export function createOfflineStoreController<
     while (true) {
       // Same key as the stores' item keys: object payloads match whatever the
       // order of their keys
-      const serializedRef = getCompositeKey(currentRef);
+      const serializedRef = getPayloadKey(currentRef);
       if (seen.has(serializedRef)) {
         // WORKAROUND: The resolver preserves the caller's entity-ref payload shape,
         // but the remap table stores refs behind the shared ValidPayload boundary.
@@ -1056,7 +1056,7 @@ export function createOfflineStoreController<
     nextRef: ValidPayload,
   ): void {
     resolvedEntityRefBySerializedRef.set(
-      getCompositeKey(previousRef),
+      getPayloadKey(previousRef),
       resolveEntityRef(nextRef),
     );
     tempReconciliationCount += 1;
@@ -1402,9 +1402,7 @@ export function createOfflineStoreController<
               isTempCreateOperation(entry.operation)
             ) {
               for (const tempId of entry.tempIds) {
-                resolvedEntityRefBySerializedRef.delete(
-                  getCompositeKey(tempId),
-                );
+                resolvedEntityRefBySerializedRef.delete(getPayloadKey(tempId));
               }
             }
             return;
@@ -4669,7 +4667,7 @@ export function createOfflineStoreController<
 
     for (const tempId of tempIds ??
       getOperationRawEntityRefs(operation, operationName, input)) {
-      resolvedEntityRefBySerializedRef.delete(getCompositeKey(tempId));
+      resolvedEntityRefBySerializedRef.delete(getPayloadKey(tempId));
     }
   }
 

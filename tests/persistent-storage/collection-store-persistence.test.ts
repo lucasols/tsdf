@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { rc_object, rc_string } from 'runcheck';
@@ -17,6 +16,7 @@ import {
 } from '../../src/persistentStorage/compactLocalStorageEntry';
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
@@ -32,7 +32,7 @@ const wrappedItemSchema = rc_object({
 const persistentStore = createLocalStoragePersistentTestStore();
 
 function itemKey(payload: string): string {
-  return getCompositeKey(payload);
+  return getPayloadKey(payload);
 }
 
 function itemStorageKey(

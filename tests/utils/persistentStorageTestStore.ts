@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { ItemLoadedFields } from '../../src/listQueryStore/types';
@@ -24,6 +23,7 @@ import type {
   PersistedListQueryItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 
 const utf8Encoder = new TextEncoder();
 
@@ -130,15 +130,7 @@ export type PersistentTestStoreScope = {
     seedQuery: (
       params: unknown,
       items: ListQueryItemRef[],
-      options?: StorageSeedOptions & {
-        hasMore?: boolean;
-        /**
-         * Payload persisted in the entry when it differs from `params`, the
-         * payload its key is built from (e.g. entries written by versions that
-         * persisted the payload schema output).
-         */
-        persistedPayload?: unknown;
-      },
+      options?: StorageSeedOptions & { hasMore?: boolean },
     ) => string;
     readItemEntry: <T>(
       tableId: string,
@@ -200,7 +192,7 @@ function createPersistentTestStore(
     const documentStorageKey = `tsdf.${sessionKey}.${storeName}`;
 
     function collectionItemKey(payload: string): string {
-      return getCompositeKey(payload);
+      return getPayloadKey(payload);
     }
 
     function collectionItemStorageKey(payload: string): string {
@@ -215,7 +207,7 @@ function createPersistentTestStore(
     }
 
     function listQueryItemKey(tableId: string, id: number | string): string {
-      return getCompositeKey(rawListQueryItemPayload(tableId, id));
+      return getPayloadKey(rawListQueryItemPayload(tableId, id));
     }
 
     function listQueryItemStorageKey(
@@ -226,7 +218,7 @@ function createPersistentTestStore(
     }
 
     function listQueryStorageKey(params: unknown): string {
-      return `tsdf.${sessionKey}.${storeName}.lq.${getCompositeKey(params)}`;
+      return `tsdf.${sessionKey}.${storeName}.lq.${getPayloadKey(params)}`;
     }
 
     function normalizeQueryItemRef(item: ListQueryItemRef): string {
@@ -468,17 +460,11 @@ function createPersistentTestStore(
         seedQuery(
           params: unknown,
           items: ListQueryItemRef[],
-          options?: StorageSeedOptions & {
-            hasMore?: boolean;
-            persistedPayload?: unknown;
-          },
+          options?: StorageSeedOptions & { hasMore?: boolean },
         ) {
           const key = listQueryStorageKey(params);
           const persistedData = {
-            payload:
-              options?.persistedPayload !== undefined
-                ? options.persistedPayload
-                : params,
+            payload: params,
             items: items.map(normalizeQueryItemRef),
             hasMore: options?.hasMore ?? false,
           } satisfies PersistedListQueryData;

@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
@@ -12,6 +11,7 @@ import {
   vi,
 } from 'vitest';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -71,7 +71,7 @@ function getQueriesRelatedToItem(
 
   return queriesRelatedToItem.map((item) => ({
     queryPayload: item.query.payload,
-    itemIndexInQuery: item.query.items.indexOf(getCompositeKey(itemId)),
+    itemIndexInQuery: item.query.items.indexOf(getPayloadKey(itemId)),
     querySize: item.query.items.length,
     refetchOnMount: item.query.refetchOnMount,
   }));
@@ -868,7 +868,7 @@ test('mutation optimistic list invalidations wait for success and deduplicate su
         ),
       revalidateOnSuccess: {
         queries: (payload) =>
-          getCompositeKey(payload) === getCompositeKey(userQuery),
+          getPayloadKey(payload) === getPayloadKey(userQuery),
         items: false,
       },
     });
@@ -880,7 +880,7 @@ test('mutation optimistic list invalidations wait for success and deduplicate su
     env.serverTable.getRequestHistory('list', { includeTime: false }),
   ).toMatchInlineSnapshot(`[]`);
   expect(
-    env.store.state.queries[getCompositeKey(userQuery)]?.refetchOnMount,
+    env.store.state.queries[getPayloadKey(userQuery)]?.refetchOnMount,
   ).toBe(false);
 
   await advanceTime(99);
@@ -888,7 +888,7 @@ test('mutation optimistic list invalidations wait for success and deduplicate su
   // The request is still in flight, so the deferred invalidation should remain
   // unapplied.
   expect(
-    env.store.state.queries[getCompositeKey(userQuery)]?.refetchOnMount,
+    env.store.state.queries[getPayloadKey(userQuery)]?.refetchOnMount,
   ).toBe(false);
 
   await advanceTime(1);
@@ -897,7 +897,7 @@ test('mutation optimistic list invalidations wait for success and deduplicate su
   // Success should now apply the deferred invalidation once, merged with the
   // explicit success revalidation for the same query.
   expect(
-    env.store.state.queries[getCompositeKey(userQuery)]?.refetchOnMount,
+    env.store.state.queries[getPayloadKey(userQuery)]?.refetchOnMount,
   ).toBe('highPriority');
 
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -953,7 +953,7 @@ test('destination query fetch waits for optimistic filter mutation to settle', a
     env.serverTable.getRequestHistory('list', { includeTime: false }),
   ).toMatchInlineSnapshot(`[]`);
   expect(
-    env.store.state.queries[getCompositeKey(userQuery)]?.items,
+    env.store.state.queries[getPayloadKey(userQuery)]?.items,
   ).toMatchInlineSnapshot(
     `['"users||2', '"users||4', '"users||6', '"users||8', '"users||10', '"users||1']`,
   );
@@ -984,7 +984,7 @@ test('destination query fetch waits for optimistic filter mutation to settle', a
     `);
 
   // The concurrent server update to users||2 was picked up by the deferred fetch.
-  expect(env.store.state.items[getCompositeKey('users||2')])
+  expect(env.store.state.items[getPayloadKey('users||2')])
     .toMatchInlineSnapshot(`
       age: 31
       id: 2
@@ -995,7 +995,7 @@ test('destination query fetch waits for optimistic filter mutation to settle', a
   // After rollback, users||1 is no longer in the user query — only the original
   // 5 user-type items remain.
   expect(
-    env.store.state.queries[getCompositeKey(userQuery)]?.items,
+    env.store.state.queries[getPayloadKey(userQuery)]?.items,
   ).toMatchInlineSnapshot(
     `['"users||2', '"users||4', '"users||6', '"users||8', '"users||10']`,
   );

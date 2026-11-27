@@ -1,10 +1,10 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { scheduleLocalStorageMaintenance } from '../../../src/persistentStorage/persistentStorageManager';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { getPayloadKey } from '../../../src/utils/getPayloadKey';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
@@ -763,7 +763,7 @@ describe('sync storage efficiency: collection', () => {
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
-    expect(env.store.state[getCompositeKey('1')]?.data).toMatchInlineSnapshot(
+    expect(env.store.state[getPayloadKey('1')]?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Cached user' }`,
     );
     expect(operationsBreakdown).toMatchInlineSnapshot(`
@@ -804,7 +804,7 @@ describe('sync storage efficiency: collection', () => {
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user' }`,
     );
-    expect(env.store.state[getCompositeKey('1')]?.data).toMatchInlineSnapshot(
+    expect(env.store.state[getPayloadKey('1')]?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user' }`,
     );
   });

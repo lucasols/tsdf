@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import {
   __LEGIT_CAST__,
   type __LEGIT_ANY__,
@@ -34,6 +33,7 @@ import type {
 import { createStoreManager, type StoreManager } from '../../src/storeManager';
 import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import {
   getNextStoreId,
@@ -117,9 +117,9 @@ function getRawItemKey(tableId: string, id: number): string {
   return `${tableId}||${id}`;
 }
 
-// Store item key (matches what getCompositeKey produces for string payloads)
+// Store item key (matches what getPayloadKey produces for string payloads)
 function getStoreItemKey(tableId: string, id: number): string {
-  return getCompositeKey(getRawItemKey(tableId, id));
+  return getPayloadKey(getRawItemKey(tableId, id));
 }
 
 export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
@@ -698,10 +698,10 @@ export function createListQueryStoreTestEnv<
       getRawItemKey(tableId, rowId),
     getStoreItemKey: (tableId: string, rowId: number) =>
       getStoreItemKey(tableId, rowId),
-    getStoreItemKeyFromRaw: (rawKey: string) => getCompositeKey(rawKey),
-    getQueryKey: (params: ListQueryParams) => getCompositeKey(params),
+    getStoreItemKeyFromRaw: (rawKey: string) => getPayloadKey(rawKey),
+    getQueryKey: (params: ListQueryParams) => getPayloadKey(params),
     getItemQueryState: (rawItemKey: string) =>
-      listQueryStore.store.state.itemQueries[getCompositeKey(rawItemKey)],
+      listQueryStore.store.state.itemQueries[getPayloadKey(rawItemKey)],
     scheduleFetch: (
       fetchType: FetchType,
       params: ListQueryParams,
@@ -871,7 +871,7 @@ function buildSnapshotData<TRow extends Row>(
     initialData.queries.push({
       payload: { tableId },
       hasMore: false,
-      items: tableItems.map(({ itemId }) => getCompositeKey(itemId)),
+      items: tableItems.map(({ itemId }) => getPayloadKey(itemId)),
     });
 
     for (const { itemId, data } of tableItems) {
@@ -886,7 +886,7 @@ function buildSnapshotData<TRow extends Row>(
     initialData.queries.push({
       payload: query,
       hasMore: false,
-      items: result.items.map(({ itemId }) => getCompositeKey(itemId)),
+      items: result.items.map(({ itemId }) => getPayloadKey(itemId)),
     });
 
     for (const { itemId, data } of result.items) {

@@ -1,5 +1,5 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { Result, type Result as TResult } from 't-result';
+import { getPayloadKey } from './getPayloadKey';
 import { mutationSkipped, type MutationSkipped } from './storeShared';
 
 /** Starts a temporary window-close block while a mutation is in progress. */
@@ -25,7 +25,7 @@ export type MutationDebounce = {
 export type MutationDebounceKey = Pick<MutationDebounce, 'context' | 'payload'>;
 
 function getDebounceKey(debounce: MutationDebounceKey): string {
-  return getCompositeKey([debounce.context, debounce.payload]);
+  return getPayloadKey([debounce.context, debounce.payload]);
 }
 
 /**

@@ -1,11 +1,11 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { type __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
   TSFDCollectionItem,
   TSFDCollectionState,
 } from '../collectionStore/collectionStore';
+import { getPayloadKey } from '../utils/getPayloadKey';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   ASYNC_STORAGE_MAX_AGE_MS,
@@ -176,7 +176,7 @@ export function setupCollectionPersistence<
   );
   const maxBytes = config.maxBytes ?? defaultMaxBytes;
   const resolveItemKey =
-    options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
+    options.getItemKey ?? ((payload: ItemPayload) => getPayloadKey(payload));
   const pinnedItemKeys = new Set(
     (config.pinnedItems ?? []).map((payload) => resolveItemKey(payload)),
   );

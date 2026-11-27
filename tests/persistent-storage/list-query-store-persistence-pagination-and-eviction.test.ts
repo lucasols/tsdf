@@ -346,71 +346,82 @@ describe('localStorage: list query store persistence', () => {
     `);
   });
 
-  test('a query persisted by an older version with a payload that no longer builds its key is repaired by its next fetch', async () => {
-    // Versions before 18.13.2 restored queries with the payload schema output
-    // and saved it back under the original key. The test env's schema only
-    // declares `tableId`, so such an entry lost its filters.
-    const filteredQuery = {
-      tableId: 'products',
-      filters: [{ op: 'gte' as const, field: 'id', value: 1 }],
-    };
+  test('a query restored from storage is found by a payload with another key order in a nested object', async () => {
     const products = Array.from({ length: 20 }, (_, index) => ({
       id: index + 1,
       name: `Product ${index + 1}`,
     }));
-    const storeName = 'lq-repair-old-persisted-payload';
+    const storeName = 'lq-restored-query-nested-key-order';
     const sessionKey = 'sess1';
 
-    for (const product of products.slice(0, 5)) {
-      setCachedItem(storeName, sessionKey, 'products', product.id, product);
-    }
-    persistentStore.scope(storeName, sessionKey).listQuery.seedQuery(
-      filteredQuery,
-      products.slice(0, 5).map(({ id }) => storeItemKey('products', id)),
-      { hasMore: true, persistedPayload: { tableId: 'products' } },
-    );
-
-    const env = createEnv({
+    // A previous session loads and persists the first page of a query whose
+    // filter has a nested value
+    const writerEnv = createEnv({
       storeName,
       sessionKey,
       serverData: { products },
       defaultQuerySize: 5,
       offsetPagination: { maxInvalidationLimit: 100 },
     });
-    const { result } = renderHook(() =>
-      env.apiStore.useListQuery(filteredQuery),
+    writerEnv.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      {
+        tableId: 'products',
+        filters: [
+          {
+            op: 'neq',
+            field: 'supplier',
+            value: { country: 'BR', city: 'SP' },
+          },
+        ],
+      },
+      5,
     );
-
-    // The restored query shows the cached page right away
-    expect(result.current.items.length).toMatchInlineSnapshot(`5`);
-
-    // The revalidation on mount gives the query back the payload it was
-    // created with
     await flushAllTimers();
-    const repairedPayload = result.current.payload;
-    expect(repairedPayload).toMatchInlineSnapshot(`
-      filters:
-        - { field: 'id', op: 'gte', value: 1 }
-      tableId: 'products'
-    `);
-    if (!repairedPayload) throw new Error('Expected a restored payload');
-
-    // So paging with the payload returned by the hook works again
-    expect(env.apiStore.loadMore(repairedPayload)).toBe('triggered');
-    await flushAllTimers();
-    expect(result.current.items.length).toMatchInlineSnapshot(`10`);
-
-    // And the repaired payload is saved, so the next session restores it
     await advanceTime(1100);
-    expect(
-      persistentStore
-        .scope(storeName, sessionKey)
-        .listQuery.readQueryEntry(filteredQuery).data.payload,
-    ).toMatchInlineSnapshot(`
-      filters:
-        - { field: 'id', op: 'gte', value: 1 }
-      tableId: 'products'
+
+    // A new session asks for the same query, but builds the nested value with
+    // its keys in another order (e.g. a payload rebuilt by a schema)
+    const sameQueryInOtherKeyOrder: ListQueryParams = {
+      tableId: 'products',
+      filters: [
+        { op: 'neq', field: 'supplier', value: { city: 'SP', country: 'BR' } },
+      ],
+    };
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products },
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+    const renders = createLoggerStore();
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(
+        sameQueryInOtherKeyOrder,
+        { returnRefetchingStatus: true },
+      );
+      renders.add({ status, count: items.length });
+    });
+    await flushAllTimers();
+
+    // The persisted page is shown right away instead of a loading state
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ count: 5
+      -> status: refetching ⋅ count: 5
+      -> status: success ⋅ count: 5
+      "
     `);
+
+    // And the restored query keeps paging
+    expect(readerEnv.apiStore.loadMore(sameQueryInOtherKeyOrder)).toBe(
+      'triggered',
+    );
+    await flushAllTimers();
+    expect(
+      readerEnv.apiStore.getQueryState(sameQueryInOtherKeyOrder)?.items.length,
+    ).toMatchInlineSnapshot(`10`);
   });
 
   test('hook loadSize smaller than hydrated query keeps the persisted larger size during refetch', async () => {

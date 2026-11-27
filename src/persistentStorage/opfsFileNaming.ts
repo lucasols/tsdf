@@ -1,6 +1,6 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
 import { isObject } from '@ls-stack/utils/typeGuards';
+import { getPayloadKey } from '../utils/getPayloadKey';
 import {
   encodePersistedAsyncNamespaceKind,
   getPayloadRecordKey,
@@ -148,7 +148,7 @@ export function resolveHashedPayloadRecordKeyFromValue(
     case 'collection.item':
     case 'listQuery.item':
     case 'listQuery.query':
-      return getPayloadRecordKey(getCompositeKey(record.p));
+      return getPayloadRecordKey(getPayloadKey(record.p));
     default:
       return null;
   }

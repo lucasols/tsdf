@@ -500,6 +500,47 @@ describe('fetch query', () => {
     expect(env.apiStore.loadMore({ tableId: 'not found' }, 10)).toBe('skipped');
   });
 
+  test('payloads that differ only in the key order of a nested object are the same query', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      defaultQuerySize: 5,
+    });
+
+    // Two parts of an app build the same filter, writing the keys of its
+    // nested value in a different order
+    const query: ListQueryParams = {
+      tableId: 'products',
+      filters: [
+        { op: 'neq', field: 'supplier', value: { country: 'BR', city: 'SP' } },
+      ],
+    };
+    const sameQueryInOtherKeyOrder: ListQueryParams = {
+      tableId: 'products',
+      filters: [
+        { value: { city: 'SP', country: 'BR' }, field: 'supplier', op: 'neq' },
+      ],
+    };
+
+    env.scheduleFetch('highPriority', query, 5);
+    await flushAllTimers();
+
+    // The other payload reads the query that was loaded...
+    expect(
+      env.apiStore.getQueryState(sameQueryInOtherKeyOrder)?.items.length,
+    ).toMatchInlineSnapshot(`5`);
+
+    // ...and pages it, instead of being skipped as an unknown query
+    expect(env.apiStore.loadMore(sameQueryInOtherKeyOrder)).toBe('triggered');
+    await flushAllTimers();
+
+    // Only one query exists, with both pages
+    expect(
+      env.apiStore
+        .getQueriesState(() => true)
+        .map(({ query: { items } }) => items.length),
+    ).toMatchInlineSnapshot(`[10]`);
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
+  });
+
   test('multiple fetches with different payloads not cancel each other, but cancel same payload fetches', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
 
