@@ -120,6 +120,7 @@ export async function executeQueryFetch<
   >,
   errorNormalizer: (exception: Error) => StoreError,
   getItemKey: (params: ItemPayload) => string,
+  getQueryKey: (params: QueryPayload) => string,
   updateItemSchedulerTiming: (itemKey: string, startTime: number) => void,
   partialResources?: PartialResourcesConfig<ItemState>,
   offsetPagination?: OffsetPaginationConfig,
@@ -151,6 +152,19 @@ export async function executeQueryFetch<
             : 'loading';
           query.error = null;
           query.refetchOnMount = false;
+
+          // Versions before 18.13.2 restored queries with their payload schema
+          // output (keys reordered, undeclared keys dropped) and persisted it
+          // back, so a restored payload may no longer build its own key. The
+          // fetched payload always does, so it repairs the query, and the next
+          // save repairs storage.
+          const storedPayload = store.state.queries[queryKey]?.payload;
+          if (
+            storedPayload !== undefined &&
+            getQueryKey(storedPayload) !== queryKey
+          ) {
+            query.payload = klona(payload);
+          }
         }
       }
     },

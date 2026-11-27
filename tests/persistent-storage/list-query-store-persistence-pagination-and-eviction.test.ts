@@ -346,6 +346,73 @@ describe('localStorage: list query store persistence', () => {
     `);
   });
 
+  test('a query persisted by an older version with a payload that no longer builds its key is repaired by its next fetch', async () => {
+    // Versions before 18.13.2 restored queries with the payload schema output
+    // and saved it back under the original key. The test env's schema only
+    // declares `tableId`, so such an entry lost its filters.
+    const filteredQuery = {
+      tableId: 'products',
+      filters: [{ op: 'gte' as const, field: 'id', value: 1 }],
+    };
+    const products = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      name: `Product ${index + 1}`,
+    }));
+    const storeName = 'lq-repair-old-persisted-payload';
+    const sessionKey = 'sess1';
+
+    for (const product of products.slice(0, 5)) {
+      setCachedItem(storeName, sessionKey, 'products', product.id, product);
+    }
+    persistentStore.scope(storeName, sessionKey).listQuery.seedQuery(
+      filteredQuery,
+      products.slice(0, 5).map(({ id }) => storeItemKey('products', id)),
+      { hasMore: true, persistedPayload: { tableId: 'products' } },
+    );
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products },
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+    const { result } = renderHook(() =>
+      env.apiStore.useListQuery(filteredQuery),
+    );
+
+    // The restored query shows the cached page right away
+    expect(result.current.items.length).toMatchInlineSnapshot(`5`);
+
+    // The revalidation on mount gives the query back the payload it was
+    // created with
+    await flushAllTimers();
+    const repairedPayload = result.current.payload;
+    expect(repairedPayload).toMatchInlineSnapshot(`
+      filters:
+        - { field: 'id', op: 'gte', value: 1 }
+      tableId: 'products'
+    `);
+    if (!repairedPayload) throw new Error('Expected a restored payload');
+
+    // So paging with the payload returned by the hook works again
+    expect(env.apiStore.loadMore(repairedPayload)).toBe('triggered');
+    await flushAllTimers();
+    expect(result.current.items.length).toMatchInlineSnapshot(`10`);
+
+    // And the repaired payload is saved, so the next session restores it
+    await advanceTime(1100);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry(filteredQuery).data.payload,
+    ).toMatchInlineSnapshot(`
+      filters:
+        - { field: 'id', op: 'gte', value: 1 }
+      tableId: 'products'
+    `);
+  });
+
   test('hook loadSize smaller than hydrated query keeps the persisted larger size during refetch', async () => {
     const productsQuery = { tableId: 'products' };
     const cachedProducts = Array.from({ length: 20 }, (_, index) => ({

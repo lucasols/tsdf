@@ -406,6 +406,7 @@ export function createFetchApi<
             normalizedFetchListFn,
             errorNormalizer,
             getItemKey,
+            getQueryKey,
             updateItemSchedulerTiming,
             partialResources,
             offsetPagination,
