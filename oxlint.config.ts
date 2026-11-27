@@ -3,6 +3,17 @@ import { defineConfig } from 'oxlint';
 // oxlint runs the native rules and, through tsrs, the type-aware ones and the
 // type check. The `@ls-stack` rules are in `fast-lint.config.ts`
 
+const restrictedImportPaths = [
+  {
+    name: 't-state',
+    importNames: ['deepEqual'],
+    message: 'Use deepEqual from @ls-stack/utils/deepEqual instead.',
+  },
+];
+const restrictedImportPatterns = [
+  { group: ['*.test'], message: 'Do not import test files' },
+];
+
 export default defineConfig({
   plugins: ['typescript', 'unicorn', 'react', 'vitest'],
   categories: { correctness: 'off' },
@@ -113,13 +124,14 @@ export default defineConfig({
       'error',
       {
         paths: [
+          ...restrictedImportPaths,
           {
-            name: 't-state',
-            importNames: ['deepEqual'],
-            message: 'Use deepEqual from @ls-stack/utils/deepEqual instead.',
+            name: '@ls-stack/utils/getCompositeKey',
+            message:
+              'Use getPayloadKey from src/utils/getPayloadKey instead: getCompositeKey only sorts the object keys of the first 3 levels by default, so deeper payloads would build keys that depend on their key order.',
           },
         ],
-        patterns: [{ group: ['*.test'], message: 'Do not import test files' }],
+        patterns: restrictedImportPatterns,
       },
     ],
     'no-implicit-coercion': [
@@ -165,6 +177,17 @@ export default defineConfig({
     'vitest/no-identical-title': 'error',
   },
   overrides: [
+    {
+      // the only place allowed to import getCompositeKey: it wraps it with
+      // sorting at every depth
+      files: ['src/utils/getPayloadKey.ts'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          { paths: restrictedImportPaths, patterns: restrictedImportPatterns },
+        ],
+      },
+    },
     {
       files: ['tests/**/*.{ts,tsx}'],
       rules: { 'typescript/no-non-null-assertion': 'off' },
