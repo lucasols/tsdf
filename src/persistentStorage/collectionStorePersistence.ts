@@ -81,7 +81,7 @@ import type {
   PersistedCollectionItemData,
   ResolvedCollectionPersistentStorageConfig,
 } from './types';
-import { validateWithSchema } from './validateWithSchema';
+import { validatePayloadWithSchema } from './validatePayloadWithSchema';
 
 const SAVE_DEBOUNCE_MS = 1000;
 const MAINTENANCE_SCAN_CHUNK_SIZE = 25;
@@ -402,7 +402,7 @@ export function setupCollectionPersistence<
       JSON.stringify(persistedStaticPolicy);
 
     for (const [key, metadata] of indexState.entries) {
-      const payload = validateWithSchema(
+      const payload = validatePayloadWithSchema(
         config.payloadSchema,
         readManifestPayloadMeta(metadata.customMetadata),
       );
@@ -902,7 +902,7 @@ export function setupCollectionPersistence<
             entry.entryKey,
             entry.sizeBytes,
           ),
-          payload: validateWithSchema(
+          payload: validatePayloadWithSchema(
             config.payloadSchema,
             readManifestPayloadMeta(entry.meta),
           ),
@@ -1068,7 +1068,7 @@ export function setupCollectionPersistence<
       if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
         protectedItemKeys.add(entry.key);
       }
-      const payload = validateWithSchema(
+      const payload = validatePayloadWithSchema(
         config.payloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
@@ -1320,7 +1320,7 @@ export function setupCollectionPersistence<
               continue;
             }
 
-            const payload = validateWithSchema(
+            const payload = validatePayloadWithSchema(
               config.payloadSchema,
               readManifestPayloadMeta(entry.customMetadata),
             );

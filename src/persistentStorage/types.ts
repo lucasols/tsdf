@@ -516,7 +516,9 @@ export type CollectionOfflineOperationsConfig<
 > = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
 
 type CollectionPersistentStorageFields<ItemPayload extends ValidPayload> = {
-  /** Schema used to validate cached item payloads on load. */
+  /**
+   * Schema used to validate cached item payloads on load. A payload that passes keeps its persisted shape, so schema transforms, defaults and key reordering don't change it.
+   */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
   /**
    * Maximum serialized JSON size to persist for collection items. Budgeting
@@ -591,9 +593,13 @@ type ListQueryPersistentStorageFields<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 > = {
-  /** Schema used to validate cached item payloads on load. */
+  /**
+   * Schema used to validate cached item payloads on load. A payload that passes keeps its persisted shape, so schema transforms, defaults and key reordering don't change it.
+   */
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
-  /** Schema used to validate cached query payloads on load. */
+  /**
+   * Schema used to validate cached query payloads on load. A payload that passes keeps its persisted shape, so schema transforms, defaults and key reordering don't change it.
+   */
   queryPayloadSchema: PersistentStorageSchema<QueryPayload>;
   /**
    * Maximum serialized JSON size to persist for list items. Budgeting uses the

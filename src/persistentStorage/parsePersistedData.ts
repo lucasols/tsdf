@@ -16,6 +16,7 @@ import type {
   PersistentStorageDataSchema,
   PersistentStorageSchema,
 } from './types';
+import { validatePayloadWithSchema } from './validatePayloadWithSchema';
 import { validateWithSchema } from './validateWithSchema';
 
 const persistedDocumentDataSchema = rc_object({ data: rc_unknown });
@@ -153,7 +154,10 @@ function parsePersistedItem<
   const result = rc_parse(value, valueSchema);
   if (!result.ok) return null;
 
-  const payload = validateWithSchema(payloadSchema, result.value.payload);
+  const payload = validatePayloadWithSchema(
+    payloadSchema,
+    result.value.payload,
+  );
   if (payload === null) return null;
 
   const data =
@@ -274,7 +278,10 @@ export function parsePersistedListQueryData<QueryPayload extends ValidPayload>(
   const result = rc_parse(value, persistedListQueryDataSchema);
   if (!result.ok) return null;
 
-  const payload = validateWithSchema(payloadSchema, result.value.payload);
+  const payload = validatePayloadWithSchema(
+    payloadSchema,
+    result.value.payload,
+  );
   if (payload === null) return null;
 
   return {
