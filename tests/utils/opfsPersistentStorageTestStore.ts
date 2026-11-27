@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { ItemLoadedFields } from '../../src/listQueryStore/types';
@@ -22,6 +21,7 @@ import type {
   AsyncStorageNamespaceScope,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import {
   createMockBrowserOpfs,
   type MockBrowserOpfsEnvironment,
@@ -29,15 +29,15 @@ import {
 } from '../mocks/mockBrowserOpfs';
 
 function itemKey(payload: string): string {
-  return getCompositeKey(payload);
+  return getPayloadKey(payload);
 }
 
 function listQueryItemKey(tableId: string, id: number | string): string {
-  return getCompositeKey(`${tableId}||${id}`);
+  return getPayloadKey(`${tableId}||${id}`);
 }
 
 function listQueryQueryKey(params: unknown): string {
-  return getCompositeKey(params);
+  return getPayloadKey(params);
 }
 
 function getRecord(value: unknown): Record<string, unknown> | null {

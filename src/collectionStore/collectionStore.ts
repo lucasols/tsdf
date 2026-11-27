@@ -4,7 +4,6 @@ import {
 } from '@ls-stack/browser-utils/window';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter, type Emitter } from 'evtmitter';
 import { klona } from 'klona/json';
@@ -104,6 +103,7 @@ import {
   type BrowserTabsTransportFactory,
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
+import { getPayloadKey } from '../utils/getPayloadKey';
 import { createOptimisticMutationTracker } from '../utils/optimisticMutationTracker';
 import { revertOptimisticChange } from '../utils/optimisticRollback';
 import {
@@ -1200,7 +1200,7 @@ export function createCollectionStore<
   });
 
   function getItemKey(params: ItemPayload): string {
-    return getCompositeKey(
+    return getPayloadKey(
       filterCollectionItemObjKey ? filterCollectionItemObjKey(params) : params,
     );
   }

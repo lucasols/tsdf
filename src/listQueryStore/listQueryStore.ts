@@ -5,7 +5,6 @@ import {
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { notNullish } from '@ls-stack/utils/assertions';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter, type Emitter } from 'evtmitter';
 import { klona } from 'klona/json';
@@ -104,6 +103,7 @@ import {
   type BrowserTabsTransportFactory,
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
+import { getPayloadKey } from '../utils/getPayloadKey';
 import type { MutationDebounceKey } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
@@ -1808,15 +1808,13 @@ export function createListQueryStore<
   });
 
   function getQueryKey(params: QueryPayload): string {
-    return getCompositeKey(
+    return getPayloadKey(
       customGetQueryKey ? customGetQueryKey(params) : params,
     );
   }
 
   function getItemKey(params: ItemPayload): string {
-    return getCompositeKey(
-      customGetItemKey ? customGetItemKey(params) : params,
-    );
+    return getPayloadKey(customGetItemKey ? customGetItemKey(params) : params);
   }
 
   type ResolvedOfflineOperations = TOfflineOperations extends null

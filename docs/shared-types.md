@@ -79,7 +79,7 @@ Payloads that identify items or queries must be one of:
 - `string` — e.g., `'user-123'`
 - `Record<string, unknown>` — e.g., `{ projectId: 'proj-1', status: 'active' }`
 
-Payloads are converted to composite keys internally for state storage. Object payloads are serialized deterministically (key order doesn't matter).
+Payloads are converted to composite keys internally for state storage. Object payloads are serialized deterministically (key order doesn't matter, at any nesting depth).
 
 ## PayloadDebounce
 

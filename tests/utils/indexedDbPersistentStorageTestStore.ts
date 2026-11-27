@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
@@ -23,6 +22,7 @@ import type {
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { parseAsyncStorageNamespaceKind } from '../../src/persistentStorage/types';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 
 const INDEXED_DB_ENTRY_STORE = 'entries';
 const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
@@ -180,15 +180,15 @@ type IndexedDbPersistentStorageTestStoreScope = {
 };
 
 function itemKey(payload: string): string {
-  return getCompositeKey(payload);
+  return getPayloadKey(payload);
 }
 
 function listQueryItemKey(tableId: string, id: number | string): string {
-  return getCompositeKey(`${tableId}||${id}`);
+  return getPayloadKey(`${tableId}||${id}`);
 }
 
 function listQueryQueryKey(params: unknown): string {
-  return getCompositeKey(params);
+  return getPayloadKey(params);
 }
 
 function getRecord(value: unknown): Record<string, unknown> | null {
