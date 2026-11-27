@@ -275,6 +275,77 @@ describe('localStorage: list query store persistence', () => {
     `);
   });
 
+  test('loadMore with the payload returned by the hook keeps paging a query restored from storage', async () => {
+    // The test env's `queryPayloadSchema` only declares `tableId`, and
+    // runcheck rebuilds objects from the schema (dropping undeclared keys and
+    // reordering the declared ones). The restored query must keep the payload
+    // it was persisted with, or its payload no longer matches its query key.
+    const filteredQuery = {
+      tableId: 'products',
+      filters: [{ op: 'gte' as const, field: 'id', value: 1 }],
+    };
+    const products = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      name: `Product ${index + 1}`,
+    }));
+    const storeName = 'lq-hydrated-payload-load-more';
+    const sessionKey = 'sess1';
+
+    // A previous session loads the first page and persists it
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products },
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+    writerEnv.apiStore.scheduleListQueryFetch('highPriority', filteredQuery, 5);
+    await flushAllTimers();
+    await advanceTime(1100);
+
+    // A new session restores the query from storage and, like a list UI,
+    // pages it with the payload the hook returns
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products },
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+    const { result } = renderHook(() =>
+      readerEnv.apiStore.useListQuery(filteredQuery),
+    );
+    await flushAllTimers();
+
+    // The hook returns the payload the query was created with, filters included
+    const restoredPayload = result.current.payload;
+    expect(restoredPayload).toMatchInlineSnapshot(`
+      filters:
+        - { field: 'id', op: 'gte', value: 1 }
+      tableId: 'products'
+    `);
+    if (!restoredPayload) throw new Error('Expected a restored payload');
+
+    readerEnv.serverTable.clearFetchHistory();
+    expect(readerEnv.apiStore.loadMore(restoredPayload)).toBe('triggered');
+    await flushAllTimers();
+
+    // The next page is appended to the restored query, requested with the
+    // query filters
+    expect(result.current.items.length).toMatchInlineSnapshot(`10`);
+    expect(
+      readerEnv.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          filters:
+            - { field: 'id', op: 'gte', value: 1 }
+          pos: { limit: 5, offset: 5 }
+        returned_items: 5
+    `);
+  });
+
   test('hook loadSize smaller than hydrated query keeps the persisted larger size during refetch', async () => {
     const productsQuery = { tableId: 'products' };
     const cachedProducts = Array.from({ length: 20 }, (_, index) => ({

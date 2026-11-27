@@ -102,7 +102,7 @@ import type {
   PersistedListQueryItemData,
   ResolvedListQueryPersistentStorageConfig,
 } from './types';
-import { validateWithSchema } from './validateWithSchema';
+import { validatePayloadWithSchema } from './validatePayloadWithSchema';
 
 const DEFAULT_MAX_QUERY_SIZE = 100;
 const SAVE_DEBOUNCE_MS = 1000;
@@ -1170,7 +1170,7 @@ export function setupListQueryPersistence<
         let indexChanged = false;
 
         for (const [key, metadata] of indexState.entries) {
-          const payload = validateWithSchema(
+          const payload = validatePayloadWithSchema(
             config.queryPayloadSchema,
             readManifestPayloadMeta(metadata.customMetadata),
           );
@@ -1208,7 +1208,7 @@ export function setupListQueryPersistence<
         let indexChanged = false;
 
         for (const [key, metadata] of indexState.entries) {
-          const payload = validateWithSchema(
+          const payload = validatePayloadWithSchema(
             config.itemPayloadSchema,
             readManifestPayloadMeta(metadata.customMetadata),
           );
@@ -2252,7 +2252,7 @@ export function setupListQueryPersistence<
             itemKeys = localStorageAdapter
               .listManifestEntries(itemPrefix)
               .flatMap((entry) => {
-                const payload = validateWithSchema(
+                const payload = validatePayloadWithSchema(
                   config.itemPayloadSchema,
                   readManifestPayloadMeta(entry.meta),
                 );
@@ -2271,7 +2271,7 @@ export function setupListQueryPersistence<
                 { equals: groupKey, key: 'g', order: 'key' },
               );
             itemKeys = metadataEntries.flatMap((entry) => {
-              const payload = validateWithSchema(
+              const payload = validatePayloadWithSchema(
                 config.itemPayloadSchema,
                 readManifestPayloadMeta(entry.customMetadata),
               );
@@ -2380,7 +2380,7 @@ export function setupListQueryPersistence<
         }
         if (expiredQueryKeys.has(entry.queryKey)) continue;
 
-        const payload = validateWithSchema(
+        const payload = validatePayloadWithSchema(
           config.queryPayloadSchema,
           entry.payload,
         );
@@ -2576,7 +2576,7 @@ export function setupListQueryPersistence<
       if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
         protectedQueryKeys.add(entry.key);
       }
-      const payload = validateWithSchema(
+      const payload = validatePayloadWithSchema(
         config.queryPayloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
@@ -2738,7 +2738,7 @@ export function setupListQueryPersistence<
           itemKey: entry.entryKey,
           lastAccessAt: entry.lastAccessAt,
           sizeBytes: rememberItemMetadataSize(entry.entryKey, entry.sizeBytes),
-          payload: validateWithSchema(
+          payload: validatePayloadWithSchema(
             config.itemPayloadSchema,
             readManifestPayloadMeta(entry.meta),
           ),
@@ -3070,7 +3070,7 @@ export function setupListQueryPersistence<
       if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
         protectedItemKeys.add(entry.key);
       }
-      const payload = validateWithSchema(
+      const payload = validatePayloadWithSchema(
         config.itemPayloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
@@ -3713,7 +3713,7 @@ export function setupListQueryPersistence<
       if (!finalPersistedQueryKeys.has(entry.key)) continue;
       if (finalQueryDataByKey.has(entry.key)) continue;
 
-      const payload = validateWithSchema(
+      const payload = validatePayloadWithSchema(
         config.queryPayloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
@@ -3934,7 +3934,7 @@ export function setupListQueryPersistence<
       if (!finalPersistedItemKeys.has(entry.key)) continue;
       if (finalItemDataByKey.has(entry.key)) continue;
 
-      const payload = validateWithSchema(
+      const payload = validatePayloadWithSchema(
         config.itemPayloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
