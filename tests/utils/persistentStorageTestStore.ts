@@ -130,15 +130,7 @@ export type PersistentTestStoreScope = {
     seedQuery: (
       params: unknown,
       items: ListQueryItemRef[],
-      options?: StorageSeedOptions & {
-        hasMore?: boolean;
-        /**
-         * Payload persisted in the entry when it differs from `params`, the
-         * payload its key is built from (e.g. entries written by versions that
-         * persisted the payload schema output).
-         */
-        persistedPayload?: unknown;
-      },
+      options?: StorageSeedOptions & { hasMore?: boolean },
     ) => string;
     readItemEntry: <T>(
       tableId: string,
@@ -468,17 +460,11 @@ function createPersistentTestStore(
         seedQuery(
           params: unknown,
           items: ListQueryItemRef[],
-          options?: StorageSeedOptions & {
-            hasMore?: boolean;
-            persistedPayload?: unknown;
-          },
+          options?: StorageSeedOptions & { hasMore?: boolean },
         ) {
           const key = listQueryStorageKey(params);
           const persistedData = {
-            payload:
-              options?.persistedPayload !== undefined
-                ? options.persistedPayload
-                : params,
+            payload: params,
             items: items.map(normalizeQueryItemRef),
             hasMore: options?.hasMore ?? false,
           } satisfies PersistedListQueryData;
