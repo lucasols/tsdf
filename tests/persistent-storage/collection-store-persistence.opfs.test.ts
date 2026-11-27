@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { rc_object, rc_string } from 'runcheck';
@@ -17,6 +16,7 @@ import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -42,7 +42,7 @@ const wrappedItemSchema = rc_object({
 });
 
 function itemKey(payload: string): string {
-  return getCompositeKey(payload);
+  return getPayloadKey(payload);
 }
 
 function itemStorageKey(

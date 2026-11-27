@@ -1,8 +1,8 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { getPayloadKey } from '../../../src/utils/getPayloadKey';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
@@ -91,7 +91,7 @@ describe('sync storage efficiency: list-query', () => {
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
-    expect(env.store.state.queries[getCompositeKey(usersQuery)])
+    expect(env.store.state.queries[getPayloadKey(usersQuery)])
       .toMatchInlineSnapshot(`
         error: null
         hasMore: '❌'

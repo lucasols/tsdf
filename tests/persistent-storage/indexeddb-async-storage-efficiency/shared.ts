@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
@@ -16,6 +15,7 @@ import {
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
+import { getPayloadKey } from '../../../src/utils/getPayloadKey';
 import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv';
 import {
   createDocumentStoreTestEnv,
@@ -488,7 +488,7 @@ export function rawItemPayload(tableId: string, id: number): string {
 }
 
 export function storeItemKey(tableId: string, id: number): string {
-  return getCompositeKey(rawItemPayload(tableId, id));
+  return getPayloadKey(rawItemPayload(tableId, id));
 }
 
 export const partialResourcesConfig: PartialResourcesConfig<Row> = {

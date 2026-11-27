@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
@@ -6,6 +5,7 @@ import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import {
   createFocusChangeCoordinator,
   setupBrowserTabsTestLifecycle,
@@ -504,7 +504,7 @@ describe('persistence + browser tabs sync integration', () => {
       tabBRenders.add({ status, value: data?.value.name ?? null });
     });
 
-    expect(tabB.store.state[getCompositeKey('item1')]?.data?.value.name).toBe(
+    expect(tabB.store.state[getPayloadKey('item1')]?.data?.value.name).toBe(
       'Stale',
     );
 
@@ -519,7 +519,7 @@ describe('persistence + browser tabs sync integration', () => {
       -> status: success ⋅ value: Fresh
       "
     `);
-    expect(tabB.store.state[getCompositeKey('item1')]?.data?.value.name).toBe(
+    expect(tabB.store.state[getPayloadKey('item1')]?.data?.value.name).toBe(
       'Fresh',
     );
     expect(

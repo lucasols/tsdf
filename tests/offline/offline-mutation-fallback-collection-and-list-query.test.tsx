@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_array, rc_object, rc_string } from 'runcheck';
@@ -7,6 +6,7 @@ import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -288,11 +288,11 @@ describe('collection', () => {
     `);
 
     expect(
-      env.store.state[getCompositeKey('temp:Ada queued')]?.data,
+      env.store.state[getPayloadKey('temp:Ada queued')]?.data,
     ).toMatchInlineSnapshot(`value: { name: 'pending:Ada queued' }`);
 
     expect(
-      env.store.state[getCompositeKey('temp:Grace queued')]?.data,
+      env.store.state[getPayloadKey('temp:Grace queued')]?.data,
     ).toMatchInlineSnapshot(`value: { name: 'pending:Grace queued' }`);
 
     await env.apiStore.performMutation('temp:Ada queued', {
@@ -335,11 +335,11 @@ describe('collection', () => {
     );
 
     expect(
-      env.store.state[getCompositeKey('users||ada queued')]?.data,
+      env.store.state[getPayloadKey('users||ada queued')]?.data,
     ).toMatchInlineSnapshot(`value: { name: 'Ada rebound' }`);
 
     expect(
-      env.store.state[getCompositeKey('users||grace queued')]?.data,
+      env.store.state[getPayloadKey('users||grace queued')]?.data,
     ).toMatchInlineSnapshot(`value: { name: 'Grace rebound' }`);
   });
 
@@ -488,7 +488,7 @@ describe('collection', () => {
     // invalidated so it is refetched with the rename
     expect(onSuccessPayloads).toMatchInlineSnapshot(`['users||2']`);
     expect(
-      pick(env.store.state[getCompositeKey('users||2')], [
+      pick(env.store.state[getPayloadKey('users||2')], [
         'data',
         'refetchOnMount',
       ]),
@@ -618,8 +618,8 @@ describe('collection', () => {
       `[]`,
     );
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-    expect(env.store.state[getCompositeKey('temp:Temp A')]).toBeUndefined();
-    expect(env.store.state[getCompositeKey('temp:Temp B')]).toBeUndefined();
+    expect(env.store.state[getPayloadKey('temp:Temp A')]).toBeUndefined();
+    expect(env.store.state[getPayloadKey('temp:Temp B')]).toBeUndefined();
   });
 
   test('call the direct mutation while online and skip queueing on success', async () => {
@@ -1621,7 +1621,7 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
   `);
 
   expect(
-    env.store.state[getCompositeKey('temp:Ada')]?.data,
+    env.store.state[getPayloadKey('temp:Ada')]?.data,
   ).toMatchInlineSnapshot(`value: { name: 'pending:Ada' }`);
 
   // Advancing time lets the recovery probe replay the queued mutation.
@@ -1635,10 +1635,10 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
   // server entity and removed from offline bookkeeping.
   expect(execute).toHaveBeenCalledTimes(1);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-  expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
+  expect(env.store.state[getPayloadKey('temp:Ada')]).toBeNull();
 
   expect(
-    env.store.state[getCompositeKey('users||ada')]?.data,
+    env.store.state[getPayloadKey('users||ada')]?.data,
   ).toMatchInlineSnapshot(`value: { name: 'Ada' }`);
 });
 

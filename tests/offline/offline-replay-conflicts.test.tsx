@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
@@ -13,6 +12,7 @@ import {
 } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createOfflineNetworkMock } from '../../src/testing';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -778,7 +778,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     `);
 
   expect(
-    env.store.state[getCompositeKey('temp:Ada')]?.data,
+    env.store.state[getPayloadKey('temp:Ada')]?.data,
   ).toMatchInlineSnapshot(`value: { name: 'pending:Ada' }`);
 
   // Replay the queued create. The first online attempt should stop at the
@@ -826,8 +826,8 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     .toMatchInlineSnapshot(`
       ['temp:Ada']
     `);
-  expect(env.store.state[getCompositeKey('temp:Ada resolved')]).toBeUndefined();
-  expect(env.store.state[getCompositeKey('temp:Ada')]?.data)
+  expect(env.store.state[getPayloadKey('temp:Ada resolved')]).toBeUndefined();
+  expect(env.store.state[getPayloadKey('temp:Ada')]?.data)
     .toMatchInlineSnapshot(`
       value: { name: 'pending:Ada resolved' }
     `);
@@ -845,10 +845,10 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
 
   expect(offlineResolutionsHook.result.current).toMatchInlineSnapshot(`[]`);
   expect(offlineEntitiesHook.result.current).toMatchInlineSnapshot(`[]`);
-  expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
+  expect(env.store.state[getPayloadKey('temp:Ada')]).toBeNull();
 
   expect(
-    env.store.state[getCompositeKey('users||ada-resolved')]?.data,
+    env.store.state[getPayloadKey('users||ada-resolved')]?.data,
   ).toMatchInlineSnapshot(`value: { name: 'Ada resolved' }`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -971,9 +971,9 @@ test('committing a temp-entity conflict with an external result reconciles the o
   expect(execute).not.toHaveBeenCalled();
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-  expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
+  expect(env.store.state[getPayloadKey('temp:Ada')]).toBeNull();
   expect(tempAdaHook.result.current.data).toBeNull();
-  expect(env.store.state[getCompositeKey('users||ada-committed')]?.data)
+  expect(env.store.state[getPayloadKey('users||ada-committed')]?.data)
     .toMatchInlineSnapshot(`
       value: { name: 'Ada committed' }
     `);

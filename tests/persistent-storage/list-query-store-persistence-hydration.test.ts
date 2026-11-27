@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
@@ -13,6 +12,7 @@ import {
 } from 'vitest';
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import { type Row } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
@@ -202,7 +202,7 @@ describe('localStorage: list query store persistence', () => {
       status: 'success'
       wasLoaded: '✅'
     `);
-    expect(env.store.state.queries[getCompositeKey(usersQuery)])
+    expect(env.store.state.queries[getPayloadKey(usersQuery)])
       .toMatchInlineSnapshot(`
         error: null
         hasMore: '❌'

@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
@@ -14,6 +13,7 @@ import {
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createOfflineNetworkMock } from '../../src/testing';
+import { getPayloadKey } from '../../src/utils/getPayloadKey';
 import { type Row } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -925,8 +925,8 @@ describe('opfs: list query store persistence', () => {
     const firstQuery = { tableId: 'first' };
     const secondQuery = { tableId: 'second' };
     const thirdQuery = { tableId: 'third' };
-    const secondItemKey = getCompositeKey('second||1');
-    const thirdItemKey = getCompositeKey('third||1');
+    const secondItemKey = getPayloadKey('second||1');
+    const thirdItemKey = getPayloadKey('third||1');
     const { listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
